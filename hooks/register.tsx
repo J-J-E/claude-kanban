@@ -89,7 +89,6 @@ const PANE_COLUMNS = 100
 const TITLE_MAX = 120
 /** The board Client gets this much of a card's flag: a question or a gate reason is a sentence, and the tile cuts it at its own edge. */
 const FLAG_MAX = 120
-const COMMENT_MAX = 300
 /** The card view draws at most this much of a card's text or plan. */
 const CARD_TEXT_MAX = 6000
 const PROPS_MAX_CHARS = 90000
@@ -1852,7 +1851,6 @@ async function performComment($: EngineInterface, ctx: Ctx, id: string, raw: str
   if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was written.`)
   const line = cleanText(raw, Infinity, true)
   if (line === '') return refuse('Type a comment first.')
-  if (charCount(line) > COMMENT_MAX) return refuse(`A comment can be at most ${COMMENT_MAX} characters; this one is ${charCount(line)}. Nothing was written.`)
   const matches = snap.cards.filter((c) => c.id === id)
   const found = matches[0]
   if (found === undefined) return refuse(`No card ${id} on the board.`)

@@ -7,6 +7,7 @@
 import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
+import { parseCard } from '../hooks/lib/cards.ts'
 import { BOARD_EXAMPLE, GATED_BOARD_EXAMPLE } from './examples.ts'
 import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
 
@@ -564,26 +565,43 @@ test('a comment is one Log line by the owner, bumps updated, asks nothing and em
   expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('')
   expect(w.writes).toEqual([FOOTER, FOOTER])
 
-  // Nothing typed, nothing written; a comment of exactly 300 characters is written whole.
+  // Nothing typed, nothing written.
   await ui.input({ key: 'card-comment', text: '   ' })
   expect(w.writes).toHaveLength(2)
   expect(w.toasts.slice(2)).toEqual(['Type a comment first.'])
-  await ui.input({ key: 'card-comment', text: 'x'.repeat(300) })
-  expect(w.text(FOOTER)).toMatch(/\n- 2026-10-08 14:05 John: x{300}\n$/)
   expect(w.sent).toEqual([])
 })
 
-test('a comment over 300 characters is refused with the limit, writes nothing and stays in the field', async ($, on) => {
+test('a comment of 545 and one of 5,000 characters are each written whole as one Log line: no limit', async ($, on) => {
   const w = await boot($, on)
   const ui = await mountPane($, 'desktop')
   await select(ui, 'KB-0001')
-  const before = w.text(FOOTER)
-  await ui.input({ key: 'card-comment', text: 'x'.repeat(301), kind: 'change' })
-  await ui.input({ key: 'card-comment', text: 'x'.repeat(301) })
-  expect(w.toasts).toEqual(['A comment can be at most 300 characters; this one is 301. Nothing was written.'])
-  expect(w.writes).toEqual([])
-  expect(w.text(FOOTER)).toBe(before)
-  expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('x'.repeat(301))
+  for (const n of [545, 5000]) {
+    const long = 'word '.repeat(Math.ceil(n / 5)).slice(0, n - 1) + 'x'
+    expect(long).toHaveLength(n)
+    await ui.input({ key: 'card-comment', text: long, kind: 'change' })
+    await ui.input({ key: 'card-comment', text: long })
+    const text = w.text(FOOTER)
+    expect(text.endsWith('\n- 2026-10-08 14:05 John: ' + long + '\n')).toBe(true)
+    expect(text.split('\n').filter((l) => l.includes(long))).toHaveLength(1)
+    expect(parseCard(text, FOOTER.slice('kanban/'.length)).ok).toBe(true)
+    expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('')
+  }
+  expect(w.toasts).toEqual(['Comment added to KB-0001.', 'Comment added to KB-0001.'])
+  expect(w.writes).toEqual([FOOTER, FOOTER])
+})
+
+test('a long comment with line breaks is still one Log line', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  const para = 'first part of the answer '.repeat(30)
+  await ui.input({ key: 'card-comment', text: para + '\n\n' + para + '\r\n\tend' })
+  const last = w.text(FOOTER).trimEnd().split('\n').pop() as string
+  expect(last.startsWith('- 2026-10-08 14:05 John: first part')).toBe(true)
+  expect(last.endsWith(' end')).toBe(true)
+  expect(last.length).toBeGreaterThan(1000)
+  expect(parseCard(w.text(FOOTER), FOOTER.slice('kanban/'.length)).ok).toBe(true)
 })
 
 test('a comment on a card Claude is editing is refused and kept in the field', async ($, on) => {

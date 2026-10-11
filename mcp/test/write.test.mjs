@@ -96,6 +96,18 @@ test('a comment adds one Log line and touches nothing else', () => {
   assert.deepEqual(read(dir, name).split('\n'), expected)
 })
 
+test('a comment of any length is written whole as one Log line', () => {
+  const dir = makeBoard([['KB-0001', 'Talker', 'Plan', 1000]])
+  const name = cardFile(dir, 'KB-0001')
+  const long = 'a long answer\nwith breaks '.repeat(250)
+  const one = long.replace(/\s+/g, ' ').trim()
+  assert.ok(one.length > 5000)
+  const r = commentOn(dir, { id: '1', text: long, who: 'Gemini' }, NOW)
+  assert.equal(r.message, 'Comment added to KB-0001.')
+  const lines = read(dir, name).split('\n')
+  assert.ok(lines.includes('- 2026-10-09 14:05 Gemini: ' + one))
+})
+
 test('decisions are numbered, may supersede, and need a reason', () => {
   const dir = makeBoard()
   assert.equal(decide(dir, { title: 'One', decision: 'Do A', reason: 'Because' }, NOW).n, 1)
