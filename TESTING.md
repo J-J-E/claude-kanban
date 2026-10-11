@@ -143,23 +143,25 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 
 ## E. Obsidian
 
-Obsidian 1.14 or later is needed (checked with 1.14.4). The steps to open the vault are in `WALKTHROUGH.md`, section 9. Step 28 can be done without Obsidian; 29 to 33 need it. Use the demo project from section B.
+Status: experimental. None of this has yet been tried in a real Obsidian; the "Expect" lines say what should happen, and a difference is a finding. Known limits from the design: a card whose `flag:` holds a colon cannot be dragged there, a drag cannot place a card between two others, and whether empty lanes show as columns is unknown (`docs/obsidian.md`).
+
+Obsidian 1.14 or later is needed (read from 1.14.4). The steps to open the vault are in `WALKTHROUGH.md`, section 9. Step 28 can be done without Obsidian; 29 to 33 need it. Use the demo project from section B.
 
 28. The view file.
    - Do: in a session in `<demo-folder>`, type `set up the Obsidian view`. If asked, answer with the path of the `kanban` folder inside your vault (it asks nothing when the vault is the project folder).
    - Expect: `Obsidian view written: kanban/Board.base. Open it in Obsidian 1.14 or later; a card dragged there changes only its status.` `kanban/Board.base` exists, lists every lane label of `board.md` in board order, and nothing else changed (`git status` shows only the new file). The pane still shows the same cards.
 29. Open the vault.
    - Do: in Obsidian choose "Open folder as vault" and pick `<demo-folder>` (`WALKTHROUGH.md` section 9). If your vault is elsewhere, link the project's `kanban/` folder into it as that section shows (it makes one link and removes nothing).
-   - Expect: the project's cards appear in Obsidian's file list (under `kanban/`, or under the link's name).
+   - Expect: the project's cards should appear in Obsidian's file list (under `kanban/`, or under the link's name).
 30. Read the board.
    - Do: in Obsidian open `Board.base`.
-   - Expect: one column per lane, in the board's order, each card showing its file name, `id` and `flag`. `board.md` and `DECISIONS.md` are not cards.
+   - Expect: a column per lane, in the board's order (whether a lane with no cards shows is unknown; note what you see), each card showing its file name, `id` and `flag`. `board.md` and `DECISIONS.md` are not cards.
 31. Drag a card in Obsidian.
    - Do: drag one card to another column.
-   - Expect: the card file's `status:` is the new lane and nothing else of the front matter changes by meaning. Within a few seconds the pane shows the card in the new lane and the card's Log gains `moved <old> -> <new> in Obsidian`. No Claude turn starts. This has not been confirmed on a real drag; if the card file is rewritten in an unexpected way, that is the finding.
+   - Expect: the card file's `status:` should be the new lane and nothing else of the front matter should change by meaning. Within a few seconds the pane should show the card in the new lane and the card's Log should gain `moved <old> -> <new> in Obsidian`. No Claude turn should start. This has not been confirmed on a real drag; if the card file is rewritten in an unexpected way, that is the finding.
 32. Edit in Obsidian.
    - Do: change a card's `flag:` in Obsidian's properties panel.
-   - Expect: the pane shows the new flag. A card flagged `GATE: ...` or `QUESTION: ...` may refuse to drag in Obsidian (see `docs/obsidian.md`).
+   - Expect: the pane should show the new flag. A card flagged `GATE: ...` or `QUESTION: ...` may refuse to drag in Obsidian (see `docs/obsidian.md`).
 33. Remove the link (optional, only if you made one in step 29).
    - Do: remove only the link (`WALKTHROUGH.md` section 9 shows the command for your system). It deletes only the link.
    - Expect: the project's `kanban/` folder and its cards are untouched.

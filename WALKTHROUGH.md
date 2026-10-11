@@ -274,12 +274,14 @@ Press a card (or choose `Open card` in the menu under its `⋯`) and the pane sh
 
 ## 9. Watch the board in Obsidian
 
-Obsidian 1.14 or later (checked with 1.14.4) can show the board as a Kanban view of one file, `kanban/Board.base`, with no plugin. A drag there changes only the card's `status:`; the pane then adds the Log line `moved A -> B in Obsidian`. A drag does not place a card between two others, and a card flagged `GATE:` or `QUESTION:` may refuse to drag (details in `docs/obsidian.md`).
+Status: experimental. The `Board.base` file and the pane's handling of a move made in Obsidian are covered by tests, but this section has not yet been tried in a real Obsidian; what follows is what should happen, read from Obsidian's behaviour.
+
+Obsidian 1.14 or later (read from 1.14.4) can show the board as a Kanban view of one file, `kanban/Board.base`, with no plugin. A drag there should change only the card's `status:`; the pane should then add the Log line `moved A -> B in Obsidian`. By design a drag cannot place a card between two others, a card whose `flag:` holds a colon (such as `GATE: ...` or `QUESTION: ...`) cannot be dragged there, and whether empty lanes show as columns is unknown (details in `docs/obsidian.md`).
 
 The simplest setup is to make your project folder the vault:
 1. In Obsidian choose "Open folder as vault" and pick the project folder (the one that holds `kanban/`). Obsidian adds a `.obsidian/` folder there; add `.obsidian/` to the project's `.gitignore`.
 2. In a session in that project say `set up the Obsidian view`. Because the vault is the project, Claude writes the file without asking and replies `Obsidian view written: kanban/Board.base. Open it in Obsidian 1.14 or later; a card dragged there changes only its status.` It does not commit. Say it again after you add or rename a lane.
-3. In Obsidian open `kanban/Board.base`. Drag a card to another column; its `status:` changes. Whether Obsidian rewrites the card file as `docs/obsidian.md` predicts has not been confirmed on a real drag.
+3. In Obsidian open `kanban/Board.base`. Drag a card to another column; its `status:` should change. Whether Obsidian rewrites the card file as `docs/obsidian.md` predicts has not been confirmed on a real drag.
 
 If your vault is somewhere else, link the project's `kanban/` folder into it (a folder shortcut, so the files stay in the project): on Windows in cmd.exe, `mklink /J "<vault>\<project>" "<project folder>\kanban"`; on macOS or Linux, `ln -s "<project folder>/kanban" "<vault>/<project>"`. Each makes one link and removes nothing. Then `set up the Obsidian view` asks `What is the path of this kanban folder inside your Obsidian vault?`; answer `<project>`. To remove the link later, on Windows `rmdir "<vault>\<project>"` in cmd.exe, elsewhere `rm "<vault>/<project>"`. That deletes only the link, not the cards.
 

@@ -60,7 +60,7 @@ A scratch project, six steps:
 - **Settings.** The `Settings` tab has `Workers at once` and a `Model` and `Thinking` for the Manager, Planner, Worker and Advisor. They write to `kanban/board.md`. `Restore all defaults` undoes your changes, `Save as defaults` makes the current values this board's own defaults, and `Restore original defaults` removes those.
 
   ![The Settings tab](docs/design/real-pane-settings.png)
-- **Obsidian (optional).** Say "set up the Obsidian view" and Claude writes `kanban/Board.base`, which Obsidian 1.14 or later shows as a Kanban board; dragging a card there changes only its `status:`. See [`docs/obsidian.md`](docs/obsidian.md).
+- **Obsidian (optional, experimental).** Say "set up the Obsidian view" and Claude writes `kanban/Board.base`, which Obsidian 1.14 or later should show as a Kanban board. The file format is covered by tests, but it has not yet been tried in a real Obsidian: nobody has dragged a card there and watched the pane follow. If you try it, please report what you see on the issues page. See [`docs/obsidian.md`](docs/obsidian.md).
 
 ## MCP server (optional)
 

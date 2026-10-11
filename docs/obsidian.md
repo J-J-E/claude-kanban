@@ -1,6 +1,6 @@
 # Obsidian as a viewer: what Obsidian needs
 
-Facts marked (app code) were read from the bundled JavaScript of Obsidian 1.14.4 (the `obsidian.asar` file in its install folder), because the help pages do not say what a drag writes. Nothing here has yet been seen on a real drag; the fixtures below are derived from that code.
+Status: experimental. Everything here was derived by reading Obsidian's behaviour, not by watching it. Facts marked (app code) were read from the bundled JavaScript of Obsidian 1.14.4 (the `obsidian.asar` file in its install folder), because the help pages do not say what a drag writes; the rest comes from Obsidian's help pages. The `Board.base` file and the card fixtures are covered by tests, but no card has yet been dragged in a real Obsidian and the pane has not been seen following it, so every expected effect below is unverified. Known limits: a card whose `flag:` holds a colon cannot be dragged, a drag cannot place a card between two others, and whether empty lanes show as columns is unknown.
 
 ## Answer
 
