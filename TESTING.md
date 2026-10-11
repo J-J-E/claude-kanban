@@ -129,6 +129,26 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Do: type `move KB-3 to Backlog`.
     - Expect: `KB-0003 moved Pending -> Backlog.` and nothing else: no lane action, no commit. `what's next` no longer lists KB-0003 under `Untriaged`.
 
+25a. The number is reserved first. In the fresh folder, open `kanban/board.md`, set `next_id: 5` (no card numbered 5 or higher exists), save, and start a new session there.
+   - Do: type `add a card: one`.
+   - Expect: `KB-0005 added to Pending: One` (the title is Claude's own short phrase). `board.md` shows `next_id: 6` and `kanban/KB-0005-one.md` exists. Claude writes `next_id` first and the card file second, so a number is never handed out twice; the order cannot be seen afterwards, only that the two agree.
+25b. A request in chat becomes a card. Use the demo project (section B) with the pane open, in a NEW session, so the pane's note rides on what you type.
+   - Do: type `fix the date format in the summary`.
+   - Expect: a first reply that starts `KB-00NN added to Auto: Fix the date format in the summary` (`NN` is the next free number). The card is in Auto in the pane. The header reads `Claude is on KB-00NN`. A planning agent is started for it (the card has no plan yet). The main session does not edit any project file itself.
+   - Do: type `what does the summary function do?` (the demo has no summary function: Claude answers that it finds none, which is still an answer).
+   - Expect: an answer in chat and no new card, because a question makes no card.
+25c. Answering a waiting card in chat. Put one card in Needs You flagged `PLAN READY` (drag a card to Plan and wait, as in `WALKTHROUGH.md` section 5). It is the only card waiting.
+   - Do: type `yes go ahead`.
+   - Expect: the card's Log gains `<you>: yes go ahead` and `<you>: moved Needs You -> Auto`, in that order, then `Claude: started: kb-<n>-<slug>`. Claude replies `<ID> moved Needs You -> Auto.` and the card runs. No new card is made.
+25d. Two cards waiting. Get a second card into Needs You (any flag) so two wait.
+   - Do: type `yes`.
+   - Expect: `Which card: <ID> or <ID>?` with the two real IDs, and no card file or lane changes.
+25e. Skipping the card.
+   - Do: type `no card: fix the typo in the README`.
+   - Expect: Claude does the work and makes no card: `git status` shows no new file in `kanban/` and `next_id` is unchanged.
+
+Steps 25a to 25e test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
+
 ## D. The MCP server
 
 26. Run the end-to-end check.

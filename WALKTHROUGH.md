@@ -261,6 +261,14 @@ If you give no reason, Claude asks once. To change a decision, say so; a new lin
 - **Pausing.** `move KB-3 to Pending` (or Backlog) while Auto is running it. Claude stops at the next safe point, commits no work in progress, Logs `stopped at step <n>`, keeps the flag and branch, and commits the board as `KB-0003 board: stopped`.
 - **Discarded.** `move KB-3 to Discarded`. Claude stops, Logs `scrapped at step <n>; branch <branch>, PR <pr or none> left for you to close`, and replies with the branch and PR for you to delete. It deletes nothing.
 
+**Ask in chat.** With the pane open, the chat is the board's manager. Type a request that changes the project:
+```
+fix the date format in the summary
+```
+Claude makes the card before doing anything else and replies `<ID> added to Auto: Fix the date format in the summary`. The card shows in Auto, the header reads `Claude is on <ID>`, and a planning agent starts on it. A question (`what does the summary function do?`) makes no card, and `no card: fix the typo in the README` skips it. `plan ...` puts the card in Plan; `later ...`, `idea ...` or `note ...` in Pending.
+
+When a card waits in Needs You, answer it in chat. With one card waiting, type `yes go ahead`: the card's Log gets `<you>: yes go ahead` and `<you>: moved Needs You -> Auto`, and Claude starts it. With two waiting, a bare `yes` gets `Which card: <ID> or <ID>?`; name one.
+
 ## 8. The open card
 
 Press a card (or choose `Open card` in the menu under its `⋯`) and the pane shows that card alone:

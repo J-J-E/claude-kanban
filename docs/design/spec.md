@@ -668,6 +668,26 @@ The board follows the app's theme (KB-0041): every colour it draws is a theme ke
 
 Cells are characters. Add `2b` to every bordered box (section 0). A one-row card becomes 3 rows (`h + 2b`); a lane panel's title bar gets a border row above it. The hover reveals do not exist: draw `⋯` always (dim) and skip 7.4. Native controls reserve 2 rows as on the desktop. The numbers in section 2 are the same.
 
+## 21a. The chat as manager
+
+The pane makes the main session the board's manager (`hooks/register.tsx` `prompt.submit` and `chatNote`; the text is `managerNote` in `hooks/lib/strings.ts`).
+
+**The note.** A hidden context line attached to the prompt; the typed text is never changed.
+
+| Part | Text |
+|---|---|
+| Always | `Kanban board: this project has kanban/board.md (owner <owner>). You are its manager. Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").` |
+| When cards wait in a Needs You lane | a second line `Waiting on <owner>: KB-0036 PLAN READY; KB-0041 QUESTION: which colour?`: at most 5 cards, each as ID and flag (the flag cut at 60 characters, the ID alone when the flag is empty), then `and N more` |
+
+- **When.** Only for a prompt the person types in the composer or sends through Remote Control, in a project whose board can be read and written. Never for a `Kanban:` prompt, a slash command, an SDK or scheduled prompt, or a read-only board. The cost is about 45 tokens a prompt, more when cards wait.
+- **Never carries** a card title, a card body or a Log line: the owner, IDs and flags only.
+
+**Busy during any turn.** The pane is busy from the start of every turn (`inTurn`), not only a turn it started, and idle again when the main session's turn completes.
+
+**Cards named in chat count as worked.** A typed prompt that contains a full card ID on the board (any letter case) marks that card as the one being worked, and so does a card file the main session writes in a turn not started by a `Kanban:` prompt. The header then reads `Claude is on KB-0057`, as for a pane prompt, until the turn completes.
+
+**Reserve-first Add.** The pane's `Add` (section 11) writes `next_id` in `board.md` first and the card file second, so two writers never take one number. If a file for the number already exists the pane writes no card and shows the toast `KB-0016 was just taken. Press Add again.` A `Write` that would create a second file for an ID that already has one is denied.
+
 ## 21. Live updates
 
 The pane re-draws from the board about once a second and at once after Claude edits a card. Everything in section 8 is recomputed each time. The chosen tab, the open card menu, the open card, an open create field, fold choices, the sort of each lane and the scroll position are kept across redraws. A card Claude moves while he is dragging does not cancel the drag; the release is judged against the board as it is then (14.4, stale). The open card follows the card by ID.
