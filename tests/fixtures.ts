@@ -28,10 +28,15 @@ export function cardPath(id: string, slug: string): string {
   return `kanban/${id}-${slug}.md`
 }
 
+/** The board text with `types:` declaring `kb` (letters `KB`) beside the usual three, so the KB- fixture cards are not flagged `unknown-type`. `kb` comes last because the first type is the one a new card gets, and the add tests expect BUG. */
+export function withKbType(board: string): string {
+  return board.replace('\nlanes:\n', '\ntypes: [bug, enhancement, chore, kb]\nlanes:\n')
+}
+
 /** A board with two Inbox cards, one in Auto and one in Done. */
 export function defaultFiles(): Record<string, string> {
   return {
-    [BOARD_PATH]: GATED_BOARD_EXAMPLE,
+    [BOARD_PATH]: withKbType(GATED_BOARD_EXAMPLE),
     [cardPath('KB-0001', 'fix-footer')]: cardText('KB-0001', 'Fix footer', 'Inbox', 1000),
     [cardPath('KB-0002', 'write-docs')]: cardText('KB-0002', 'Write docs', 'Inbox', 2000),
     [cardPath('KB-0003', 'ship-it')]: cardText('KB-0003', 'Ship it', 'Auto', 1000),
@@ -42,7 +47,7 @@ export function defaultFiles(): Record<string, string> {
 /** The seven-lane board init writes (Needs You, Pending, Plan, Auto, Backlog, Done, Discarded; no Manual, no Parked) with a card in Pending, Needs You, Auto and Done. */
 export function sevenLaneFiles(): Record<string, string> {
   return {
-    [BOARD_PATH]: INIT_BOARD_EXAMPLE,
+    [BOARD_PATH]: withKbType(INIT_BOARD_EXAMPLE),
     [cardPath('KB-0001', 'fix-footer')]: cardText('KB-0001', 'Fix footer', 'Pending', 1000),
     [cardPath('KB-0002', 'write-docs')]: cardText('KB-0002', 'Write docs', 'Needs You', 1000, 'PLAN READY'),
     [cardPath('KB-0003', 'ship-it')]: cardText('KB-0003', 'Ship it', 'Auto', 1000),

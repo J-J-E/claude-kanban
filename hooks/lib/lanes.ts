@@ -93,8 +93,9 @@ export const MAX_W = 150
 /** The Label and Changed columns appear from this inner width (`iw`). */
 export const WIDE_FROM = 100
 export { MAX_SHOWN }
-/** The ID zone of a card's first row. */
-export const ID_W = 8
+/** The ID zone is the longest ID on the board plus one gap cell, never under ID_MIN_W (8: a `KB-0047` board) nor over ID_MAX_W (12). */
+export const ID_MIN_W = 8
+export const ID_MAX_W = 12
 export const MENU_ZONE_W = 3
 export const LABEL_COL_W = 20
 export const CHANGED_COL_W = 14
@@ -144,6 +145,16 @@ export function widthsFor(columns: number): Widths {
   return { columns: W, boardWidth: B, innerWidth: iw, tileWidth: iw, textWidth: Math.max(0, iw - 2 * PADDING), isWide: iw >= WIDE_FROM }
 }
 
+/**
+ * The width of the ID zone for these IDs: the longest one + 1, at least 8 and at most 12. An ID longer than 11 characters is
+ * cut by the card's Text (`truncate-end`: its first 10 characters and an ellipsis) like any over-long text.
+ */
+export function idWidth(ids: readonly string[]): number {
+  let longest = 0
+  for (const id of ids) if (typeof id === 'string' && id.length > longest) longest = id.length
+  return Math.max(ID_MIN_W, Math.min(ID_MAX_W, longest + 1))
+}
+
 // ---- The layout types ----
 
 /** One card's tile and its zones. All rectangles are inside `rect`. */
@@ -155,11 +166,11 @@ export type CardTile = {
   rect: Rect
   /** 1, or 2 when the card has a status line. */
   rows: 1 | 2
-  /** The ID zone: 8 cells at the left of row 1, inside the 2 cells of padding. */
+  /** The ID zone: `PanelLayout.idWidth` cells (8 to 12) at the left of row 1, inside the 2 cells of padding. */
   idRect: Rect
   /** Row 1's flexible part, after the ID zone and before the fixed zones on the right (the title, the marks and the pin chip are drawn in it by a flex row). */
   titleRect: Rect
-  /** Row 2 (2-row cards): 8 cells in, `text - 8` wide, the status line and its time. Null on a 1-row card. */
+  /** Row 2 (2-row cards): `idWidth` cells in, `text - idWidth` wide, the status line and its time. Null on a 1-row card. */
   statusRect: Rect | null
   /** The `⋯` zone: 3 cells at the right of row 1, inside the padding. */
   menuRect: Rect
@@ -236,6 +247,8 @@ export type PanelLayout = {
   tileWidth: number
   textWidth: number
   isWide: boolean
+  /** The ID zone's width on this board (`idWidth` of every card sent, all lanes): the same in every lane so the titles line up. */
+  idWidth: number
   /** `Waiting to start` is drawn as `Waiting` on this board (`text` below 40). */
   shortWaiting: boolean
   /** Rows the region needs: down to the last lane's last row. 0 with no lanes. */
@@ -337,6 +350,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
   const kept = props?.view ?? {}
   const fold = view.fold ?? kept.fold ?? {}
   const more = view.more ?? kept.more ?? {}
+  const idW = idWidth(lanes.flatMap((l) => cardsOf(l).map((c) => c.id)))
   const totals = lanes.map((l) => Math.max(typeof l.total === 'number' ? l.total : 0, cardsOf(l).length))
   const isFiltered = props?.isFiltered === true
   const isEmptyBoard = !isFiltered && lanes.length > 0 && totals.every((t) => t === 0)
@@ -401,7 +415,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
         const tall = cardHeight(card)
         const tile = rect(cx, y, iw, tall)
         const padX = cx + PADDING
-        const idRect = inside(rect(padX, y, ID_W, 1), tile)
+        const idRect = inside(rect(padX, y, idW, 1), tile)
         const menuRect = inside(rect(cx + iw - PADDING - MENU_ZONE_W, y, MENU_ZONE_W, 1), tile)
         const changedRect = w.isWide ? inside(rect(menuRect.x - CHANGED_COL_W, y, CHANGED_COL_W, 1), tile) : null
         const labelRect = changedRect !== null ? inside(rect(changedRect.x - LABEL_COL_W, y, LABEL_COL_W, 1), tile) : null
@@ -414,7 +428,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
           rows: tall,
           idRect,
           titleRect: inside(rect(idRect.x + idRect.w, y, flexEnd - (idRect.x + idRect.w), 1), tile),
-          statusRect: tall === 2 ? inside(rect(padX + ID_W, y + 1, text - ID_W, 1), tile) : null,
+          statusRect: tall === 2 ? inside(rect(padX + idW, y + 1, text - idW, 1), tile) : null,
           menuRect,
           labelRect,
           changedRect,
@@ -487,6 +501,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
     tileWidth: w.tileWidth,
     textWidth: text,
     isWide: w.isWide,
+    idWidth: idW,
     shortWaiting: text < SHORT_WAITING_BELOW,
     height,
     isEmptyBoard,

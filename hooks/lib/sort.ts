@@ -30,7 +30,8 @@ export const SORTS: readonly SortOption[] = [
 export const DEFAULT_SORT: SortKey = 'order'
 
 /** What a sort needs of a card. `updated` is the card's `updated` date (`2026-10-08`), `labels` its labels, `flag` its flag line. */
-export type SortCard = { id: string; order: number; title?: string; updated?: string; labels?: readonly string[]; flag?: string }
+export type SortCard = { id: string; order: number; title?: string; updated?: string; labels?: readonly string[]; flag?: string; createdAt?: string }
+// `createdAt` is the moment the card was made (`2026-10-08 14:30`, sorts as text); a snapshot from an older pane has none.
 
 export function isSortKey(key: unknown): key is SortKey {
   return SORTS.some((s) => s.key === key)
@@ -86,6 +87,18 @@ export function compareIds(a: string, b: string): number {
   return text(a, b)
 }
 
+/**
+ * Creation order: `createdAt` (text), then the ID. A card with no `createdAt` (undefined or empty) counts as older than
+ * every card that has one (it was made before the field existed); two such cards compare by ID alone, as before.
+ */
+function byCreation(a: SortCard, b: SortCard): number {
+  const ca = a.createdAt ?? ''
+  const cb = b.createdAt ?? ''
+  if (ca === '' && cb !== '') return -1
+  if (ca !== '' && cb === '') return 1
+  return text(ca, cb) || compareIds(a.id, b.id)
+}
+
 function byOrder(a: SortCard, b: SortCard): number {
   return num(a.order, b.order) || compareIds(a.id, b.id)
 }
@@ -104,8 +117,8 @@ function firstLabel(card: SortCard): string {
  *
  * | key | orders by | ties |
  * | `order` | `order`, ascending | the ID |
- * | `newest` | ID, descending | none |
- * | `oldest` | ID, ascending | none |
+ * | `newest` | `createdAt`, descending (a card without it last) | the ID, descending |
+ * | `oldest` | `createdAt`, ascending (a card without it first) | the ID |
  * | `changed` | `updated`, newest first (a card with no date last) | `order` |
  * | `title` | title, case-insensitive, A to Z | `order` |
  * | `needs-you` | cards waiting on him first (a flag in a Claude-only lane) | `order` |
@@ -118,9 +131,9 @@ export function sortCards<T extends SortCard>(cards: readonly T[], key: unknown,
   const k = sortKeyOf(key)
   const cmp: (a: T, b: T) => number =
     k === 'newest'
-      ? (a, b) => compareIds(b.id, a.id)
+      ? (a, b) => byCreation(b, a)
       : k === 'oldest'
-        ? (a, b) => compareIds(a.id, b.id)
+        ? byCreation
         : k === 'changed'
           ? (a, b) => text(String(b.updated ?? ''), String(a.updated ?? '')) || byOrder(a, b)
           : k === 'title'

@@ -11,8 +11,10 @@ type Els = ReturnType<EngineInterface['ui']['resolve']>
 const SURFACE = 'userMessageBackground'
 /** The words under the open card's Model and Thinking Selects for "no choice": the first option of each. */
 const AUTO = 'Auto'
-/** Below this many cells the Lane, Model and Thinking Selects stack. */
+/** Below this many cells the Type, Lane, Model and Thinking Selects stack, one per row. */
 const NARROW = 60
+/** From this many cells the four Selects stand in one row; between NARROW and this, two rows of two. */
+const WIDE = 90
 
 /** The Auto choice: its value is `Auto` (what the pane writes as "no choice"), its words carry the board's default. */
 function autoOption(words: string): { value: string; label: string } {
@@ -26,6 +28,12 @@ export type CardActions = {
   step: (dir: -1 | 1) => void
   move: (id: string, from: string, to: string) => void
   set: (id: string, field: 'model' | 'thinking', choice: string) => void
+  /** The Type list picked a type name: only held, nothing is written or asked. Picking the card's own type puts the pick away. */
+  pickType: (name: string) => void
+  /** `Retype` on the question row: asks Claude to retype the card as this type. */
+  confirmedRetype: (id: string, type: string) => void
+  /** `Cancel` on the question row: the list goes back to the card's real type. */
+  cancelRetype: () => void
   showLog: () => void
   typeComment: (value: string) => void
   comment: (id: string, value: string) => void
@@ -58,10 +66,12 @@ export type CardProps = {
   /** What `Auto` stands for on this card (the model and the thinking the board's settings give it; thinking '' when Not set): the Auto choice reads `Auto (sonnet)`. */
   autoModel: string
   autoThinking: string
-  /** The pane's width in cells: below NARROW the three Selects stand one under the other. */
+  /** The pane's width in cells: from WIDE the four Selects stand in one row, from NARROW two rows of two, below that one under the other. */
   columns: number
   comment: string
   confirmDelete: boolean
+  /** The type picked in the Type list and not yet asked for ('' = none). */
+  retypePick: string
   /** The Rename field: whether it is open and the title typed in it. */
   renaming: { isOpen: boolean; title: string }
   /** `Show details` is on: every plan step is drawn in full, not only the step in hand. */
@@ -74,6 +84,47 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
   const { Box, Text, Input, Select, Button, Markdown } = el
   const { snap, view, box, moveValues, options, ownModel, ownThinking, pinText, autoLine, comment, confirmDelete, renaming } = p
   const isNarrow = p.columns < NARROW
+  const isWide = p.columns >= WIDE
+  // The question shows while a type other than the card's own is picked.
+  const isAsking = p.retypePick !== '' && p.retypePick !== view.typeValue
+  const selectBoxes = [
+    <Box key="card-type-box" flexGrow={1} flexShrink={1} minWidth={0}>
+      <Select
+        key="card-type"
+        label="Type"
+        options={options(view.typeOptions)}
+        value={p.retypePick !== '' ? p.retypePick : view.typeValue}
+        onSelect={(v: string) => act.pickType(v)}
+      />
+    </Box>,
+    <Box key="card-move-box" flexGrow={1} flexShrink={1} minWidth={0}>
+      <Select
+        key="card-move"
+        label="Lane"
+        options={options(moveValues)}
+        value={view.moveTo.value}
+        onSelect={(v: string) => act.move(view.id, view.lane, v)}
+      />
+    </Box>,
+    <Box key="card-model-box" flexGrow={1} flexShrink={1} minWidth={0}>
+      <Select
+        key="card-model"
+        label="Model"
+        options={[autoOption(p.autoModel), ...options(p.modelWords)]}
+        value={ownModel === '' ? AUTO : ownModel}
+        onSelect={(v: string) => act.set(view.id, 'model', v)}
+      />
+    </Box>,
+    <Box key="card-thinking-box" flexGrow={1} flexShrink={1} minWidth={0}>
+      <Select
+        key="card-thinking"
+        label="Thinking"
+        options={[autoOption(p.autoThinking), ...p.thinkingOptions]}
+        value={ownThinking === '' ? AUTO : ownThinking}
+        onSelect={(v: string) => act.set(view.id, 'thinking', v)}
+      />
+    </Box>,
+  ]
   return (
       <Box key="card" flexDirection="column" marginX={2}>
         <Box key="card-panel" flexDirection="column">
@@ -88,7 +139,7 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
             />
             <Box key="card-header" flexShrink={1}>
               <Text dimColor wrap="truncate-end">
-                {`${view.id}  in ${view.lane}`}
+                {`${view.id}${view.formerId === null ? '' : ` (was ${view.formerId})`}  in ${view.lane}`}
               </Text>
             </Box>
             <Box key="card-titlebar-gap" flexGrow={1} />
@@ -269,34 +320,45 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
               </Box>
             )}
             {!snap.isReadOnly && (
-              <Box key="card-selects-row" marginTop={1} flexDirection={isNarrow ? 'column' : 'row'} columnGap={2}>
-                <Box key="card-move-box" flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Select
-                    key="card-move"
-                    label="Lane"
-                    options={options(moveValues)}
-                    value={view.moveTo.value}
-                    onSelect={(v: string) => act.move(view.id, view.lane, v)}
-                  />
-                </Box>
-                <Box key="card-model-box" flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Select
-                    key="card-model"
-                    label="Model"
-                    options={[autoOption(p.autoModel), ...options(p.modelWords)]}
-                    value={ownModel === '' ? AUTO : ownModel}
-                    onSelect={(v: string) => act.set(view.id, 'model', v)}
-                  />
-                </Box>
-                <Box key="card-thinking-box" flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Select
-                    key="card-thinking"
-                    label="Thinking"
-                    options={[autoOption(p.autoThinking), ...p.thinkingOptions]}
-                    value={ownThinking === '' ? AUTO : ownThinking}
-                    onSelect={(v: string) => act.set(view.id, 'thinking', v)}
-                  />
-                </Box>
+              <Box key="card-selects-row" marginTop={1} flexDirection={isWide ? 'row' : 'column'} columnGap={2}>
+                {isWide || isNarrow ? (
+                  selectBoxes
+                ) : (
+                  [
+                    <Box key="card-selects-pair-1" flexDirection="row" columnGap={2}>
+                      {selectBoxes.slice(0, 2)}
+                    </Box>,
+                    <Box key="card-selects-pair-2" flexDirection="row" columnGap={2}>
+                      {selectBoxes.slice(2)}
+                    </Box>,
+                  ]
+                )}
+              </Box>
+            )}
+            {!snap.isReadOnly && view.suggestion !== null && (
+              <Box key="card-suggestion" flexShrink={1} minWidth={0}>
+                <Text dimColor wrap="wrap">
+                  {view.suggestion.text}
+                </Text>
+              </Box>
+            )}
+            {isAsking && (
+              <Box key="card-retype-ask" marginTop={1} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                <Text>{`Retype ${view.id} as ${p.retypePick}? Its ID will change.`}</Text>
+                <Button
+                  key="card-retype-yes"
+                  label="Retype"
+                  onPress={() => {
+                    act.confirmedRetype(view.id, p.retypePick)
+                  }}
+                />
+                <Button
+                  key="card-retype-no"
+                  label="Cancel"
+                  onPress={() => {
+                    act.cancelRetype()
+                  }}
+                />
               </Box>
             )}
             {!snap.isReadOnly && (

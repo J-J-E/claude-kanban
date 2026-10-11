@@ -17,8 +17,8 @@ const NEXT_STEPS = `
 Next steps:
   1. Open a new Claude session in that folder (desktop app, Code tab).
   2. Type /board.
-  3. Drag KB-0001 to Plan and read the plan.
-  4. Drag KB-0001 to Auto.
+  3. Drag ENH-0001 to Plan and read the plan.
+  4. Drag ENH-0001 to Auto.
 Auto will create a branch, edit the files, commit and merge on its own.`
 
 function main(args) {

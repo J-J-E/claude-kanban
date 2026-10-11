@@ -53,3 +53,45 @@ describe('matchesFind', () => {
     expect(matchesFind({ id: 'KB-0001', title: 'x', labels: [] }, [])).toBe(true)
   })
 })
+
+describe('matchesFind with types and former IDs', () => {
+  const types = [
+    { name: 'bug', prefix: 'BUG' },
+    { name: 'enhancement', prefix: 'ENH' },
+  ]
+  const moved = { id: 'ENH-0007', title: 'Sorting', labels: [] as string[], formerIds: ['BUG-0012', 'KB-0034'] }
+
+  test('the type name finds the card, whole or in part, in any case', () => {
+    const bug = { id: 'BUG-0012', title: 'Crash', labels: [] }
+    expect(matchesFind(bug, findWords('bug'), types)).toBe(true)
+    expect(matchesFind(bug, findWords('BUG'), types)).toBe(true)
+    expect(matchesFind({ id: 'ENH-0001', title: 'x', labels: [] }, findWords('enhance'), types)).toBe(true)
+    expect(matchesFind(bug, findWords('enhancement'), types)).toBe(false)
+  })
+
+  test('no types given: the type name matches nothing extra, the ID still does', () => {
+    expect(matchesFind({ id: 'ENH-0001', title: 'x', labels: [] }, findWords('enhancement'))).toBe(false)
+    expect(matchesFind({ id: 'ENH-0001', title: 'x', labels: [] }, findWords('enh'))).toBe(true)
+  })
+
+  test('an ID with no known type adds no type name', () => {
+    expect(matchesFind({ id: 'KB-0001', title: 'x', labels: [] }, findWords('bug'), types)).toBe(false)
+  })
+
+  test('a former ID finds the card, in the spellings the current ID accepts', () => {
+    for (const q of ['BUG-0012', 'bug-0012', 'bug-00', '0012', 'KB-0034', 'kb-0034', '0034']) {
+      expect(matchesFind(moved, findWords(q))).toBe(true)
+    }
+    expect(matchesFind(moved, findWords('bug-12'))).toBe(false)
+    expect(matchesFind(moved, findWords('0099'))).toBe(false)
+  })
+
+  test('words may be split between the former ID and the title', () => {
+    expect(matchesFind(moved, findWords('bug-0012 sorting'), types)).toBe(true)
+  })
+
+  test('no formerIds field and an empty one behave the same as today', () => {
+    expect(matchesFind({ id: 'KB-0001', title: 'x', labels: [] }, findWords('0034'))).toBe(false)
+    expect(matchesFind({ id: 'KB-0001', title: 'x', labels: [], formerIds: [] }, findWords('0034'), types)).toBe(false)
+  })
+})

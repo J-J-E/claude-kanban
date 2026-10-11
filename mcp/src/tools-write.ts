@@ -1,13 +1,14 @@
-// The four write tools: card_add, card_move, card_comment and decision_add. They call the file layer (store.ts) and return
-// its text. Every one but decision_add takes the caller's name for the Log. The server only edits files; it never starts work.
+// The five write tools: card_add, card_move, card_comment, card_retype and decision_add. They call the file layer (store.ts)
+// and return its text. Every one but decision_add takes the caller's name for the Log. The server only edits files; it never starts work.
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { addCard, commentOn, decide, moveCardTo, refuse } from './store.ts'
+import { addCard, commentOn, decide, moveCardTo, refuse, retypeCard } from './store.ts'
 import type { Outcome } from './store.ts'
 import { reply } from './tools-read.ts'
 
 const who = z.string().describe('Your name, as it should appear in the card\'s Log (for example "Gemini").')
-const cardId = z.string().describe('Card ID: KB-0012, KB-12 or 12')
+const cardId = z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype) is followed to the card that holds it now.')
+const typeName = z.string().describe('A type name or its letters, as in the types tool (for example "bug" or "ENH")')
 
 export function registerWriteTools(server: McpServer, kanbanDir: () => string | undefined, noBoard: string): void {
   const run = (go: (dir: string) => Outcome): ReturnType<typeof reply> => {
@@ -18,8 +19,16 @@ export function registerWriteTools(server: McpServer, kanbanDir: () => string | 
   server.registerTool(
     'card_add',
     {
-      description: 'Add a card to the first intake lane. The body is the requirement in the person\'s words; leave design choices out.',
-      inputSchema: { title: z.string(), body: z.string().optional(), labels: z.array(z.string()).optional(), who },
+      description:
+        'Add a card of a type to the first intake lane; its ID takes the type\'s letters and next number (BUG-0013). The body is the requirement in the person\'s words; leave design choices out. "from" names a card this one is made from.',
+      inputSchema: {
+        title: z.string(),
+        type: typeName,
+        body: z.string().optional(),
+        labels: z.array(z.string()).optional(),
+        from: z.string().optional().describe('Card ID of the card this one is made from (both get a Log line)'),
+        who,
+      },
     },
     (a) => run((dir) => addCard(dir, a)),
   )
@@ -39,6 +48,15 @@ export function registerWriteTools(server: McpServer, kanbanDir: () => string | 
       inputSchema: { id: cardId, text: z.string(), who },
     },
     (a) => run((dir) => commentOn(dir, a)),
+  )
+  server.registerTool(
+    'card_retype',
+    {
+      description:
+        'Change a card\'s type. The card gets the new type\'s next ID (BUG-0012 becomes ENH-0007), its file is renamed, a Log line records the old ID and its child cards\' parent lines follow. The old ID keeps working. Refused for a card in an auto lane.',
+      inputSchema: { id: cardId, type: typeName, who },
+    },
+    (a) => run((dir) => retypeCard(dir, a)),
   )
   server.registerTool(
     'decision_add',

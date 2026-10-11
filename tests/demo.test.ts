@@ -9,24 +9,25 @@ function build(owner: string) {
   const board = parseBoard(files['kanban/board.md'])
   if (!board.ok) throw new Error(board.message)
   const cardFiles = Object.keys(files)
-    .filter((p) => p.startsWith('kanban/KB-'))
+    .filter((p) => /^kanban\/[A-Z]+-\d/.test(p))
     .map((p) => ({ name: p.slice('kanban/'.length), text: files[p] }))
   return { files, board: board.value, cardFiles, read: readCards(board.value, cardFiles) }
 }
 
 describe('demo project texts', () => {
-  test('the board has the seven default lanes, the owner and next_id 4', () => {
-    const { board } = build('Sam')
+  test('the board has the seven default lanes, the owner and a counter line per type in use', () => {
+    const { board, files } = build('Sam')
     expect(board.lanes.map((l) => l.label)).toEqual(['Needs You', 'Pending', 'Plan', 'Auto', 'Backlog', 'Done', 'Discarded'])
-    expect(board.prefix).toBe('KB')
     expect(board.owner).toBe('Sam')
-    expect(board.nextId).toBe(4)
+    expect(board.counters.ENH).toBe(3)
+    expect(board.counters.CHORE).toBe(2)
+    expect(files['kanban/board.md']).not.toMatch(/^(prefix|next_id):/m)
   })
 
   test('three cards parse without problems and sit in Pending in order', () => {
     const { read } = build('Sam')
     expect(read.problems).toEqual([])
-    expect(read.cards.map((c) => c.id)).toEqual(['KB-0001', 'KB-0002', 'KB-0003'])
+    expect(read.cards.map((c) => c.id)).toEqual(['ENH-0001', 'ENH-0002', 'CHORE-0001'])
     expect(read.cards.map((c) => c.status)).toEqual(['Pending', 'Pending', 'Pending'])
     expect(read.cards.map((c) => c.order)).toEqual([1000, 2000, 3000])
     expect(read.cards.map((c) => c.title)).toEqual([
@@ -48,9 +49,9 @@ describe('demo project texts', () => {
   test('file names start with the card ID and the project files are there', () => {
     const { files, cardFiles } = build('You')
     expect(cardFiles.map((f) => f.name)).toEqual([
-      'KB-0001-greet-a-person-by-name.md',
-      'KB-0002-add-a-goodbye-function.md',
-      'KB-0003-format-the-greeting-with-a-colour-library.md',
+      'ENH-0001-greet-a-person-by-name.md',
+      'ENH-0002-add-a-goodbye-function.md',
+      'CHORE-0001-format-the-greeting-with-a-colour-library.md',
     ])
     expect(Object.keys(files)).toContain('hello.py')
     expect(Object.keys(files)).toContain('test_hello.py')

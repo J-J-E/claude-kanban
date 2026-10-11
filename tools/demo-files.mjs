@@ -13,7 +13,7 @@ const LANES = [
 
 const CARDS = [
   {
-    id: 'KB-0001',
+    id: 'ENH-0001',
     slug: 'greet-a-person-by-name',
     title: 'Greet a person by name',
     body: [
@@ -23,13 +23,13 @@ const CARDS = [
     ],
   },
   {
-    id: 'KB-0002',
+    id: 'ENH-0002',
     slug: 'add-a-goodbye-function',
     title: 'Add a goodbye function',
     body: ['hello.py should also have a goodbye function that says goodbye to a person. The test should cover it.'],
   },
   {
-    id: 'KB-0003',
+    id: 'CHORE-0001',
     slug: 'format-the-greeting-with-a-colour-library',
     title: 'Format the greeting with a colour library',
     body: [
@@ -84,7 +84,7 @@ export function demoFiles({ owner = 'You', stamp = localStamp() } = {}) {
     'test_hello.py': TEST_HELLO_PY,
     'kanban/DECISIONS.md': '# Decisions\n\n',
     'kanban/board.md':
-      ['---', 'prefix: KB', `next_id: ${CARDS.length + 1}`, `owner: ${owner}`, 'lanes:', ...LANES.map((l) => '  - ' + l), '---', '# Board notes', '', 'Free text.'].join('\n') + '\n',
+      ['---', `owner: ${owner}`, 'next_enh: 3', 'next_chore: 2', 'lanes:', ...LANES.map((l) => '  - ' + l), '---', '# Board notes', '', 'Free text.'].join('\n') + '\n',
   }
   CARDS.forEach((c, i) => {
     const lines = [

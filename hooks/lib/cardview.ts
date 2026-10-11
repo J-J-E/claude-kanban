@@ -10,7 +10,7 @@
 import { parseCard } from './cards.ts'
 import { flagKind } from './flags.ts'
 import type { FlagKind } from './flags.ts'
-import { findLane } from './board.ts'
+import { DEFAULT_TYPES, findLane, typeOfId } from './board.ts'
 import type { Lane } from './board.ts'
 import { agentText, barText, cardFacts, cardStatus, reasonLine, stepInHand, timeWords } from './status.ts'
 import type { CardFacts, CardStatus } from './status.ts'
@@ -45,6 +45,39 @@ export type CardViewInput = {
   now: Stamp
   /** `Show the whole log` has been pressed: every Log line is shown. */
   isLogOpen: boolean
+  /** The board's ticket types, in board order. Absent: the library's default types. */
+  types?: readonly { name: string; prefix: string }[]
+}
+
+/** The Type list's value for a card whose ID letters are no type on the board: shown as the value only, never offered for another card. */
+export const NO_TYPE = 'No type'
+
+// ---------------------------------------------------------------- the type and the suggestion
+
+/** `suggests type enhancement: the card adds a feature`: the type word and the reason. */
+const SUGGESTS = /^suggests type (\S+): (.+)$/
+const RETYPED_LINE = /^retyped from [A-Z]{1,10}-\d{4,} to [A-Z]{1,10}-\d{4,}$/
+
+/** A line under the lists: Claude thinks the card has another type. `text` is `Claude suggests enhancement: <reason>`. */
+export type TypeSuggestion = { type: string; reason: string; text: string }
+
+/**
+ * The newest `suggests type <type>: <reason>` Log line, while it is newer (later in the Log) than the newest `retyped from … to …`
+ * line; null when there is none, or a retype came after it (the suggestion was acted on or overtaken).
+ */
+export function typeSuggestion(log: readonly { text: string }[]): TypeSuggestion | null {
+  let suggested = -1
+  let retyped = -1
+  log.forEach((l, i) => {
+    if (SUGGESTS.test(l.text)) suggested = i
+    else if (RETYPED_LINE.test(l.text)) retyped = i
+  })
+  if (suggested === -1 || suggested < retyped) return null
+  const m = SUGGESTS.exec(log[suggested]?.text ?? '')
+  if (m === null) return null
+  const type = m[1] ?? ''
+  const reason = (m[2] ?? '').trim()
+  return { type, reason, text: `Claude suggests ${type}: ${reason}` }
 }
 
 // ---------------------------------------------------------------- the plan
@@ -309,6 +342,16 @@ export type CardView = {
   moveTo: MoveToView
   /** `Type your answer` on a question the card waits on, else `Write a comment for Claude`. */
   commentPlaceholder: string
+  /** The card's most recent old ID (from its `retyped from` Log lines), null when it was never retyped: the header reads `ENH-0007 (was BUG-0012)`. */
+  formerId: string | null
+  /** The NAME of the card's type, read from its ID's letters; null when the letters are no type on the board. */
+  type: string | null
+  /** The Type list's value: the type name, or `No type`. */
+  typeValue: string
+  /** The Type list's options: the board's type names; `No type` is added first for a card with no type (as its value only). */
+  typeOptions: string[]
+  /** Claude's suggestion of another type, or null (none, or a retype came after it). */
+  suggestion: TypeSuggestion | null
 }
 
 /**
@@ -358,9 +401,17 @@ export function cardView(i: CardViewInput): Result<CardView> {
   else if (status.kind === 'waiting') box = waitingBox(card.flag, f.total, lanes)
   else if (status.kind === 'children') box = { kind: 'children', colour: 'default', text: status.text, children }
 
+  const types = i.types ?? DEFAULT_TYPES
+  const own = typeOfId({ types }, card.id)
+  const typeNames = types.map((t) => t.name)
   return {
     ok: true,
     value: {
+      formerId: card.formerIds[card.formerIds.length - 1] ?? null,
+      type: own === undefined ? null : own.name,
+      typeValue: own === undefined ? NO_TYPE : own.name,
+      typeOptions: own === undefined ? [NO_TYPE, ...typeNames] : typeNames,
+      suggestion: typeSuggestion(card.log),
       id: card.id,
       title: card.title,
       lane: lane === undefined ? card.status : lane.label,

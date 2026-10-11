@@ -17,6 +17,7 @@ import {
   splitLines,
   stripBom,
 } from './frontmatter.ts'
+import { formerIdsOf } from './ids.ts'
 import { MODELS, THINKING_LEVELS, thinkingLabel } from './settings.ts'
 
 const BOM = '﻿'
@@ -65,30 +66,6 @@ export function slugify(title: string): string {
     s = cut.replace(/-+$/, '')
   }
   return s === '' ? 'card' : s
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/**
- * The next ID: n = max(the board's next_id, highest existing n + 1). Existing means a name in `names`
- * matching ^<PREFIX>-(\d+)(-.*)?\.md$, case-sensitive; other prefixes and other files are ignored and gaps
- * are never filled. The caller writes `n + 1` back to board.md as next_id.
- */
-export function nextId(prefix: string, nextIdFromBoard: number, names: readonly string[]): { id: string; n: number } {
-  const re = new RegExp('^' + escapeRegExp(prefix) + '-(\\d+)(-.*)?\\.md$')
-  let highest = 0
-  for (const name of names) {
-    const m = re.exec(name)
-    if (m) {
-      const v = parseInt(m[1], 10)
-      if (v > highest) highest = v
-    }
-  }
-  const fromBoard = Number.isInteger(nextIdFromBoard) && nextIdFromBoard > 0 ? nextIdFromBoard : 1
-  const n = Math.max(fromBoard, highest + 1)
-  return { id: prefix + '-' + String(n).padStart(4, '0'), n }
 }
 
 export function cardFileName(id: string, title: string): string {
@@ -274,6 +251,8 @@ export function parseCard(text: string, fileName?: string): Result<Card> {
     thinking: allowedOrAuto(thinking.value, THINKING_LEVELS),
     title,
     log,
+    formerIds: formerIdsOf(log),
+    createdAt: scalars.created + ' ' + (log.length > 0 ? log[0].time : '00:00'),
   }
   if (fileName !== undefined) card.fileName = fileName
   return ok(card)
@@ -325,6 +304,29 @@ export function setTitle(text: string, title: string, stamp: Stamp, who: string)
   sp.lines[at] = '# ' + next
   const renamed = (bom ? BOM : '') + joinLines(sp)
   return appendLog(renamed, { date: stamp.date, time: stamp.time, who, text: `renamed from "${old}"` })
+}
+
+/** `parent:` only (empty clears it); `updated` is left alone. */
+export function setParent(text: string, id: string): Result<string> {
+  if (typeof id !== 'string' || (id !== '' && !ID_PATTERN.test(id))) {
+    return fail('bad-value', `"parent" must be a card ID like KB-0012, or empty to clear it, not "${id}".`)
+  }
+  return setScalar(text, 'parent', id)
+}
+
+/**
+ * Give the card a new ID after a retype: rewrite `id:` and `updated:` and append one Log line
+ * `retyped from <old> to <new>`. Every other byte stays (the file rename is the caller's). The ID the card
+ * already has, or a string that is not an ID, is refused.
+ */
+export function retypeCardText(text: string, newId: string, stamp: Stamp, who: string): Result<string> {
+  if (typeof newId !== 'string' || !ID_PATTERN.test(newId)) return fail('bad-id', `"${newId}" is not a card ID like BUG-0012.`)
+  const card = parseCard(text)
+  if (!card.ok) return card
+  if (card.value.id === newId) return fail('bad-value', `The card already has the ID ${newId}.`)
+  const withId = setScalar(text, 'id', newId)
+  if (!withId.ok) return withId
+  return appendLog(withId.value, { date: stamp.date, time: stamp.time, who, text: `retyped from ${card.value.id} to ${newId}` })
 }
 
 /** The card's two own fields (spec 18.4): written only when set, removed on Auto, never touched by a move. */

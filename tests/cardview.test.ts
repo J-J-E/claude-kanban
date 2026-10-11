@@ -426,3 +426,54 @@ describe('firstSentence', () => {
     expect(firstSentence('Done? Yes.')).toBe('Done?')
   })
 })
+
+// ---- KB-0064: the type, the old ID and Claude's suggestion ----
+
+const TYPES = [
+  { name: 'bug', prefix: 'BUG' },
+  { name: 'enhancement', prefix: 'ENH' },
+  { name: 'chore', prefix: 'CHORE' },
+]
+
+/** The same card file under another ID, with these Log lines after the created line. */
+function typed(id: string, log: string[] = []): string {
+  return file({ log: ['- 2026-10-08 09:10 John: created in Inbox', ...log] }).replace('id: KB-0014', 'id: ' + id)
+}
+
+describe('the type, the old ID and the suggestion', () => {
+  test('the type is read from the ID letters; a card whose letters are no type shows No type as its value only', () => {
+    const bug = view(typed('BUG-0012'), { types: TYPES })
+    expect(bug.type).toBe('bug')
+    expect(bug.typeValue).toBe('bug')
+    expect(bug.typeOptions).toEqual(['bug', 'enhancement', 'chore'])
+    const none = view(typed('KB-0014'), { types: TYPES })
+    expect(none.type).toBeNull()
+    expect(none.typeValue).toBe('No type')
+    expect(none.typeOptions).toEqual(['No type', 'bug', 'enhancement', 'chore'])
+    // Without types the library's defaults stand in; a board's own letters are followed.
+    expect(view(typed('ENH-0007')).type).toBe('enhancement')
+    expect(view(typed('DOCS-0001'), { types: [...TYPES, { name: 'docs', prefix: 'DOCS' }] }).type).toBe('docs')
+  })
+
+  test('formerId is the most recent old ID, null when the card was never retyped', () => {
+    expect(view(typed('ENH-0007')).formerId).toBeNull()
+    expect(view(typed('ENH-0007', ['- 2026-10-09 10:00 Claude: retyped from BUG-0012 to ENH-0007'])).formerId).toBe('BUG-0012')
+    expect(
+      view(typed('CHORE-0002', ['- 2026-10-09 10:00 Claude: retyped from BUG-0003 to ENH-0007', '- 2026-10-09 11:00 Claude: retyped from ENH-0007 to CHORE-0002'])).formerId,
+    ).toBe('ENH-0007')
+  })
+
+  test('the suggestion shows while the newest suggests-type line is newer than the newest retyped line', () => {
+    const none = view(typed('BUG-0012'))
+    expect(none.suggestion).toBeNull()
+    const s = view(typed('BUG-0012', ['- 2026-10-09 10:00 Claude: suggests type enhancement: it adds a feature']))
+    expect(s.suggestion).toEqual({ type: 'enhancement', reason: 'it adds a feature', text: 'Claude suggests enhancement: it adds a feature' })
+    // A retype after it takes it away; a newer suggestion after the retype brings one back.
+    const after = ['- 2026-10-09 10:00 Claude: suggests type enhancement: it adds a feature', '- 2026-10-09 11:00 Claude: retyped from BUG-0003 to BUG-0012']
+    expect(view(typed('BUG-0012', after)).suggestion).toBeNull()
+    expect(view(typed('BUG-0012', [...after, '- 2026-10-09 12:00 Claude: suggests type chore: just tidying'])).suggestion?.text).toBe('Claude suggests chore: just tidying')
+    // The newest suggestion wins over an older one.
+    const two = ['- 2026-10-09 10:00 Claude: suggests type enhancement: first', '- 2026-10-09 10:30 Claude: suggests type chore: second']
+    expect(view(typed('BUG-0012', two)).suggestion?.text).toBe('Claude suggests chore: second')
+  })
+})

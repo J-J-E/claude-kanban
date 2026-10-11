@@ -8,7 +8,7 @@ import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
 import { parseCard } from '../hooks/lib/cards.ts'
-import { BOARD_EXAMPLE, GATED_BOARD_EXAMPLE } from './examples.ts'
+import { BOARD_EXAMPLE, GATED_BOARD_EXAMPLE, INIT_BOARD_EXAMPLE } from './examples.ts'
 import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
@@ -910,7 +910,7 @@ async function modelLine(ui: Pane): Promise<string | undefined> {
   return (await ui.find({ key: 'card-model-line' }))?.text
 }
 
-test('the open card has Lane, Model and Thinking in one row; Auto first, the line under them says Settings decide', async ($, on) => {
+test('the open card has Type, Lane, Model and Thinking in one row; Auto first, the line under them says Settings decide', async ($, on) => {
   const w = await boot($, on)
   const ui = await mountPane($, 'desktop')
   await select(ui, 'KB-0001')
@@ -928,8 +928,8 @@ test('the open card has Lane, Model and Thinking in one row; Auto first, the lin
   expect(model?.props.value).toBe('Auto')
   expect(thinking?.props.value).toBe('Auto')
   expect(await modelLine(ui)).toBe(AUTO_LINE)
-  // Only the three Selects stand beside the comment field, and reading wrote nothing.
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking'])
+  // Only the four Selects stand beside the comment field (KB-0064: Type comes before Lane), and reading wrote nothing.
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
   expect(w.writes).toEqual([])
   expect(w.toasts).toEqual([])
 })
@@ -1165,12 +1165,12 @@ test('an older board with Manual and Parked lanes shows no Do it step by step or
   expect(w.writes).toEqual([])
 })
 
-for (const columns of [40, 59, 60, 100]) {
-  test(`at ${columns} cells the three Selects stand ${columns < 60 ? 'one under the other' : 'in a row'}, each sized by flex`, async ($, on) => {
+for (const columns of [40, 59, 60, 89, 90, 100]) {
+  test(`at ${columns} cells the four Selects stand ${columns < 60 ? 'one under the other' : columns < 90 ? 'two and two' : 'in a row'}, each sized by flex`, async ($, on) => {
     const { w, ui } = await bootSeven(on, $, sevenLaneFiles(), columns)
     await select(ui, 'KB-0001')
-    expect((await ui.find({ key: 'card-selects-row' }))?.props.flexDirection).toBe(columns < 60 ? 'column' : 'row')
-    for (const key of ['card-move-box', 'card-model-box', 'card-thinking-box']) {
+    expect((await ui.find({ key: 'card-selects-row' }))?.props.flexDirection).toBe(columns < 90 ? 'column' : 'row')
+    for (const key of ['card-type-box', 'card-move-box', 'card-model-box', 'card-thinking-box']) {
       const box = await ui.find({ key })
       expect(box?.props).toMatchObject({ flexGrow: 1, minWidth: 0 })
       expect(typeof box?.props.width).not.toBe('number')
@@ -1387,3 +1387,239 @@ test('with Find on, Previous and Next step through the matches only; a card Find
   await select(ui, 'KB-0003')
   expect(await ui.find({ key: 'card-step' })).toBeUndefined()
 })
+
+// ---------------------------------------------------------------- KB-0064 step 1: the open card retypes through Claude
+
+const BUG12 = cardPath('BUG-0012', 'fix-date')
+const ENH7 = cardPath('ENH-0007', 'add-export')
+const OLD1 = cardPath('KB-0001', 'old-card')
+const RETYPE_BUG12 = 'Kanban: John asked to retype BUG-0012 "Fix the date" as enhancement. Retype the card with the kanban skill.'
+
+/** A typed board (the default types bug, enhancement, chore): BUG-0012 in Pending, ENH-0007 in Auto and KB-0001, whose letters are no type, in Pending. */
+function typedSeven(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    [BOARD_PATH]: INIT_BOARD_EXAMPLE,
+    [BUG12]: cardText('BUG-0012', 'Fix the date', 'Pending', 1000),
+    [ENH7]: cardText('ENH-0007', 'Add export', 'Auto', 1000),
+    [OLD1]: cardText('KB-0001', 'Old card', 'Pending', 2000),
+    ...extra,
+  }
+}
+
+async function pickType(ui: Pane, name: string): Promise<void> {
+  await ui.select({ key: 'card-type', value: name })
+}
+
+test("the Type list comes before Lane, lists the board's types with the card's own selected; a card with no type shows No type as its value only", async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
+  const type = await ui.find({ key: 'card-type' })
+  expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['bug', 'enhancement', 'chore'])
+  expect(type?.props.value).toBe('bug')
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'ENH-0007')
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('enhancement')
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'KB-0001')
+  const none = await ui.find({ key: 'card-type' })
+  expect(none?.props.value).toBe('No type')
+  expect((none?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['No type', 'bug', 'enhancement', 'chore'])
+  // No type is not something to pick: choosing it asks nothing.
+  await pickType(ui, 'No type')
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test("picking another type writes nothing and asks the question; Cancel, the card's own type and closing the card put the list back", async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  await pickType(ui, 'enhancement')
+  expect((await ui.find({ key: 'card-retype-ask' }))?.text).toContain('Retype BUG-0012 as enhancement? Its ID will change.')
+  expect((await ui.find({ key: 'card-retype-yes' }))?.props.label).toBe('Retype')
+  expect((await ui.find({ key: 'card-retype-no' }))?.props.label).toBe('Cancel')
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('enhancement')
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+  expect(w.toasts).toEqual([])
+  // Another pick changes the question.
+  await pickType(ui, 'chore')
+  expect((await ui.find({ key: 'card-retype-ask' }))?.text).toContain('Retype BUG-0012 as chore? Its ID will change.')
+  // Cancel puts the list back to the card's real type.
+  await ui.press({ key: 'card-retype-no' })
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('bug')
+  // Picking the card's own type again leaves no question.
+  await pickType(ui, 'chore')
+  await pickType(ui, 'bug')
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  // Closing the card forgets the pick.
+  await pickType(ui, 'enhancement')
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'BUG-0012')
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('bug')
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+  expect(w.toasts).toEqual([])
+})
+
+test('Retype sends the prompt once, writes nothing, queues the card and says Claude is retyping', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.sent.map((s) => s.text)).toEqual([RETYPE_BUG12])
+  expect(w.toasts).toEqual(['Claude is retyping BUG-0012 as enhancement.'])
+  expect(w.writes).toEqual([])
+  // The question is gone and the list is back on the card's real type while Claude works.
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('bug')
+  expect(await boxText(ui)).toContain(QUEUED_TITLE)
+  // The turn that starts from the prompt is about the card.
+  await $.turn.start({ text: RETYPE_BUG12, turnId: 't1' })
+  await ui.press({ key: 'card-back' })
+  expect(await tileOf(ui, 'BUG-0012')).toMatchObject({ isTurn: true, isQueued: false })
+})
+
+test('Retype while Claude is busy says Claude retypes when it finishes what it is doing', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  w.agents = [{ id: 'a1', description: 'KB-0001 old card', type: 'general-purpose', status: 'running' }]
+  const ui = await mountPane($, 'desktop')
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toEqual(['Claude will retype BUG-0012 when it finishes what it is doing.'])
+  expect(w.sent.map((s) => s.text)).toEqual([RETYPE_BUG12])
+})
+
+test('the prompt cleans the title as the other prompts do: one line, no double quotes', async ($, on) => {
+  const files = typedSeven({ [BUG12]: cardText('BUG-0012', 'Fix "the" date', 'Pending', 1000) })
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'chore')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.sent.map((s) => s.text)).toEqual(['Kanban: John asked to retype BUG-0012 "Fix the date" as chore. Retype the card with the kanban skill.'])
+})
+
+test('Retype is refused with a toast and nothing sent for a card in an auto lane', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'ENH-0007')
+  await pickType(ui, 'bug')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toEqual(['ENH-0007 is being worked. Move it out of Auto or wait, then retype.'])
+  expect(w.sent).toEqual([])
+  expect(w.writes).toEqual([])
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+})
+
+test('Retype is refused with a toast and nothing sent for a card that has an agent on it', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  w.agents = [{ id: 'a1', description: 'BUG-0012 step 1: fix it', type: 'general-purpose', status: 'running' }]
+  const ui = await mountPane($, 'desktop')
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toEqual(['BUG-0012 is being worked. Move it out of Auto or wait, then retype.'])
+  expect(w.sent).toEqual([])
+  expect(w.writes).toEqual([])
+})
+
+test('Retype is refused with a toast and nothing sent while the turn is about the card', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  await $.turn.start({ text: 'Kanban: John moved BUG-0012 "Fix the date" from Backlog to Pending. Do the intake lane action from the kanban skill.', turnId: 't1' })
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toEqual(['BUG-0012 is being worked. Move it out of Auto or wait, then retype.'])
+  expect(w.sent).toEqual([])
+})
+
+test('Retype is refused with the read-only words and nothing sent on a board that cannot be read', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('owner: John', 'owner: John\nworkers: 9'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(await ui.find({ key: 'error' })).toBeDefined()
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toEqual(["The board file can't be read. Nothing was asked."])
+  expect(w.sent).toEqual([])
+  expect(w.writes).toEqual([])
+})
+
+test('Retype is refused with a toast and nothing sent for a card whose ID two files hold', async ($, on) => {
+  const files = typedSeven({ [cardPath('BUG-0012', 'copy')]: cardText('BUG-0012', 'Fix the date', 'Pending', 3000) })
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  await pickType(ui, 'enhancement')
+  await ui.press({ key: 'card-retype-yes' })
+  expect(w.toasts).toHaveLength(1)
+  expect(w.toasts[0]).toMatch(/^More than one file has ID BUG-0012: .*\.md.*\. Fix by hand; nothing was changed\.$/)
+  expect(w.sent).toEqual([])
+})
+
+test('the header names the most recent old ID of a retyped card', async ($, on) => {
+  const retyped =
+    cardText('ENH-0007', 'Add export', 'Pending', 1000).replace(/\n*$/, '\n') +
+    '- 2026-10-09 10:00 Claude: retyped from BUG-0003 to CHORE-0002\n- 2026-10-09 11:00 Claude: retyped from CHORE-0002 to ENH-0007\n'
+  await boot($, on, typedSeven({ [ENH7]: retyped }))
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'ENH-0007')
+  expect(await header(ui)).toBe('ENH-0007 (was CHORE-0002)  in Pending')
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'BUG-0012')
+  expect(await header(ui)).toBe('BUG-0012  in Pending')
+})
+
+test("the dim line shows Claude's suggestion while it is newer than the newest retype, and goes after a retype", async ($, on) => {
+  const suggested = cardText('BUG-0012', 'Fix the date', 'Pending', 1000).replace(/\n*$/, '\n') + '- 2026-10-09 10:00 Claude: suggests type enhancement: it adds a feature, not a fix\n'
+  const w = await boot($, on, typedSeven({ [BUG12]: suggested }))
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'BUG-0012')
+  expect((await ui.find({ key: 'card-suggestion' }))?.text).toBe('Claude suggests enhancement: it adds a feature, not a fix')
+  const text = (await ui.findAll({ type: 'Text' })).find((t) => t.text === 'Claude suggests enhancement: it adds a feature, not a fix')
+  expect(text?.props.dimColor).toBe(true)
+  // A retype written after the suggestion takes the line away.
+  w.put(BUG12, suggested + '- 2026-10-09 11:00 Claude: retyped from BUG-0003 to BUG-0012\n')
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(await ui.find({ key: 'card-suggestion' })).toBeUndefined()
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'ENH-0007')
+  expect(await ui.find({ key: 'card-suggestion' })).toBeUndefined()
+})
+
+const SHAPES = [
+  { columns: 108, direction: 'row', pairs: false },
+  { columns: 80, direction: 'column', pairs: true },
+  { columns: 50, direction: 'column', pairs: false },
+]
+for (const s of SHAPES) {
+  test('at ' + s.columns + ' cells the four lists stand ' + (s.pairs ? 'two rows of two' : s.direction === 'row' ? 'in one row' : 'one under the other'), async ($, on) => {
+    const w = await boot($, on, typedSeven())
+    const ui = await mountPane($, 'desktop', s.columns)
+    await select(ui, 'BUG-0012')
+    expect((await ui.find({ key: 'card-selects-row' }))?.props.flexDirection).toBe(s.direction)
+    expect((await ui.find({ key: 'card-selects-pair-1' })) !== undefined).toBe(s.pairs)
+    expect((await ui.find({ key: 'card-selects-pair-2' })) !== undefined).toBe(s.pairs)
+    if (s.pairs) expect((await ui.find({ key: 'card-selects-pair-1' }))?.props.flexDirection).toBe('row')
+    expect((await ui.findAll({ type: 'Select' })).map((x) => x.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
+    expect(w.writes).toEqual([])
+  })
+}

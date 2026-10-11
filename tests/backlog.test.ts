@@ -76,7 +76,7 @@ test('a card added in Backlog is made and sends nothing', async ($, on) => {
   expect(made).toBeDefined()
   expect(w.text(made as string)).toContain('\nstatus: Backlog\n')
   expect(w.sent).toEqual([])
-  expect(w.toasts).toEqual([expect.stringMatching(/^Added KB-[0-9]+ to Backlog[.]$/)])
+  expect(w.toasts).toEqual([expect.stringMatching(/^Added BUG-[0-9]+ to Backlog[.]$/)])
 })
 
 test('Backlog cards are not counted as waiting or queued', async ($, on) => {

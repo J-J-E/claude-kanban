@@ -14,7 +14,8 @@ export type KanbanLane = {
 /** The settings lines of board.md, as the pane shows them. */
 export type KanbanSettings = {
   owner: string
-  prefix: string
+  /** The board's ticket types in order, as board.md lists them. Absent in a snapshot saved before types: read as the library's default types. */
+  types?: { name: string; prefix: string }[]
   workers: number
   managerModel: string
   plannerModel: string
@@ -66,6 +67,12 @@ export type KanbanCard = {
   /** The card's own model and thinking level (an allowed word, or '' for Auto). Absent in a snapshot saved before the card fields: read as Auto. */
   model?: string
   thinking?: string
+  /** The NAME of the card's type, read from the letters of its ID; absent when the letters are no type on the board. Absent in an old snapshot. */
+  type?: string
+  /** Old IDs from the Log's `retyped from <A> to <B>` lines, oldest first. Absent in an old snapshot: read as none. */
+  formerIds?: string[]
+  /** `YYYY-MM-DD HH:MM` the card was made (sorts as text). Absent in an old snapshot. */
+  createdAt?: string
 }
 
 /** One file the board could not use: unreadable, unparsable, an unknown lane, a duplicate ID. */
@@ -93,8 +100,8 @@ export type KanbanSnapshot = {
 export type KanbanQueued = {
   /** The card the prompt is about. */
   id: string
-  /** 'move': a card dropped in a lane; 'create': a card made in a lane that has an action; 'delete': asked to be deleted. */
-  kind: 'move' | 'create' | 'delete'
+  /** 'move': a card dropped in a lane; 'create': a card made in a lane that has an action; 'delete': asked to be deleted; 'retype': asked to be given another type (a new ID). */
+  kind: 'move' | 'create' | 'delete' | 'retype'
   /** The prompt text, to match turn.start against. */
   text: string
   /** Milliseconds since the epoch. */
@@ -139,6 +146,8 @@ declare module 'claude-code' {
       showDetails: boolean
       /** Whether the card view's last row asks `Delete KB-0015?` in place of the two buttons. Reset when the card changes. */
       confirmDelete: boolean
+      /** The type name picked in the open card's Type list and not yet asked for ('' = none); the question row `Retype KB-0015 as enhancement?` shows while it differs from the card's own type. Reset when the card changes. */
+      retypePick: string
       /** The open card's Rename field: whether it is open and the title typed in it. Reset when the card changes. */
       renaming: { isOpen: boolean; title: string }
       /** Whether the Settings tab's top row asks `Put every setting back to its default?` in place of Restore all defaults. Closed by Keep, Restore and any change of tab. */
@@ -151,8 +160,8 @@ declare module 'claude-code' {
       tabChanges: number
       /** The Find field's text. Cleared when the session starts. */
       find: string
-      /** The toolbar's New card row: whether it is open, the title typed, and the lane picked ('' = the first intake lane). Cleared by Cancel. */
-      add: { isOpen: boolean; title: string; lane: string }
+      /** The toolbar's New card row: whether it is open, the title typed, the lane picked ('' = the first intake lane) and the type picked, by name ('' = the board's first type). Cleared by Cancel. `type` is absent in a state saved before types. */
+      add: { isOpen: boolean; title: string; lane: string; type?: string }
       /** Whether the Kanban pane is shown (set on each open, cleared on its close); null until known, then the engine's own list says. The Board chip above the chat box shows while it is false. */
       paneShown: boolean | null
     }

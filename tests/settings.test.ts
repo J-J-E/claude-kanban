@@ -284,11 +284,11 @@ describe('saved lines: which are saved, clear one, clear all', () => {
     expect(must(clearTarget(t, 'planner'))).toBe(t)
   })
 
-  test('Restore all removes every saved settings line and keeps prefix, next_id, owner and lanes', () => {
+  test('Restore all removes every saved settings line and keeps owner, lanes and any leftover prefix and next_id lines', () => {
     const cleared = must(clearAllSettings(BOARD_EXAMPLE))
     expect(must(savedKeys(cleared))).toEqual([])
     expect(cleared).toBe(OLD_LANES_BOARD_EXAMPLE.replace('next_id: 1', 'next_id: 13'))
-    expect(must(parseBoard(cleared)).nextId).toBe(13)
+    expect(must(parseBoard(cleared)).owner).toBe('John')
   })
 
   test('keeps CRLF and the BOM, whole output compared', () => {

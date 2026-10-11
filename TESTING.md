@@ -4,7 +4,7 @@ This is a manual test script for someone developing the plugin: it checks by han
 
 It was written and run on Windows 11 with the Claude Code desktop app, the only setup it has been checked on. Commands are given for PowerShell; the git and Node commands are the same in bash or zsh. Do the steps in order. Every step opens with Do and ends with Expect. Open a NEW Code tab session each time a step says so: sessions opened before the plugin was installed or loaded do not have it. Anything that fails: see "If it does not work" at the bottom.
 
-`<path-to-your-clone>` is your clone of this repo. `<you>` is the owner name on the board (your first name), `<date> <time>` is your local date and time, and `<ID>` is a card ID such as `KB-0004`.
+`<path-to-your-clone>` is your clone of this repo. `<you>` is the owner name on the board (your first name), `<date> <time>` is your local date and time, and `<ID>` is a card ID such as `ENH-0003`.
 
 ## A. Terminal: validate and tests
 
@@ -22,19 +22,19 @@ It was written and run on Windows 11 with the Claude Code desktop app, the only 
 
 ## B. The pane, in the demo project
 
-Make a fresh demo project for this section. It is a small git repo with one commit, a ready board and three sample cards in Pending (`KB-0001` to `KB-0003`):
+Make a fresh demo project for this section. It is a small git repo with one commit, a ready board and three sample cards in Pending (`ENH-0001`, `ENH-0002` and `CHORE-0001`):
 
 ```
 node <path-to-your-clone>/tools/make-demo.mjs <demo-folder>
 ```
 
-`<demo-folder>` must be new or empty. Nothing else is touched. If you cannot run that script, follow `WALKTHROUGH.md` section 3 for the hand-made repo, then add three cards with `add a card: ...` (step 20 shows how). Steps 5 to 16 add and delete a card called `Fix footer`; it gets the next free number, `KB-0004` here, called the footer card below.
+`<demo-folder>` must be new or empty. Nothing else is touched. If you cannot run that script, follow `WALKTHROUGH.md` section 3 for the hand-made repo, then add three cards with `add an enhancement: ...` (step 20 shows how). Steps 5 to 16 add and delete a card called `Fix footer`; it gets the next free number of its type, `BUG-0001` here (its type is bug), called the footer card below.
 
 Pictures of what you should see are in `docs/design/real-pane-*.png`, for example `docs/design/real-pane-board-with-menu.png` (the board with a card's menu open) and `docs/design/real-pane-settings.png` (the Settings tab).
 
 2. Load the plugin.
    - Do: in the desktop app, start a new Code tab session with the folder `<demo-folder>`. Type `/`.
-   - Expect: `kanban:kanban` is in the menu. If not, quit and reopen the app, then start another new session.
+   - Expect: `kanban:kanban` and `kanban:setup` are in the menu. If not, quit and reopen the app, then start another new session.
 3. Open the pane.
    - Do: type `/board`. (The pane may not open by itself at session start in a narrow docked pane. `/board` is the sure way.)
    - Expect: the header (`Claude is idle`, the `Board` and `Settings` tabs, a time like `changed 14:02` or `3 min ago`, and `◆ 1 need you` when a card waits on you), the toolbar (`New card`, `Find a card`, `Sort`, `Collapse all`, a line like `3 cards`) and the lanes, each a flat row. The three sample cards are in Pending. Within a few seconds the session may switch to opus (the `manager_model`), or a notice says `run /model opus yourself`.
@@ -42,8 +42,11 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
    - Do: close the pane with its `x`.
    - Expect: a `Board` chip above the chat box. Press it: the pane opens. With the pane open the chip is gone.
 5. New card.
-   - Do: press `New card`. A `What needs doing?` field appears with a `Lane` list, `Add` and `Cancel`. Type `Fix footer`, leave `Lane` on Pending, press Enter (or `Add`).
-   - Expect: the card `Fix footer` is in Pending at once and no Claude turn starts. `kanban/<ID>-fix-footer.md` exists with `status: Pending`. `board.md` has `next_id` one higher. The `What needs doing?` field is empty and stays open after Enter. Press `Cancel`: the field closes and no further card is made.
+   - Do: press `New card`. A `What needs doing?` field appears with a `Type` list, a `Lane` list, `Add` and `Cancel`. Type `Fix footer`, leave `Type` on bug and `Lane` on Pending, press Enter (or `Add`).
+   - Expect: the card `Fix footer` is in Pending at once and no Claude turn starts. `kanban/<ID>-fix-footer.md` exists with `status: Pending`. `board.md` has the line `next_bug: 2`. The `What needs doing?` field is empty and stays open after Enter. Press `Cancel`: the field closes and no further card is made.
+5a. The Type list in New card.
+   - Do: press `New card`. Look at the `Type` list, pick `enhancement`, type `Footer link`, press Enter. Press `Cancel`. Press `New card` again.
+   - Expect: `Type` sits beside `Lane` and lists `bug`, `enhancement`, `chore` in that order, starting on `bug`. The card is made as an enhancement with the next enhancement number (`ENH-0003` in the demo) and `board.md` shows `next_enh: 4`. The footer card of step 5 kept its own number and type. Reopened, `Type` still shows `enhancement` (it keeps the last pick while the pane is open). Delete the `Footer link` card afterwards (step 10 shows how); the number is not handed out again.
 6. Find a card.
    - Do: type `footer` in `Find a card`. Then `zzzz`. Then press `Clear`.
    - Expect: with `footer` only the footer card shows. With `zzzz` the pane says `No card matches "zzzz"` with a `Clear`, and every lane shows 0. `Clear` brings every card back.
@@ -60,6 +63,9 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 9a. The small menu under a card. NOT VERIFIED: nobody has looked at this menu on the real pane yet, so a failure here is a finding, not a mistake in your steps.
    - Do: press the `⋯` on the footer card. Then press the same `⋯` again. Press it once more, then press `Copy ID`. Press the `⋯` again, then `Delete card…`, then `Keep it`. Press `Open card`.
    - Expect: the `⋯` opens no card. A small menu with `Open card`, `Copy ID` and `Delete card…` appears directly under the footer card, inside the lane, and the cards below move down by its 3 rows. The same `⋯` again closes it. `Copy ID` shows `Copied <ID>.`, Ctrl+V pastes the ID, and the menu closes. `Delete card…` turns the menu into `Delete <ID>?`, `This removes the card and its log.`, `Delete it` and `Keep it`; `Keep it` goes back to the three rows and deletes nothing. `Open card` opens the footer card (the open card of step 9). Each row acts on the first click. Pressing anywhere else on the lanes closes the menu.
+9b. The Type list in the open card, and a retype. Use the sample card `ENH-0002` in the demo project (not the footer card).
+   - Do: open `ENH-0002`. Look at the `Type` list, then pick `chore` in it. Press `Cancel`. Pick `chore` again and press `Retype`. Wait for Claude to finish.
+   - Expect: `Type` is the first of the four lists and reads `enhancement`. Picking `chore` writes nothing: the question `Retype ENH-0002 as chore? Its ID will change.` appears with `Retype` and `Cancel`, and `Cancel` puts the list back to `enhancement`. `Retype` shows `Claude is retyping ENH-0002 as chore.` (or `Claude will retype ENH-0002 when it finishes what it is doing.`) and chat shows `Kanban: <you> asked to retype ENH-0002 "Add a goodbye function" as chore. Retype the card with the kanban skill.` Then the file is `kanban/CHORE-0002-add-a-goodbye-function.md`, its Log ends `retyped from ENH-0002 to CHORE-0002`, `board.md` shows `next_chore: 3`, and the open card stays open with the header `CHORE-0002 (was ENH-0002)`. Retyping a card in Auto is refused with a toast `<ID> is being worked. Move it out of Auto or wait, then retype.`
 10. Delete a card.
     - Do: open the footer card, press `Delete card…`, press `Keep it`. Then `Delete card…` and `Delete it`.
     - Expect: the question `Delete <ID>? This removes the card and its log.` `Keep it` changes nothing. `Delete it` shows `Deleted <ID>.` and the file is gone. Add `Fix footer` again (step 5) for the steps below; it gets the next number, which is now the footer card.
@@ -69,7 +75,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: a ghost of the card follows the pointer. On release the card is in Auto at once.
     - Expect: the Log has `<you>: moved Needs You -> Auto` within a second, and its time matches your clock (local, not UTC). Open the card file in `<demo-folder>/kanban/` in an editor to see it.
     - Expect: chat shows `Kanban: <you> moved <ID> "<title>" from Needs You to Auto. Do the auto lane action from the kanban skill.` The card shows `● Working` or `○ Waiting to start` while the turn runs.
-    - Expect: Claude adds `started: kb-<n>-<slug>`, `approved: GATE: merge touches <manifest file>`, `merged kb-<n>-<slug>`, `moved Auto -> Done`. The flag is empty. The card is in Done.
+    - Expect: Claude adds `started: <letters>-<n>-<slug>`, `approved: GATE: merge touches <manifest file>`, `merged <letters>-<n>-<slug>`, `moved Auto -> Done`. The flag is empty. The card is in Done.
     - Check, in a terminal (reads only): `git -C <demo-folder> log --oneline --graph` shows a merge commit starting with the gate card's ID and, on top, `<ID> board: done`. The project's dependency file now lists the new package.
 12. Bounce.
     - Do: drag the footer card from Pending onto Needs You.
@@ -106,48 +112,58 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
       git commit --allow-empty -m "Initial commit"
       ```
       Start a new Code tab session in that folder and type `/board`.
-    - Expect: the pane says `There is no kanban/board.md in this project.` and shows a `Set up a board` button.
+    - Expect: the pane says `This project has no board yet.` and shows a `Set up a board` button.
 19. Set up the board.
-    - Do: type `set up the kanban board`. Claude asks `Whose board is this?` and offers your git name. Type your first name. Then type `set up the kanban board` again.
-    - Expect: `Board ready for <you>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded.` Then `Board already set up (0 cards)`. `kanban/board.md` has 7 lanes, `next_id: 1`, `owner: <you>`, no settings lines (every setting takes its default: workers 2; manager opus, medium; planner opus, high; worker sonnet, medium; advisor fable, high). `kanban/DECISIONS.md` holds only `# Decisions`. The pane swaps to the board within about 10 seconds.
+    - Do: type `/kanban:setup`. Then type `/kanban:kanban`. Then make a second empty folder the same way as in step 18, start a new Code tab session there and type `kanban: add a card: x`.
+    - Expect: the pane opens by itself, without typing `/board`, as soon as you press Enter, saying `This project has no board yet.` until it swaps to seven empty lanes. `/kanban:setup` gives one reply starting `Board ready for <you>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded.` and asking no question (git has a name). `kanban/board.md` and `kanban/DECISIONS.md` are on disk and uncommitted. Then `/kanban:kanban` prints the three `what's next` headings: `Queued for Claude`, `Waiting on you`, `Untriaged`. In the second folder the reply is `No kanban/board.md here. Say "set up the kanban board" to create it.` and no file is written. In the first folder `kanban/board.md` has 7 lanes, no `types:` list and no counter lines, `owner: <you>`, no settings lines (every setting takes its default: workers 2; manager opus, medium; planner opus, high; worker sonnet, medium; advisor fable, high). `kanban/DECISIONS.md` holds only `# Decisions`. The pane swaps to the board within about 10 seconds.
+    - Also: `make me a kanban board` typed in a fresh empty folder (another new session) also sets up, with the same `Board ready for` reply.
 20. Add three cards.
-    - Do: type `add a card: fix the morning summary date`, then `add a card: second card`, then `add a card: third card`.
-    - Expect: `KB-0001 added to Pending: ...` (with the title), then KB-0002, KB-0003. `kanban/KB-0001-fix-the-morning-summary-date.md` has `status: Pending`, `order: 1000`, today's dates and one Log line `created in Pending`.
+    - Do: type `add a bug: fix the morning summary date`, then `add an enhancement: second card`, then `add a chore: third card`.
+    - Expect: `BUG-0001 added to Pending: ...` (with the title), then `ENH-0001`, `CHORE-0001`. `kanban/BUG-0001-fix-the-morning-summary-date.md` has `status: Pending`, `order: 1000`, today's dates and one Log line `created in Pending`.
 21. Two refusals.
-    - Do: type `move KB-2 to Nowhere`. Then `move KB-2 to Needs You`.
+    - Do: type `move enhancement 1 to Nowhere`. Then `move enhancement 1 to Needs You`.
     - Expect: `Unknown lane "Nowhere". Lanes on this board: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. Nothing was changed.` Then `"Needs You" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.` Neither changes a file.
 22. Comment.
-    - Do: type `comment on KB-1: waiting on Sam`.
-    - Expect: `Comment added to KB-0001.` One new Log line `<you>: waiting on Sam`. `status:` is still Pending.
+    - Do: type `comment on bug 1: waiting on Sam`.
+    - Expect: `Comment added to BUG-0001.` One new Log line `<you>: waiting on Sam`. `status:` is still Pending.
 23. List and what's next.
     - Do: type `list the board`, then `what's next`.
-    - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, and `Untriaged` with KB-0001, KB-0002, KB-0003.
+    - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, and `Untriaged` with BUG-0001, ENH-0001 and CHORE-0001.
 24. Decide.
     - Do: type `decide: Pending is the inbox, because one place`. Then record a second decision.
     - Expect: `D1 recorded: Pending is the inbox`. `DECISIONS.md` has a line `- **D1 (<date>) Pending is the inbox:** ...` ending `Reason: one place.` The second one is D2.
 25. A move that does nothing more.
-    - Do: type `move KB-3 to Backlog`.
-    - Expect: `KB-0003 moved Pending -> Backlog.` and nothing else: no lane action, no commit. `what's next` no longer lists KB-0003 under `Untriaged`.
+    - Do: type `move chore 1 to Backlog`.
+    - Expect: `CHORE-0001 moved Pending -> Backlog.` and nothing else: no lane action, no commit. `what's next` no longer lists CHORE-0001 under `Untriaged`.
 
-25a. The number is reserved first. In the fresh folder, open `kanban/board.md`, set `next_id: 5` (no card numbered 5 or higher exists), save, and start a new session there.
-   - Do: type `add a card: one`.
-   - Expect: `KB-0005 added to Pending: One` (the title is Claude's own short phrase). `board.md` shows `next_id: 6` and `kanban/KB-0005-one.md` exists. Claude writes `next_id` first and the card file second, so a number is never handed out twice; the order cannot be seen afterwards, only that the two agree.
+25a. The number is reserved first. In the fresh folder, open `kanban/board.md`, add the line `next_bug: 5` (no card numbered 5 or higher exists), save, and start a new session there.
+   - Do: type `add a bug: one`.
+   - Expect: `BUG-0005 added to Pending: One` (the title is Claude's own short phrase). `board.md` shows `next_bug: 6` and `kanban/BUG-0005-one.md` exists. Claude writes `next_bug` first and the card file second, so a number is never handed out twice; the order cannot be seen afterwards, only that the two agree.
 25b. A request in chat becomes a card. Use the demo project (section B) with the pane open, in a NEW session, so the pane's note rides on what you type.
    - Do: type `fix the date format in the summary`.
-   - Expect: a first reply that starts `KB-00NN added to Auto: Fix the date format in the summary` (`NN` is the next free number). The card is in Auto in the pane. The header reads `Claude is on KB-00NN`. A planning agent is started for it (the card has no plan yet). The main session does not edit any project file itself.
+   - Expect: a first reply that starts `<ID> added to Auto: Fix the date format in the summary` (Claude picks the type from the request, here most likely a bug, so `BUG-00NN`, `NN` being the next free number of that type). The card is in Auto in the pane. The header reads `Claude is on <ID>`. A planning agent is started for it (the card has no plan yet). The main session does not edit any project file itself.
    - Do: type `what does the summary function do?` (the demo has no summary function: Claude answers that it finds none, which is still an answer).
    - Expect: an answer in chat and no new card, because a question makes no card.
 25c. Answering a waiting card in chat. Put one card in Needs You flagged `PLAN READY` (drag a card to Plan and wait, as in `WALKTHROUGH.md` section 5). It is the only card waiting.
    - Do: type `yes go ahead`.
-   - Expect: the card's Log gains `<you>: yes go ahead` and `<you>: moved Needs You -> Auto`, in that order, then `Claude: started: kb-<n>-<slug>`. Claude replies `<ID> moved Needs You -> Auto.` and the card runs. No new card is made.
+   - Expect: the card's Log gains `<you>: yes go ahead` and `<you>: moved Needs You -> Auto`, in that order, then `Claude: started: <letters>-<n>-<slug>`. Claude replies `<ID> moved Needs You -> Auto.` and the card runs. No new card is made.
 25d. Two cards waiting. Get a second card into Needs You (any flag) so two wait.
    - Do: type `yes`.
    - Expect: `Which card: <ID> or <ID>?` with the two real IDs, and no card file or lane changes.
 25e. Skipping the card.
    - Do: type `no card: fix the typo in the README`.
-   - Expect: Claude does the work and makes no card: `git status` shows no new file in `kanban/` and `next_id` is unchanged.
+   - Expect: Claude does the work and makes no card: `git status` shows no new file in `kanban/` and no counter line changed.
+25f. Retype from chat. Use the fresh folder of step 18 (it holds `BUG-0001`, `ENH-0001`, `CHORE-0001` and, from 25a, `BUG-0005`).
+   - Do: type `retype bug 1 as enhancement`.
+   - Expect: `BUG-0001 is now ENH-0002.` The file `kanban/BUG-0001-fix-the-morning-summary-date.md` is gone and `kanban/ENH-0002-fix-the-morning-summary-date.md` exists with `id: ENH-0002`, a new last Log line `retyped from BUG-0001 to ENH-0002`, and `board.md` has `next_enh: 3`. Nothing else in the card changed. Now type `retype bug 5 as widget`: `Unknown type "widget". Types on this board: bug, enhancement, chore. Nothing was changed.`
+25g. An old ID is followed.
+   - Do: type `comment on bug 1: still here`.
+   - Expect: `Comment added to ENH-0002 (was BUG-0001).` The new Log line is on `ENH-0002`. `add a bug: another` does not give `BUG-0001` again: it gets the next number after `BUG-0005`, `BUG-0006`.
+25h. A bare number that clashes.
+   - Do: type `move 1 to Backlog`. `ENH-0001` and `CHORE-0001` both end in 1.
+   - Expect: `More than one card is numbered 1: ` followed by the two IDs, then `. Say which, for example "bug 1". Nothing was changed.` No card file changes. Then `move enhancement 1 to Backlog` moves `ENH-0001`.
 
-Steps 25a to 25e test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
+Steps 25a to 25h test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
 
 ## D. The MCP server
 

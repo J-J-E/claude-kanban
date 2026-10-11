@@ -75,6 +75,48 @@ describe('Newest first and Oldest first: by ID', () => {
   })
 })
 
+describe('Newest first and Oldest first: by createdAt across types', () => {
+  const cards = [
+    card('ENH-0001', { createdAt: '2026-10-03 09:00' }),
+    card('BUG-0003', { createdAt: '2026-10-01 08:00' }),
+    card('CHORE-0001', { createdAt: '2026-10-05 12:30' }),
+    card('BUG-0004', { createdAt: '2026-10-04 10:00' }),
+  ]
+
+  test('Oldest first follows createdAt, not the ID', () => {
+    expect(ids(sortCards(cards, 'oldest'))).toEqual(['BUG-0003', 'ENH-0001', 'BUG-0004', 'CHORE-0001'])
+  })
+
+  test('Newest first is the exact reverse', () => {
+    expect(ids(sortCards(cards, 'newest'))).toEqual(['CHORE-0001', 'BUG-0004', 'ENH-0001', 'BUG-0003'])
+  })
+
+  test('the same createdAt ties by ID (numbers as numbers), reversed for Newest first', () => {
+    const tie = [card('BUG-0010', { createdAt: 'x1' }), card('ENH-0003', { createdAt: 'x1' }), card('BUG-0009', { createdAt: 'x1' })]
+    expect(ids(sortCards(tie, 'oldest'))).toEqual(['BUG-0009', 'BUG-0010', 'ENH-0003'])
+    expect(ids(sortCards(tie, 'newest'))).toEqual(['ENH-0003', 'BUG-0010', 'BUG-0009'])
+  })
+
+  test('cards with no createdAt (or an empty one) fall back to the ID, as before', () => {
+    const old = [card('KB-0010'), card('KB-0002', { createdAt: '' }), card('KB-0001')]
+    expect(ids(sortCards(old, 'oldest'))).toEqual(['KB-0001', 'KB-0002', 'KB-0010'])
+    expect(ids(sortCards(old, 'newest'))).toEqual(['KB-0010', 'KB-0002', 'KB-0001'])
+  })
+
+  test('mixed: a card without createdAt counts as older than any card with one, both ways round', () => {
+    const mixed = [
+      card('BUG-0001', { createdAt: '2026-10-01 08:00' }),
+      card('KB-0050'),
+      card('ENH-0001', { createdAt: '2026-09-01 08:00' }),
+      card('KB-0002'),
+    ]
+    expect(ids(sortCards(mixed, 'oldest'))).toEqual(['KB-0002', 'KB-0050', 'ENH-0001', 'BUG-0001'])
+    expect(ids(sortCards(mixed, 'newest'))).toEqual(['BUG-0001', 'ENH-0001', 'KB-0050', 'KB-0002'])
+    // the input order does not matter
+    expect(ids(sortCards(mixed.slice().reverse(), 'oldest'))).toEqual(['KB-0002', 'KB-0050', 'ENH-0001', 'BUG-0001'])
+  })
+})
+
 describe('Recently changed: updated newest first, ties by order', () => {
   test('newest date first', () => {
     const cards = [card('KB-0001', { updated: '2026-09-30' }), card('KB-0002', { updated: '2026-10-07' }), card('KB-0003', { updated: '2026-10-02' })]

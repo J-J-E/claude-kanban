@@ -5,9 +5,9 @@
 // a `Clear` button when nothing matches), and a growing gap, then ONE quiet plain button at the right that names what it will do:
 // `Collapse all` while any lane is open, else `Expand all` (they set every lane's fold in the kept view and bump its `stamp`). It is
 // not drawn while Find is on (the lanes with matches are open whatever the folds say).
-// `New card` reveals a second place under it: the title field, the lane the card is made in and `Cancel`; the one `Add` is the
+// `New card` reveals a second place under it: the title field, the type, the lane the card is made in and `Cancel`; the one `Add` is the
 // submit the app draws beside the field (`submitLabel`), as the open card's comment field does (no second `Add` button, KB-0041).
-// From 76 cells those three share one row; below that the field has the row to itself and the lane and `Cancel` sit under it. Widths come from flex alone; a Select reserves 2 rows and a Button 1, so the rows centre.
+// From 92 cells those four share one row; below that the field has the row to itself and the type, the lane and `Cancel` share the next; below 60 the type has a row of its own and the lane and `Cancel` sit under it. Widths come from flex alone; a Select reserves 2 rows and a Button 1, so the rows centre.
 // The title field (KB-0040): a native Input has no width prop and draws at its own width inside the Box that holds it (the Box grew,
 // the field did not). So its Box is a COLUMN with stretch (a column stretches its child across the Box) and takes all the free width
 // of the row (flexGrow 1); the Lane Box sizes to its value and does not grow, so the room goes to the field. Text longer than the
@@ -18,7 +18,10 @@ import type { EngineInterface } from 'claude-code'
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
 /** From this many cells the new-card controls share one row. */
-export const WIDE_ADD = 76
+export const WIDE_ADD = 92
+
+/** Below this many cells the Type list has a row of its own, and the Lane list and Cancel share the one under it. */
+export const TYPE_OWN_ROW = 60
 
 /** Below this many cells the Find field takes a row of its own. */
 export const FIND_OWN_ROW = 60
@@ -38,6 +41,10 @@ export type ToolbarProps = {
   lanes: string[]
   /** The chosen lane's label (always one of `lanes`). */
   lane: string
+  /** The board's ticket type names in order (the Type list). */
+  types: string[]
+  /** The chosen type's name (always one of `types`). */
+  type: string
   /** The sort shown: a sort key. */
   sort: string
   sortOptions: { value: string; label: string }[]
@@ -59,6 +66,7 @@ export type ToolbarActions = {
   /** Enter or the field's own `Add` gives the text (`null` reads the typed title, for a press that has no text). */
   add: (value: string | null) => void
   pickLane: (label: string) => void
+  pickType: (name: string) => void
   pickSort: (key: string) => void
   /** Typing in the Find field: the text so far. */
   setFind: (value: string) => void
@@ -105,6 +113,17 @@ function addRow(el: Els, p: ToolbarProps, act: ToolbarActions) {
       />
     </Box>
   )
+  const type = (
+    <Box key="toolbar-type-box" flexGrow={0} flexShrink={0}>
+      <Select
+        key="toolbar-type"
+        label="Type"
+        options={p.types.map((value) => ({ value }))}
+        value={p.type}
+        onSelect={(value: string) => act.pickType(value)}
+      />
+    </Box>
+  )
   const buttons = [
     <Box key="toolbar-cancel-box" flexShrink={0}>
       <Button key="toolbar-cancel" plain label="Cancel" onPress={() => act.cancel()} />
@@ -114,8 +133,25 @@ function addRow(el: Els, p: ToolbarProps, act: ToolbarActions) {
     return (
       <Box key="toolbar-add-row" flexDirection="row" alignItems="center" columnGap={2} marginTop={1}>
         {field}
+        {type}
         {lane}
         {buttons}
+      </Box>
+    )
+  }
+  if (p.columns < TYPE_OWN_ROW) {
+    return (
+      <Box key="toolbar-add-rows" flexDirection="column" marginTop={1}>
+        <Box key="toolbar-add-field-row" flexDirection="row">
+          {field}
+        </Box>
+        <Box key="toolbar-add-type-row" flexDirection="row" alignItems="center">
+          {type}
+        </Box>
+        <Box key="toolbar-add-pick-row" flexDirection="row" alignItems="center" columnGap={2}>
+          {lane}
+          {buttons}
+        </Box>
       </Box>
     )
   }
@@ -125,6 +161,7 @@ function addRow(el: Els, p: ToolbarProps, act: ToolbarActions) {
         {field}
       </Box>
       <Box key="toolbar-add-pick-row" flexDirection="row" alignItems="center" columnGap={2}>
+        {type}
         {lane}
         {buttons}
       </Box>

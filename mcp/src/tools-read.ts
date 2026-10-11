@@ -1,4 +1,4 @@
-// The four read tools: board_list, whats_next, card_get and lanes. Each is a plain function from the kanban/ folder to
+// The five read tools: board_list, whats_next, card_get, lanes and types. Each is a plain function from the kanban/ folder to
 // text (the skill's own list and what's-next layouts), so tests need no server; registerReadTools wires them to MCP.
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -105,6 +105,13 @@ export function lanes(dir: string): Text {
   return { ok: true, message: '', text: out.join('\n') }
 }
 
+/** The board's ticket types in board order, one per line as `name (LETTERS)`: what card_add and card_retype accept. */
+export function types(dir: string): Text {
+  const loaded = loadBoard(dir)
+  if (!loaded.ok) return loaded
+  return { ok: true, message: '', text: loaded.state.board.types.map((t) => `${t.name} (${t.prefix})`).join('\n') }
+}
+
 /** The MCP reply for a Text outcome: the text, or the refusal marked as an error. */
 export function reply(r: Outcome<{ text: string }>): { content: { type: 'text'; text: string }[]; isError?: boolean } {
   return r.ok ? { content: [{ type: 'text', text: r.text }] } : { content: [{ type: 'text', text: r.message }], isError: true }
@@ -127,7 +134,10 @@ export function registerReadTools(server: McpServer, kanbanDir: () => string | u
   )
   server.registerTool(
     'card_get',
-    { description: 'The whole file of one card (frontmatter, body, Plan and Log).', inputSchema: { id: z.string().describe('Card ID: KB-0012, KB-12 or 12') } },
+    {
+      description: 'The whole file of one card (frontmatter, body, Plan and Log).',
+      inputSchema: { id: z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID is followed to the card that holds it now.') },
+    },
     ({ id }) => {
       const dir = kanbanDir()
       return reply(dir === undefined ? refuse(noBoard) : cardGet(dir, id))
@@ -137,5 +147,10 @@ export function registerReadTools(server: McpServer, kanbanDir: () => string | u
     'lanes',
     { description: 'Each lane of the board: its role, who may fill it, and what a card moved there does.' },
     withDir(lanes),
+  )
+  server.registerTool(
+    'types',
+    { description: 'Each ticket type of the board in order, with its letters: "bug (BUG)". card_add and card_retype take either.' },
+    withDir(types),
   )
 }

@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
 import { dropLook } from '../hooks/lib/strings.ts'
 import { BOARD_EXAMPLE, INIT_BOARD_EXAMPLE } from './examples.ts'
-import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, ORIGIN_SPY, startSession, stubs } from './fixtures.ts'
+import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, ORIGIN_SPY, START, startSession, stubs } from './fixtures.ts'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 
@@ -1343,6 +1343,114 @@ test('no-board', async ($, on) => {
   expect(await laneOf(ui, 'KB-0001')).toBe('Inbox')
 })
 
+test('the pane opens when the main session first writes board.md', async ($, on) => {
+  const w = stubs(on, {})
+  await startSession($)
+  await w.clock.settle()
+  expect(w.opened).toEqual([])
+  const write = { tool: 'Write', file_path: '/project/kanban/board.md', content: BOARD_EXAMPLE } as const
+  // A subagent's write creates the board and opens nothing.
+  await $.tool.call({ ...write, agentId: 'a1' } as never)
+  await w.clock.settle()
+  expect(w.opened).toEqual([])
+  // The file exists now: no write after that is a creation.
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.opened).toEqual([])
+})
+
+test('the creating Write of board.md opens the pane once, and never throws', async ($, on) => {
+  const w = stubs(on, {})
+  await startSession($)
+  await w.clock.settle()
+  const write = { tool: 'Write', file_path: '/project/kanban/board.md', content: BOARD_EXAMPLE } as const
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.opened).toHaveLength(1)
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.opened).toHaveLength(1)
+})
+
+test('a refused open does not fail the creating Write of board.md', async ($, on) => {
+  const w = stubs(on, {})
+  w.openMode = 'throw'
+  await startSession($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'Write', file_path: '/project/kanban/board.md', content: BOARD_EXAMPLE })
+  expect(typeof r === 'object' && r !== null && 'deny' in r).toBe(false)
+  expect(w.opened).toHaveLength(1)
+})
+
+test('a non-interactive run opens nothing when board.md is created', async ($, on) => {
+  const w = stubs(on, {})
+  await $.session.start({ cwd: '/project', surface: 'desktop', isInteractive: false })
+  await w.clock.settle()
+  await $.tool.call({ tool: 'Write', file_path: '/project/kanban/board.md', content: BOARD_EXAMPLE })
+  await w.clock.settle()
+  expect(w.opened).toEqual([])
+})
+
+type SubmitOrigin = Parameters<Engine['prompt']['submit']>[0]['origin']
+
+/** Raises a prompt the way the REPL does and returns the text that reached the model's side. */
+async function typed($: Engine, w: ReturnType<typeof stubs>, text: string, origin: SubmitOrigin = { kind: 'composer' }) {
+  const before = w.sent.length
+  await $.prompt.submit({ text, wait: false, origin })
+  await w.clock.settle()
+  return w.sent[before]?.text
+}
+
+test('a typed /kanban:setup or /kanban:kanban opens the pane at once, before any board exists', async ($, on) => {
+  const w = stubs(on, {})
+  await startSession($)
+  await w.clock.settle()
+  expect(await typed($, w, '/kanban:setup')).toBe('/kanban:setup')
+  expect(w.opened).toEqual([{ id: 'kanban', title: 'Kanban' }])
+  expect(await typed($, w, '  /kanban:kanban\n', { kind: 'bridge' })).toBe('  /kanban:kanban\n')
+  expect(w.opened).toHaveLength(2)
+})
+
+test('the same commands from a plugin, or in a non-interactive run, or with more words, open nothing', async ($, on) => {
+  const w = stubs(on, {})
+  await startSession($)
+  await w.clock.settle()
+  expect(await typed($, w, '/kanban:setup', { kind: 'plugin', name: 'other' })).toBe('/kanban:setup')
+  expect(await typed($, w, '/kanban:kanban', { kind: 'sdk' })).toBe('/kanban:kanban')
+  expect(await typed($, w, '/kanban:kanban add a card')).toBe('/kanban:kanban add a card')
+  expect(await typed($, w, '/kanban:setup now')).toBe('/kanban:setup now')
+  expect(w.opened).toEqual([])
+})
+
+test('a non-interactive run opens nothing for a typed /kanban:setup', async ($, on) => {
+  const w = stubs(on, {})
+  await $.session.start({ cwd: '/project', surface: 'desktop', isInteractive: false })
+  await w.clock.settle()
+  expect(await typed($, w, '/kanban:setup')).toBe('/kanban:setup')
+  expect(w.opened).toEqual([])
+})
+
+test('a refused open still passes the typed command on unchanged', async ($, on) => {
+  const w = stubs(on, {})
+  w.openMode = 'throw'
+  await startSession($)
+  await w.clock.settle()
+  expect(await typed($, w, '/kanban:setup')).toBe('/kanban:setup')
+  expect(w.opened).toHaveLength(1)
+})
+
+test('the board.md Write after a typed /kanban:setup opens no second pane and does not throw', async ($, on) => {
+  const w = stubs(on, {})
+  await startSession($)
+  await w.clock.settle()
+  await typed($, w, '/kanban:setup')
+  expect(w.opened).toHaveLength(1)
+  const r = await $.tool.call({ tool: 'Write', file_path: '/project/kanban/board.md', content: BOARD_EXAMPLE })
+  await w.clock.settle()
+  expect(typeof r === 'object' && r !== null && 'deny' in r).toBe(false)
+  expect(w.opened).toHaveLength(1)
+})
+
 test('two files with one ID cannot be moved', async ($, on) => {
   const files = defaultFiles()
   files[cardPath('KB-0001', 'copy-of-footer')] = cardText('KB-0001', 'Fix footer again', 'Inbox', 3000)
@@ -2091,4 +2199,149 @@ test('Settings tab at 45, 60, 80 and 108 cells (KB-0034): Restore all, Save as d
     }
     await ui.unmount()
   }
+})
+
+// ---------------------------------------------------------------- KB-0054 step 1: typed cards in the snapshot, Find, the sorts and retypes
+
+/** A typed card: its ID's letters, made on `created` at 09:10 (the time of its first Log line), in Pending; `retyped` adds the Log line a retype writes. */
+function typedCard(id: string, title: string, created: string, retyped?: string): string {
+  let text = cardText(id, title, 'Pending', 1000).replace('created: 2026-10-08', 'created: ' + created)
+  if (retyped !== undefined) text = text.replace(/\n*$/, '\n') + `- 2026-10-09 10:00 Claude: retyped from ${retyped} to ${id}\n`
+  return text
+}
+
+function typedFiles(): Record<string, string> {
+  return {
+    [BOARD_PATH]: INIT_BOARD_EXAMPLE,
+    [cardPath('BUG-0012', 'fix-date')]: typedCard('BUG-0012', 'Fix the date', '2026-10-05'),
+    [cardPath('ENH-0007', 'add-export')]: typedCard('ENH-0007', 'Add export', '2026-10-03', 'BUG-0003'),
+    [cardPath('CHORE-0001', 'tidy-up')]: typedCard('CHORE-0001', 'Tidy up', '2026-10-07'),
+    [cardPath('KB-0001', 'old-card')]: typedCard('KB-0001', 'Old card', '2026-10-01'),
+  }
+}
+
+test('the snapshot of a typed board carries the types, each card\'s type and createdAt, and formerIds for a retyped card', async ($, on) => {
+  const state = watchState(on)
+  await boot($, on, typedFiles())
+  const snapshot = state.wrote.snapshot
+  expect(snapshot.settings.types).toEqual([
+    { name: 'bug', prefix: 'BUG' },
+    { name: 'enhancement', prefix: 'ENH' },
+    { name: 'chore', prefix: 'CHORE' },
+  ])
+  const card = (id: string) => snapshot.cards.find((c: { id: string }) => c.id === id)
+  expect(card('BUG-0012')).toMatchObject({ type: 'bug', createdAt: '2026-10-05 09:10', formerIds: [] })
+  expect(card('ENH-0007')).toMatchObject({ type: 'enhancement', createdAt: '2026-10-03 09:10', formerIds: ['BUG-0003'] })
+  expect(card('CHORE-0001')).toMatchObject({ type: 'chore', createdAt: '2026-10-07 09:10' })
+  // Letters that are no type on the board: no type.
+  expect(card('KB-0001')).not.toHaveProperty('type')
+  expect(card('KB-0001')).toMatchObject({ formerIds: [], createdAt: '2026-10-01 09:10' })
+})
+
+test('Find a card finds a card by its type name and by an old ID', async ($, on) => {
+  await boot($, on, typedFiles())
+  const ui = await mountPane($, 'desktop')
+  const shown = async (): Promise<string[]> => (await boardProps(ui)).lanes.flatMap((l) => l.cards.map((c) => c.id)).sort()
+  await ui.input({ key: 'toolbar-find', text: 'chore', kind: 'change' })
+  expect(await shown()).toEqual(['CHORE-0001'])
+  // `bug` finds the BUG card, and the card retyped from BUG-0003 (its old ID holds the letters).
+  await ui.input({ key: 'toolbar-find', text: 'bug', kind: 'change' })
+  expect(await shown()).toEqual(['BUG-0012', 'ENH-0007'])
+  await ui.input({ key: 'toolbar-find', text: 'enhancement', kind: 'change' })
+  expect(await shown()).toEqual(['ENH-0007'])
+  // The old ID of the retyped card finds it, under its new ID.
+  await ui.input({ key: 'toolbar-find', text: 'BUG-0003', kind: 'change' })
+  expect(await shown()).toEqual(['ENH-0007'])
+})
+
+test('Oldest first and Newest first order by creation time across types', async ($, on) => {
+  await boot($, on, typedFiles())
+  const ui = await mountPane($, 'desktop')
+  const order = async (): Promise<string[]> => (await boardProps(ui)).lanes.flatMap((l) => l.cards.map((c) => c.id))
+  await sortLanes(ui, 'oldest')
+  expect(await order()).toEqual(['KB-0001', 'ENH-0007', 'BUG-0012', 'CHORE-0001'])
+  await sortLanes(ui, 'newest')
+  expect(await order()).toEqual(['CHORE-0001', 'BUG-0012', 'ENH-0007', 'KB-0001'])
+})
+
+test('an open card stays open under its new ID when its file is replaced by a retyped one', async ($, on) => {
+  const state = watchState(on)
+  const w = await boot($, on, typedFiles())
+  const ui = await mountPane($, 'desktop')
+  // A card moved into Plan has a queued prompt.
+  await move(ui, 'BUG-0012', 'Pending', 'Plan')
+  expect(state.wrote.queued.map((q: { id: string }) => q.id)).toEqual(['BUG-0012'])
+  await ui.post({ type: 'select', id: 'BUG-0012' }, { in: 'board' })
+  expect((await ui.find({ key: 'card' }))).toBeDefined()
+  state.seed('turnCard', 'BUG-0012')
+  // The retype: the old file goes, the new one holds the new ID and the Log line.
+  w.files.delete(cardPath('BUG-0012', 'fix-date'))
+  w.put(cardPath('ENH-0020', 'fix-date'), typedCard('ENH-0020', 'Fix the date', '2026-10-05', 'BUG-0012'))
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(state.wrote.selected).toBe('ENH-0020')
+  expect(state.wrote.turnCard).toBe('ENH-0020')
+  expect(state.wrote.queued.map((q: { id: string }) => q.id)).toEqual(['ENH-0020'])
+  expect(await ui.find({ key: 'card' })).toBeDefined()
+  // A card that is gone with no retype still closes the view.
+  w.files.delete(cardPath('ENH-0020', 'fix-date'))
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(state.wrote.selected).toBeNull()
+})
+
+test('a snapshot saved before typed cards (no types, type, formerIds or createdAt) still draws, finds and sorts', async ($, on) => {
+  const state = watchState(on)
+  await boot($, on, typedFiles())
+  const ui = await mountPane($, 'desktop')
+  const snapshot = state.wrote.snapshot
+  const { types: _types, ...settings } = snapshot.settings
+  const old = {
+    ...snapshot,
+    settings,
+    cards: snapshot.cards.map((c: Record<string, unknown>) => ({ id: c.id, title: c.title, status: c.status, order: c.order, flag: c.flag, updated: c.updated, file: c.file })),
+  }
+  state.seed('snapshot', old)
+  await redraw(ui)
+  expect((await boardProps(ui)).lanes.flatMap((l) => l.cards).length).toBe(4)
+  await sortLanes(ui, 'oldest')
+  expect((await boardProps(ui)).lanes.flatMap((l) => l.cards).length).toBe(4)
+  // The library's default types stand in for the missing ones.
+  await ui.input({ key: 'toolbar-find', text: 'chore', kind: 'change' })
+  expect((await boardProps(ui)).lanes.flatMap((l) => l.cards.map((c) => c.id))).toEqual(['CHORE-0001'])
+})
+
+// ---------------------------------------------------------------- KB-0064 step 1: the open card asks Claude to retype
+
+test('a retype asked from the open card marks the card worked at turn.start; when the file is replaced by the new-ID one the card stays open under it and the queue is empty at the turn end', async ($, on) => {
+  const state = watchState(on)
+  const w = await boot($, on, typedFiles())
+  const ui = await mountPane($, 'desktop')
+  await ui.post({ type: 'select', id: 'BUG-0012' }, { in: 'board' })
+  await ui.select({ key: 'card-type', value: 'enhancement' })
+  await ui.press({ key: 'card-retype-yes' })
+  const prompt = 'Kanban: John asked to retype BUG-0012 "Fix the date" as enhancement. Retype the card with the kanban skill.'
+  expect(w.sent.map((s) => s.text)).toEqual([prompt])
+  expect(state.wrote.queued).toMatchObject([{ id: 'BUG-0012', kind: 'retype', text: prompt }])
+  expect(w.writes).toEqual([])
+  // The turn starts: the prompt leaves the queue and the turn is about the card.
+  await $.turn.start({ text: prompt, turnId: 't1' })
+  expect(state.wrote.queued).toEqual([])
+  expect(state.wrote.turnCard).toBe('BUG-0012')
+  // Claude renames the file and Logs the retype.
+  w.files.delete(cardPath('BUG-0012', 'fix-date'))
+  w.put(cardPath('ENH-0020', 'fix-date'), typedCard('ENH-0020', 'Fix the date', '2026-10-05', 'BUG-0012'))
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(state.wrote.selected).toBe('ENH-0020')
+  expect(state.wrote.turnCard).toBe('ENH-0020')
+  expect((await ui.find({ key: 'card-header' }))?.text).toBe('ENH-0020 (was BUG-0012)  in Pending')
+  expect((await ui.find({ key: 'card-type' }))?.props.value).toBe('enhancement')
+  expect(await ui.find({ key: 'card-retype-ask' })).toBeUndefined()
+  // The turn ends: nothing is held any more.
+  await $.turn.complete({ answer: 'done', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(state.wrote.turnCard).toBeNull()
+  expect(state.wrote.queued).toEqual([])
+  expect(await ui.find({ key: 'card' })).toBeDefined()
+  expect((await ui.find({ key: 'card-header' }))?.text).toBe('ENH-0020 (was BUG-0012)  in Pending')
 })

@@ -5,7 +5,12 @@ import {
   clearSavedDefaults,
   defaultBoardText,
   defaultDecisionsText,
+  DEFAULT_TYPES,
   findLane,
+  findType,
+  setCounter,
+  typeOfId,
+  unknownTypeMessage,
   groupByLane,
   moveCard,
   nextDecisionNumber,
@@ -17,10 +22,12 @@ import {
 } from '../hooks/lib/board.ts'
 import type { Board } from '../hooks/lib/board.ts'
 import { DEFAULTS } from '../hooks/lib/settings.ts'
-import { newCardText, nextOrder, parseCard } from '../hooks/lib/cards.ts'
-import { BOARD_EXAMPLE, BOM, INIT_BOARD_EXAMPLE, OLD_LANES_BOARD_EXAMPLE, GATED_BOARD_EXAMPLE, CARD_EXAMPLE, DECISIONS_EXAMPLE, NOW, codeOf, crlf, lines, must } from './examples.ts'
+import { newCardText, nextOrder, parseCard, retypeCardText } from '../hooks/lib/cards.ts'
+import { BOARD_EXAMPLE, BOM, BUG_CARD_EXAMPLE, COUNTERS_BOARD_EXAMPLE, RETYPED_CARD_EXAMPLE, INIT_BOARD_EXAMPLE, OLD_LANES_BOARD_EXAMPLE, GATED_BOARD_EXAMPLE, CARD_EXAMPLE, DECISIONS_EXAMPLE, NOW, codeOf, crlf, lines, must } from './examples.ts'
 
-const board: Board = must(parseBoard(BOARD_EXAMPLE))
+// `kb` is a custom type with the letters KB, so the KB- cards below are not flagged `unknown-type`.
+const KB_BOARD_TEXT = BOARD_EXAMPLE.replace('\nlanes:\n', '\ntypes: [kb, bug, enhancement, chore]\nlanes:\n')
+const board: Board = must(parseBoard(KB_BOARD_TEXT))
 /** A board that still has a Gated lane (role `gated`): it loads and behaves like Needs You. */
 const gatedBoard: Board = must(parseBoard(GATED_BOARD_EXAMPLE))
 
@@ -36,8 +43,6 @@ function cardText(id: string, status: string, order = 1000): string {
 
 describe('parseBoard', () => {
   test('reads the format.md example', () => {
-    expect(board.prefix).toBe('KB')
-    expect(board.nextId).toBe(13)
     expect(board.owner).toBe('John')
     expect(board.workers).toBe(1)
     expect(board.managerModel).toBe('opus')
@@ -86,8 +91,8 @@ describe('parseBoard', () => {
   test('absent settings take their defaults', () => {
     const b = must(parseBoard(boardWithLanes('Inbox (intake)')))
     expect(b).toEqual({
-      prefix: 'KB',
-      nextId: 1,
+      types: [...DEFAULT_TYPES],
+      counters: { BUG: 1, ENH: 1, CHORE: 1 },
       owner: 'John',
       workers: 2,
       managerModel: 'opus',
@@ -105,7 +110,7 @@ describe('parseBoard', () => {
   })
 
   test('reads the same board from CRLF and from a BOM', () => {
-    expect(must(parseBoard(BOM + crlf(BOARD_EXAMPLE)))).toEqual(board)
+    expect(must(parseBoard(BOM + crlf(KB_BOARD_TEXT)))).toEqual(board)
   })
 
   test('accepts letters and digits in two-word labels, including non-ASCII', () => {
@@ -161,8 +166,7 @@ describe('parseBoard', () => {
       'workers: 0', 'workers: 6', 'workers: two', 'workers: 1.5',
       'manager_thinking: extreme', 'planner_thinking: Not set', 'worker_thinking: ', 'advisor_thinking: gpt', 'manager_thinking: High',
       'manager_model: gpt', 'planner_model: none', 'planner_model: gpt', 'worker_model: none', 'advisor_model: gpt',
-      'prefix: kb', 'prefix: ABCDEFGHIJK', 'prefix: K1',
-      'next_id: 0', 'next_id: -3', 'next_id: x',
+      'next_bug: 0', 'next_bug: -3', 'next_bug: x',
       'workers:',
     ]) {
       expect(codeOf(parseBoard(withSetting(line)))).toBe('bad-setting')
@@ -174,8 +178,7 @@ describe('parseBoard', () => {
     expect(must(parseBoard(withSetting('workers: 5'))).workers).toBe(5)
     expect(must(parseBoard(withSetting('advisor_model: none'))).advisorModel).toBe('none')
     for (const m of ['haiku', 'sonnet', 'opus', 'fable']) expect(must(parseBoard(withSetting('planner_model: ' + m))).plannerModel).toBe(m)
-    expect(must(parseBoard(withSetting('prefix: ABCDEFGHIJ'))).prefix).toBe('ABCDEFGHIJ')
-    expect(must(parseBoard(withSetting('next_id: 10000'))).nextId).toBe(10000)
+    expect(must(parseBoard(withSetting('next_bug: 10000'))).counters.BUG).toBe(10000)
   })
 
   test('thinking: low, medium, high, xhigh and max parse; none is Not set; an absent line is the role default', () => {
@@ -185,7 +188,7 @@ describe('parseBoard', () => {
       expect(must(parseBoard(withSetting('advisor_thinking: ' + level))).advisorThinking).toBe(level)
     }
     expect(must(parseBoard(withSetting('manager_thinking: none'))).managerThinking).toBe('none')
-    const none = must(parseBoard(withSetting('prefix: KB')))
+    const none = must(parseBoard(withSetting('next_bug: 3')))
     expect([none.managerThinking, none.plannerThinking, none.workerThinking, none.advisorThinking]).toEqual(['medium', 'high', 'medium', 'high'])
   })
 
@@ -201,18 +204,19 @@ describe('defaultBoardText', () => {
     expect(text).toBe(INIT_BOARD_EXAMPLE)
     expect(text.indexOf('\r')).toBe(-1)
     const b = must(parseBoard(text))
-    expect(b.nextId).toBe(1)
     expect(b.owner).toBe('John')
     expect(b.lanes).toEqual(must(parseBoard(INIT_BOARD_EXAMPLE)).lanes)
     expect(text).not.toBe(OLD_LANES_BOARD_EXAMPLE)
   })
 
-  test('holds only prefix, next_id, owner and lanes: every setting takes its default', () => {
+  test('holds only owner and lanes: every setting takes its default, the types are the default three, every counter is 1', () => {
     const text = must(defaultBoardText('John'))
     const all = text.split('\n')
     const keys = all.slice(1, all.indexOf('---', 1)).filter((l) => !l.startsWith('  - ')).map((l) => l.split(':')[0])
-    expect(keys).toEqual(['prefix', 'next_id', 'owner', 'lanes'])
+    expect(keys).toEqual(['owner', 'lanes'])
     const b = must(parseBoard(text))
+    expect(b.types).toEqual(DEFAULT_TYPES)
+    expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
     expect(b.workers).toBe(2)
     expect([b.managerModel, b.plannerModel, b.workerModel, b.advisorModel]).toEqual(['opus', 'opus', 'sonnet', 'fable'])
     expect([b.managerThinking, b.plannerThinking, b.workerThinking, b.advisorThinking]).toEqual(['medium', 'high', 'medium', 'high'])
@@ -229,13 +233,79 @@ describe('defaultBoardText', () => {
   })
 })
 
+describe('a board as format.md section 13 shows it after use', () => {
+  test('reads its own types and one counter per type; a type with no line counts from 1', () => {
+    const b = must(parseBoard(COUNTERS_BOARD_EXAMPLE))
+    expect(b.types.map((t) => t.prefix)).toEqual(['BUG', 'ENH', 'CHORE', 'DOCS'])
+    expect(b.counters).toEqual({ BUG: 13, ENH: 8, CHORE: 2, DOCS: 1 })
+    expect(b.workers).toBe(1)
+  })
+
+  test('setCounter moves one counter line and adds a missing one', () => {
+    expect(must(setCounter(COUNTERS_BOARD_EXAMPLE, 'BUG', 14))).toBe(COUNTERS_BOARD_EXAMPLE.replace('next_bug: 13', 'next_bug: 14'))
+    const added = must(setCounter(COUNTERS_BOARD_EXAMPLE, 'DOCS', 2))
+    expect(added).toBe(COUNTERS_BOARD_EXAMPLE.replace('---\n# Board notes', 'next_docs: 2\n---\n# Board notes'))
+    expect(must(parseBoard(added)).counters.DOCS).toBe(2)
+  })
+
+  test('a retype of the card example gives the retyped example: new id, updated, one Log line, branch kept', () => {
+    expect(must(retypeCardText(BUG_CARD_EXAMPLE, 'ENH-0007', NOW, 'Claude'))).toBe(RETYPED_CARD_EXAMPLE)
+    const card = must(parseCard(RETYPED_CARD_EXAMPLE, 'ENH-0007-fix-the-morning-summary-date.md'))
+    expect(card.id).toBe('ENH-0007')
+    expect(card.formerIds).toEqual(['BUG-0012'])
+    expect(card.branch).toBe('bug-12-fix-the-morning-summary-date')
+  })
+
+  test('the BUG-0012 card example parses under its file name', () => {
+    const card = must(parseCard(BUG_CARD_EXAMPLE, 'BUG-0012-fix-the-morning-summary-date.md'))
+    expect(card.id).toBe('BUG-0012')
+    expect(must(parseBoard(COUNTERS_BOARD_EXAMPLE)).types.some((t) => t.prefix === 'BUG')).toBe(true)
+  })
+})
+
+describe('a board without counters (as init writes it now)', () => {
+  test('parses to the default types with every counter at 1, and setCounter adds the type\'s line', () => {
+    const b = must(parseBoard(INIT_BOARD_EXAMPLE))
+    expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
+    const written = must(setCounter(INIT_BOARD_EXAMPLE, 'BUG', 2))
+    expect(written).toBe(INIT_BOARD_EXAMPLE.replace('\n---\n# Board notes', '\nnext_bug: 2\n---\n# Board notes'))
+    expect(must(parseBoard(written)).counters.BUG).toBe(2)
+  })
+})
+
+describe('leftover prefix and next_id lines in an older board.md', () => {
+  const OLD = lines('---', 'prefix: KB', 'next_id: 69', 'owner: John', 'lanes:', '  - Inbox (intake)', '---', '# Notes')
+
+  test('parse with no problem and are never read', () => {
+    const b = must(parseBoard(OLD))
+    expect(b).toEqual(must(parseBoard(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', '---', '# Notes'))))
+    expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
+    expect('prefix' in b).toBe(false)
+    expect('nextId' in b).toBe(false)
+  })
+
+  test('even a value the old rules refused is not a problem', () => {
+    const odd = lines('---', 'prefix: kb', 'next_id: x', 'owner: John', 'lanes:', '  - Inbox (intake)', '---')
+    expect(codeOf(parseBoard(odd))).toBe('ok')
+  })
+
+  test('are kept byte for byte when a setting or a counter is written', () => {
+    expect(must(setBoardSetting(OLD, 'workers', 3))).toBe(OLD.replace('---\n# Notes', 'workers: 3\n---\n# Notes'))
+    expect(must(setCounter(OLD, 'BUG', 4))).toBe(OLD.replace('---\n# Notes', 'next_bug: 4\n---\n# Notes'))
+  })
+
+  test('are no longer settings that can be set', () => {
+    expect(codeOf(setBoardSetting(OLD, 'prefix', 'AB'))).toBe('bad-setting')
+    expect(codeOf(setBoardSetting(OLD, 'next_id', 70))).toBe('bad-setting')
+  })
+})
+
 describe('setBoardSetting', () => {
   test('changes exactly one line', () => {
     expect(must(setBoardSetting(BOARD_EXAMPLE, 'workers', 2))).toBe(BOARD_EXAMPLE.replace('workers: 1', 'workers: 2'))
     expect(must(setBoardSetting(BOARD_EXAMPLE, 'manager_model', 'sonnet'))).toBe(
       BOARD_EXAMPLE.replace('manager_model: opus', 'manager_model: sonnet'),
     )
-    expect(must(setBoardSetting(BOARD_EXAMPLE, 'next_id', 14))).toBe(BOARD_EXAMPLE.replace('next_id: 13', 'next_id: 14'))
   })
 
   test('keeps CRLF and the BOM, whole output compared', () => {
@@ -272,7 +342,6 @@ describe('setBoardSetting', () => {
     expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'planner_model', 'none'))).toBe('bad-setting')
     expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'planner_model', 'gpt'))).toBe('bad-setting')
     expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'owner', ''))).toBe('bad-setting')
-    expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'next_id', 0))).toBe('bad-setting')
   })
 
   test('thinking lines: set replaces, adds when absent, takes the five levels and none, refuses the rest', () => {
@@ -501,6 +570,18 @@ describe('problems and readCards', () => {
     expect(p?.message).toContain('Inbox, Plan, Needs You')
   })
 
+  test('a card whose ID letters are no type on the board gets unknown-type, and still shows', () => {
+    const r = readCards(board, [{ name: 'ZZ-0001-a.md', text: cardText('ZZ-0001', 'Inbox') }])
+    expect(r.cards.map((c) => c.id)).toEqual(['ZZ-0001'])
+    expect(r.problems).toEqual([
+      {
+        file: 'ZZ-0001-a.md',
+        code: 'unknown-type',
+        message: 'ZZ-0001 has ID letters that are no type on this board. Types on this board: kb (KB), bug (BUG), enhancement (ENH), chore (CHORE).',
+      },
+    ])
+  })
+
   test('a clean folder has no problems', () => {
     expect(readCards(board, [files[0], files[1]]).problems).toEqual([])
     expect(readCards(board, []).problems).toEqual([])
@@ -600,7 +681,7 @@ describe('DECISIONS.md', () => {
 
 /** A board.md with the given extra frontmatter lines before `lanes:`. */
 function boardWith(...extra: string[]): string {
-  return lines('---', 'prefix: KB', 'next_id: 5', 'owner: John', ...extra, 'lanes:', '  - Inbox (intake)', '---', '# Notes', '', 'Free text.')
+  return lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', ...extra, 'lanes:', '  - Inbox (intake)', '---', '# Notes', '', 'Free text.')
 }
 
 describe('default_ lines in parseBoard', () => {
@@ -679,7 +760,7 @@ describe('saveDefaults', () => {
   test('a new default_ line lands before the closing ---, like a new setting', () => {
     const out = must(saveDefaults(boardWith('workers: 4', 'worker_model: haiku', 'advisor_thinking: low')))
     expect(out).toBe(
-      lines('---', 'prefix: KB', 'next_id: 5', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 4', 'default_worker_model: haiku', 'default_advisor_thinking: low', '---', '# Notes', '', 'Free text.'),
+      lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 4', 'default_worker_model: haiku', 'default_advisor_thinking: low', '---', '# Notes', '', 'Free text.'),
     )
   })
 
@@ -706,7 +787,7 @@ describe('saveDefaults', () => {
   test('removes a default_ line whose value now equals the built-in, and replaces one in place', () => {
     const text = boardWith('default_workers: 4', 'default_manager_model: haiku', 'workers: 2', 'manager_model: sonnet')
     const out = must(saveDefaults(text))
-    expect(out).toBe(lines('---', 'prefix: KB', 'next_id: 5', 'owner: John', 'default_manager_model: sonnet', 'lanes:', '  - Inbox (intake)', '---', '# Notes', '', 'Free text.'))
+    expect(out).toBe(lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', 'default_manager_model: sonnet', 'lanes:', '  - Inbox (intake)', '---', '# Notes', '', 'Free text.'))
     const b = must(parseBoard(out))
     expect(b.workers).toBe(2)
     expect(b.savedDefaults).toEqual(['default_manager_model'])
@@ -719,7 +800,7 @@ describe('saveDefaults', () => {
   test('keeps CRLF on kept and added lines, and the BOM', () => {
     const out = must(saveDefaults(BOM + crlf(boardWith('workers: 3', 'planner_model: haiku'))))
     expect(out).toBe(
-      BOM + crlf(lines('---', 'prefix: KB', 'next_id: 5', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 3', 'default_planner_model: haiku', '---', '# Notes', '', 'Free text.')),
+      BOM + crlf(lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 3', 'default_planner_model: haiku', '---', '# Notes', '', 'Free text.')),
     )
   })
 
@@ -735,10 +816,11 @@ describe('clearSavedDefaults', () => {
     expect(must(clearSavedDefaults(text))).toBe(boardWith())
   })
 
-  test('prefix, next_id, owner, lanes and the body are untouched, and every setting reads its built-in value', () => {
+  test('owner, lanes, the body and any leftover prefix and next_id lines are untouched, and every setting reads its built-in value', () => {
     const out = must(clearSavedDefaults(BOARD_EXAMPLE))
     const b = must(parseBoard(out))
-    expect([b.prefix, b.nextId, b.owner]).toEqual(['KB', 13, 'John'])
+    expect(out).toContain('prefix: KB\nnext_id: 13\n')
+    expect(b.owner).toBe('John')
     expect(b.lanes).toEqual(board.lanes)
     expect(b.workers).toBe(DEFAULTS.workers)
     expect(b.plannerThinking).toBe(DEFAULTS.roles.planner.thinking)
@@ -753,5 +835,135 @@ describe('clearSavedDefaults', () => {
 
   test('a board with none of these lines comes back unchanged', () => {
     expect(must(clearSavedDefaults(boardWith()))).toBe(boardWith())
+  })
+})
+
+// ---------------------------------------------------------------- types and counters
+
+/** A board.md with the given extra front-matter lines after owner. */
+function boardWithTypes(...extra: string[]): string {
+  return lines('---', 'owner: John', ...extra, 'lanes:', '  - Inbox (intake)', '---')
+}
+
+/** The failure of a parse: its code and line. */
+function failOf(text: string): { code: string; line?: number } {
+  const r = parseBoard(text)
+  if (r.ok) throw new Error('expected a failure')
+  return { code: r.code, line: r.line }
+}
+
+describe('parseBoard: types and counters', () => {
+  test('absent types are bug, enhancement and chore; every counter is 1', () => {
+    const b = must(parseBoard(boardWithTypes()))
+    expect(b.types).toEqual([
+      { name: 'bug', prefix: 'BUG' },
+      { name: 'enhancement', prefix: 'ENH' },
+      { name: 'chore', prefix: 'CHORE' },
+    ])
+    expect(b.types).toEqual([...DEFAULT_TYPES])
+    expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
+  })
+
+  test('a block list with explicit and derived prefixes', () => {
+    const b = must(parseBoard(boardWithTypes('types:', '  - bug (BUG)', '  - docs', '  - enhancement', '  - spike (SPK)', '  - a1b2c3d (QA)')))
+    expect(b.types.map((t) => t.name + ':' + t.prefix)).toEqual(['bug:BUG', 'docs:DOCS', 'enhancement:ENH', 'spike:SPK', 'a1b2c3d:QA'])
+  })
+
+  test('an inline list reads the same', () => {
+    const b = must(parseBoard(boardWithTypes('types: [bug (BUG), chore]')))
+    expect(b.types).toEqual([{ name: 'bug', prefix: 'BUG' }, { name: 'chore', prefix: 'CHORE' }])
+  })
+
+  test('rejections are bad-setting with the line of the item', () => {
+    // line 1 is ---, 2 owner, 3 types:, 4 first item
+    expect(failOf(boardWithTypes('types:', '  - Bug (BUG)'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - bug (BUG)', '  - 1up (UP)'))).toEqual({ code: 'bad-setting', line: 5 })
+    expect(failOf(boardWithTypes('types:', '  - bug (B)'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - bug (bug)'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - bug (TOOLONG)'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - bug (BUG)', '  - bug (BGX)'))).toEqual({ code: 'bad-setting', line: 5 })
+    expect(failOf(boardWithTypes('types:', '  - bug (BUG)', '  - defect (BUG)'))).toEqual({ code: 'bad-setting', line: 5 })
+    expect(failOf(boardWithTypes('types:', '  - ident (ID)'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - id'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - x'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - a-b'))).toEqual({ code: 'bad-setting', line: 4 })
+    expect(failOf(boardWithTypes('types:', '  - abcdefghijklmnopqrstu (ABC)'))).toEqual({ code: 'bad-setting', line: 4 })
+  })
+
+  test('a present but empty list is bad-setting', () => {
+    expect(failOf(boardWithTypes('types: []')).code).toBe('bad-setting')
+    expect(failOf(boardWithTypes('types:')).code).toBe('bad-setting')
+  })
+
+  test('counters: read per type, absent is 1, a bad value is bad-setting with its line', () => {
+    const b = must(parseBoard(boardWithTypes('next_bug: 12', 'next_chore: 3')))
+    expect(b.counters).toEqual({ BUG: 12, ENH: 1, CHORE: 3 })
+    const custom = must(parseBoard(boardWithTypes('types: [docs, spike (SPK)]', 'next_spk: 7')))
+    expect(custom.counters).toEqual({ DOCS: 1, SPK: 7 })
+    for (const bad of ['0', '-1', 'x', '1.5']) {
+      expect(failOf(boardWithTypes('next_bug: ' + bad))).toEqual({ code: 'bad-setting', line: 3 })
+    }
+  })
+
+  test('a next_ key that matches no type is ignored like any unknown key', () => {
+    const b = must(parseBoard(boardWithTypes('next_zzz: 9')))
+    expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
+  })
+})
+
+describe('setCounter', () => {
+  test('adds a missing line before the closing ---', () => {
+    expect(must(setCounter(boardWithTypes(), 'BUG', 4))).toBe(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'next_bug: 4', '---'))
+  })
+
+  test('raises an existing counter, and the same value changes nothing', () => {
+    const text = boardWithTypes('next_enh: 3')
+    expect(must(setCounter(text, 'ENH', 9))).toBe(text.replace('next_enh: 3', 'next_enh: 9'))
+    expect(must(setCounter(text, 'ENH', 3))).toBe(text)
+  })
+
+  test('refuses to lower a counter and a number below 1', () => {
+    expect(codeOf(setCounter(boardWithTypes('next_bug: 5'), 'BUG', 4))).toBe('bad-setting')
+    expect(codeOf(setCounter(boardWithTypes(), 'BUG', 0))).toBe('bad-setting')
+  })
+
+  test('refuses a prefix that is not a type on the board', () => {
+    expect(codeOf(setCounter(boardWithTypes(), 'KB', 2))).toBe('bad-setting')
+  })
+
+  test('keeps CRLF and the BOM', () => {
+    const text = BOM + crlf(boardWithTypes('next_bug: 2'))
+    expect(must(setCounter(text, 'BUG', 6))).toBe(BOM + crlf(boardWithTypes('next_bug: 6')))
+    expect(must(setCounter(BOM + crlf(boardWithTypes()), 'CHORE', 2))).toBe(
+      BOM + crlf(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'next_chore: 2', '---')),
+    )
+  })
+})
+
+describe('findType, typeOfId, unknownTypeMessage', () => {
+  const b = must(parseBoard(boardWithTypes()))
+
+  test('findType by name or prefix in any case', () => {
+    expect(findType(b, 'bug')?.prefix).toBe('BUG')
+    expect(findType(b, 'BUG')?.name).toBe('bug')
+    expect(findType(b, 'Enh')?.name).toBe('enhancement')
+    expect(findType(b, 'ENHANCEMENT')?.prefix).toBe('ENH')
+    expect(findType(b, 'chore')?.prefix).toBe('CHORE')
+    expect(findType(b, 'feature')).toBe(undefined)
+    expect(findType(b, '')).toBe(undefined)
+  })
+
+  test('typeOfId finds the type whose prefix is the ID letters', () => {
+    expect(typeOfId(b, 'BUG-0012')?.name).toBe('bug')
+    expect(typeOfId(b, 'CHORE-0001')?.name).toBe('chore')
+    expect(typeOfId(b, 'KB-0001')).toBe(undefined)
+    expect(typeOfId(b, 'bug-0001')).toBe(undefined)
+    expect(typeOfId(b, 'nonsense')).toBe(undefined)
+  })
+
+  test('unknownTypeMessage lists the type names of the board', () => {
+    expect(unknownTypeMessage(b, 'feature')).toBe('Unknown type "feature". Types on this board: bug, enhancement, chore. Nothing was changed.')
+    const c = must(parseBoard(boardWithTypes('types: [docs, spike (SPK)]')))
+    expect(unknownTypeMessage(c, 'x')).toBe('Unknown type "x". Types on this board: docs, spike. Nothing was changed.')
   })
 })

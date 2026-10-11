@@ -4,13 +4,14 @@ A guided tour of the `kanban` plugin: set up a board in a scratch project, plan 
 
 What you need (versions, git, Node.js, what Auto does): `README.md`, section "Before you start". Install the plugin first (`README.md`, section "Install"), or load it from a clone (`README.md`, section "Dev loop").
 
-Your output will differ from the examples in small ways. It shows your own name, your own dates and times (written `<date> <time>` below), your own commit hashes (`<hash>`) and whatever wording the planning agent picks for a plan. Card IDs below are `<ID>` (for example `KB-0004`) and `<n>` is the ID number without padding. Match the shape, not the exact text. Quoted messages in `backticks` that come from the skill or the pane are exact.
+Your output will differ from the examples in small ways. It shows your own name, your own dates and times (written `<date> <time>` below), your own commit hashes (`<hash>`) and whatever wording the planning agent picks for a plan. Card IDs below are `<ID>` (for example `ENH-0003`: the letters of the card's type, then its number) and `<n>` is the ID number without padding. Match the shape, not the exact text. Quoted messages in `backticks` that come from the skill or the pane are exact.
 
 ## 1. What you are looking at
 
 - Each card is one markdown file in a `kanban/` folder inside your project.
 - The lane a card sits in is one line of that file: `status:`.
-- Dragging a card in the pane edits that line. A drop on a lane Claude acts on (Plan, Auto) also starts a Claude turn. Saying "move KB-1 to Auto" in chat does the same.
+- Dragging a card in the pane edits that line. A drop on a lane Claude acts on (Plan, Auto) also starts a Claude turn. Saying "move enhancement 1 to Auto" in chat does the same.
+- Every card has one type, shown in its ID: `BUG-0012` is a bug, `ENH-0007` an enhancement, `CHORE-0001` a chore. Section 3 shows the numbers and section 7 how to retype.
 - Claude, in your session, is the manager. It reads the cards, sends planning and work to agents, reviews what they return and commits. It never writes a plan or project code itself.
 - Workers are subagents the manager starts. They edit the code and run the checks.
 
@@ -63,35 +64,28 @@ git commit --allow-empty -m "Initial commit"
 
 If the commit says it does not know who you are, run `git config user.name "<your git name>"` and `git config user.email "<you@example.com>"` in that folder, then repeat the commit.
 
-Card numbers: on this hand-made repo your first card is `KB-0001`. With the demo, the three samples take `KB-0001` to `KB-0003`, so a card you add yourself is `KB-0004`.
+Card numbers: each type counts from 1 on its own. On this hand-made repo your first bug is `BUG-0001` and your first enhancement is `ENH-0001`. The demo has two enhancements and a chore, `ENH-0001`, `ENH-0002` and `CHORE-0001`, so a bug you add is `BUG-0001`, an enhancement `ENH-0003` and a chore `CHORE-0002`.
 
 Now start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
-- Type `/`. The menu lists `kanban:kanban`.
-- Type `/board`. With the demo, the pane opens on the board. On the hand-made repo it says `There is no kanban/board.md in this project.` with a `Set up a board` button. Once a project has a board, a `Board` chip also shows above the chat box while the pane is closed; pressing it opens the pane the same way.
+- Type `/`. The menu lists `kanban:kanban` and `kanban:setup`.
+- Type `/board`. With the demo, the pane opens on the board. On the hand-made repo it says `This project has no board yet.` with a `Set up a board` button. Once a project has a board, a `Board` chip also shows above the chat box while the pane is closed; pressing it opens the pane the same way.
 
-If `kanban:kanban` is missing, quit the desktop app and reopen it, then start a new session. The skill also starts on its own when you say "set up the kanban board", "add a card", "move KB-1 to Auto", "what's next", "list the board" or "decide".
+If `kanban:kanban` or `kanban:setup` is missing, quit the desktop app and reopen it, then start a new session. The skill also starts on its own when you say "set up the kanban board", "add a bug", "move enhancement 1 to Auto", "what's next", "list the board" or "decide".
 
 ## 4. Set up the board
 
-Skip to the pane tour below if you made the demo: its board is already set up. Saying `set up the kanban board` there only answers `Board already set up (3 cards)`.
+Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up (3 cards)`.
 
-On the hand-made repo, type: `set up the kanban board`. Claude takes the first word of your git name as the owner and asks:
+On the hand-made repo, type: `/kanban:setup`. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
 ```
-Whose board is this? I'll use <your git name> unless you say otherwise
-```
-
-Type your first name. Claude replies:
-```
-Board ready for <you>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded.
+Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong.
 ```
 
-(The `Set up a board` button in the pane sends the same request.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Say it again and Claude replies `Board already set up (0 cards)`.
+If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up (0 cards)`.
 
 `kanban/board.md` as the setup writes it:
 ```
 ---
-prefix: KB
-next_id: 1
 owner: <you>
 lanes:
   - Needs You (needs-you)
@@ -107,13 +101,21 @@ lanes:
 Free text.
 ```
 
-`next_id` is the number the next card gets. `lanes:` is the board order; the word in brackets is the lane's role. A setting you change in the pane adds one line above `lanes:`.
+`lanes:` is the board order; the word in brackets is the lane's role. A setting you change in the pane adds one line above `lanes:`. The file has no `types:` list yet, so the board has the three default types: bug (`BUG`), enhancement (`ENH`) and chore (`CHORE`). Adding a card writes a counter line for its type, the type's letters in lowercase, such as `next_bug: 2` after the first bug; no line means the type's next number is 1. To add a type of your own, add a list above `lanes:`, with all the types you want, since the list replaces the defaults:
+```
+types:
+  - bug (BUG)
+  - enhancement (ENH)
+  - chore (CHORE)
+  - docs (DOCS)
+```
+The demo board shows the counters: `next_enh: 3` and `next_chore: 2`, because it already holds `ENH-0001`, `ENH-0002` and `CHORE-0001`.
 
 The pane shows the header (`Claude is idle`, the `Board` and `Settings` tabs, when it last changed), the toolbar and the lanes (picture: `docs/design/real-pane-board-with-menu.png`):
 
 ![The board pane with a card's menu open](docs/design/real-pane-board-with-menu.png)
 
-- `New card`: opens a `What needs doing?` field with a `Lane` list (pick where the card goes), `Add` and `Cancel`. Enter also adds. The pane writes the card file itself. If the lane is one Claude acts on (Plan or Auto), a Claude turn starts for it; in Pending nothing runs.
+- `New card`: opens a `What needs doing?` field with a `Type` list (the board's types; the card gets that type's letters and that type's next number) and a `Lane` list (pick where the card goes), `Add` and `Cancel`. Enter also adds. The pane writes the card file itself. If the lane is one Claude acts on (Plan or Auto), a Claude turn starts for it; in Pending nothing runs.
 - `Find a card`: type to show only the cards that match; `Clear` empties it. If nothing matches the pane says `No card matches "zzzz"` with another `Clear` (picture: `docs/design/real-pane-find-none.png`). Enter opens the first match.
 - `Sort`: `Your order`, `Newest first`, `Oldest first`, `Recently changed`, `Title A to Z`, `Label A to Z`, `Needs you first`. A sort changes no card file. You can only drop a card between two others while it is `Your order`.
 - `Collapse all` / `Expand all`: folds or opens every lane (picture: `docs/design/real-pane-all-folded.png`). A line like `3 cards` counts what is shown.
@@ -134,14 +136,14 @@ Each Thinking list marks the level the app recommends for the role's model; chan
 
 **Before the first drag to Auto, know what it does.** Auto is the go-ahead for Claude to make a branch, edit your files, commit each step and merge the branch into your default branch, with subagents on the models in Settings (this uses your Claude usage). That is why this tour uses a scratch project. The full list is `README.md`, section "What Auto does on its own". Plan is gentler: it only writes a plan into the card and waits.
 
-**Pick a card.** With the demo, use one of the three sample cards in Pending (the first, `KB-0001`, is the simplest). On the hand-made repo, or if you would rather use your own, add one. In chat, type:
+**Pick a card.** With the demo, use one of the three sample cards in Pending (the first, `ENH-0001`, is the simplest). On the hand-made repo, or if you would rather use your own, add one. In chat, type:
 ```
-add a card: Hello world app. A tiny Python program, hello.py, that prints Hello, world and a test that checks it. Keep it to one file plus the test.
+add an enhancement: Hello world app. A tiny Python program, hello.py, that prints Hello, world and a test that checks it. Keep it to one file plus the test.
 ```
 
 Claude replies `<ID> added to Pending: Hello world app`. Or press `New card` in the pane, type `Hello world app` in `What needs doing?` and press `Add`: the card shows in Pending at once. The pane way leaves the body empty for a short title; text longer than 120 characters becomes the body, with the title cut at a word and ended with `…`, and the toast says the full text is in the card. The file is `kanban/<ID>-hello-world-app.md` with `status: Pending` and one Log line: `<date> <time> <you>: created in Pending`.
 
-**Plan it.** Press on the card in the pane, move to the Plan lane, let go (while you drag, the lane under the pointer says what the drop will do, such as `→ Drop and Claude writes a plan.`). Or type `move <ID> to Plan` (for example `move KB-1 to Plan`), or open the card and pick Plan in its `Lane` list. The card jumps to Plan. Your chat gets a message that looks like you typed it:
+**Plan it.** Press on the card in the pane, move to the Plan lane, let go (while you drag, the lane under the pointer says what the drop will do, such as `→ Drop and Claude writes a plan.`). Or type `move <ID> to Plan` (for example `move enhancement 1 to Plan`), or open the card and pick Plan in its `Lane` list. The card jumps to Plan. Your chat gets a message that looks like you typed it:
 ```
 Kanban: <you> moved <ID> "<title>" from Pending to Plan. Do the plan lane action from the kanban skill.
 ```
@@ -161,7 +163,7 @@ A planning agent writes the plan, Claude reviews it, puts it in the card and rep
 A plan can end with a "To settle when you approve" list: questions with the answer Claude will assume, in brackets. If one is wrong, say so with `comment on <ID>: ...` before you approve.
 
 **Run it.** Not happy with the plan? Type `comment on <ID>: ...`, then drag the card back to Plan. Happy? Drag the card from Needs You to Auto. Claude does the Auto flow:
-1. Clears `PLAN READY`, makes the branch `kb-<n>-<slug>` from your default branch (`main` if there is no `origin/HEAD`), writes it in `branch:`.
+1. Clears `PLAN READY`, makes the branch `<letters>-<n>-<slug>` (for the hello world enhancement, `enh-1-hello-world-app`) from your default branch (`main` if there is no `origin/HEAD`), writes it in `branch:`.
 2. Starts one worker per plan step. The card shows `●` and the status line says `1 of 1 worker running`.
 3. Reviews each worker's diff, then commits that step on the branch.
 4. Checks the changed files for a gate (section 6). An ordinary source file and its test hit none.
@@ -176,14 +178,14 @@ The card's Log when it finished has this shape:
 - <date> <time> <you>: moved Pending -> Plan
 - <date> <time> Claude: moved Plan -> Needs You
 - <date> <time> <you>: moved Needs You -> Auto
-- <date> <time> Claude: started: kb-<n>-<slug>
+- <date> <time> Claude: started: <letters>-<n>-<slug>
 - <date> <time> Claude: step 1 done: <what>
 - <date> <time> Claude: step 2 done: <what>
-- <date> <time> Claude: merged kb-<n>-<slug>
+- <date> <time> Claude: merged <letters>-<n>-<slug>
 - <date> <time> Claude: moved Auto -> Done
 ```
 
-A worker may add a free comment between these, for example when a check tool is missing and it used another. The card file has `status: Done` and `branch: kb-<n>-<slug>`. Check the work itself: for the hello world card, `python hello.py` in the project folder prints `Hello, world`. The git history (`git log --oneline --graph`) has this shape, with your hashes and your default branch name:
+A worker may add a free comment between these, for example when a check tool is missing and it used another. The card file has `status: Done` and `branch: <letters>-<n>-<slug>`. Check the work itself: for the hello world card, `python hello.py` in the project folder prints `Hello, world`. The git history (`git log --oneline --graph`) has this shape, with your hashes and your default branch name:
 ```
 * <hash> <ID> board: done
 *   <hash> <ID> <card title>
@@ -205,7 +207,7 @@ Drag it from Pending straight to Auto. Auto writes its own plan first (a card wi
 ```
 - <date> <time> <you>: created in Pending
 - <date> <time> <you>: moved Pending -> Auto
-- <date> <time> Claude: started: kb-<n>-<slug>
+- <date> <time> Claude: started: <letters>-<n>-<slug>
 - <date> <time> Claude: step 1 done: <what>
 - <date> <time> Claude: step 2 done: <what>
 - <date> <time> Claude: GATE: merge touches <manifest file>
@@ -216,7 +218,7 @@ If your card did not gate, its plan did not change a manifest file; read the Log
 
 Other gates: auth, login, secret or deploy paths, `.env*`, workflows, a `Dockerfile`, more than 15 files, a deploy or a destructive step (full list: "Gates" in `skills/kanban/references/lanes.md`).
 
-**What your drag does.** Drag the card from Needs You to Auto. That approves the one held action and nothing else. Claude Logs `started: kb-<n>-<slug>`, then `approved: GATE: merge touches <manifest file>`. It clears the flag and merges the branch into your default branch. It Logs `merged kb-<n>-<slug>`, moves the card to Done and commits the board as `<ID> board: done`. Dropping a card into Needs You yourself does not work: that lane says `Claude's lane. You can't drop here.`
+**What your drag does.** Drag the card from Needs You to Auto. That approves the one held action and nothing else. Claude Logs `started: <letters>-<n>-<slug>`, then `approved: GATE: merge touches <manifest file>`. It clears the flag and merges the branch into your default branch. It Logs `merged <letters>-<n>-<slug>`, moves the card to Done and commits the board as `<ID> board: done`. Dropping a card into Needs You yourself does not work: that lane says `Claude's lane. You can't drop here.`
 
 Until you approve, the branch has its commits and is not merged: on your default branch the project is unchanged, and `git status` shows one change, the card file, not committed. That is expected.
 
@@ -248,8 +250,8 @@ Untriaged
   <ID> <title>
 ```
 
-- **Move.** `move KB-1 to Auto`. Claude replies `KB-0001 moved Pending -> Auto.`, then runs the lane's action. It is the same go-ahead as a drag. `Needs You` is refused: `"Needs You" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.` An unknown lane gets `Unknown lane "Nowhere". Lanes on this board: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. Nothing was changed.`
-- **Comment.** `comment on KB-1: waiting on Sam`. Reply `Comment added to KB-0001.` It adds the Log line `<you>: waiting on Sam`. The lane does not change.
+- **Move.** `move enhancement 1 to Auto`. Claude replies `ENH-0001 moved Pending -> Auto.`, then runs the lane's action. It is the same go-ahead as a drag. `Needs You` is refused: `"Needs You" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.` An unknown lane gets `Unknown lane "Nowhere". Lanes on this board: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. Nothing was changed.`
+- **Comment.** `comment on enhancement 1: waiting on Sam`. Reply `Comment added to ENH-0001.` It adds the Log line `<you>: waiting on Sam`. The lane does not change.
 - **Decide.** `decide: Python for the sample app, because it needs no build step`. Reply `D1 recorded: Python for the sample app`. The line in `DECISIONS.md`:
 ```
 - **D1 (<date>) Python for the sample app:** <the decision>. Reason: it needs no build step.
@@ -257,9 +259,13 @@ Untriaged
 
 If you give no reason, Claude asks once. To change a decision, say so; a new line ends `Supersedes D1.` and the old line stays.
 
-- **Backlog.** `move KB-3 to Backlog`. Claude replies `KB-0003 moved Pending -> Backlog.` and does nothing else. The card waits there, and `what's next` does not list it.
-- **Pausing.** `move KB-3 to Pending` (or Backlog) while Auto is running it. Claude stops at the next safe point, commits no work in progress, Logs `stopped at step <n>`, keeps the flag and branch, and commits the board as `KB-0003 board: stopped`.
-- **Discarded.** `move KB-3 to Discarded`. Claude stops, Logs `scrapped at step <n>; branch <branch>, PR <pr or none> left for you to close`, and replies with the branch and PR for you to delete. It deletes nothing.
+- **Add a card of a type, or from another card.** `add a bug: the footer overlaps the text` makes the next bug, `BUG-0001` on a board with none, and replies `BUG-0001 added to Pending: <title>`. If you name no type Claude asks once `Bug, enhancement or chore?`. `add an enhancement from bug 1: let the footer collapse` makes `ENH-0003` on the demo board and adds the Log line `spawned from BUG-0001` to it and `spawned ENH-0003: <title>` to `BUG-0001`. Neither card becomes the other's parent.
+- **Retype.** `retype bug 1 as enhancement`. The card takes the next enhancement number, the file is renamed (`BUG-0001-<slug>.md` becomes `ENH-0004-<slug>.md`, same slug), and Claude replies `BUG-0001 is now ENH-0004.` The Log gets `retyped from BUG-0001 to ENH-0004`. The card's `branch:`, its pull request and the mentions of `BUG-0001` in other cards keep the old ID, and a child card's `parent:` is changed to the new ID. Claude retypes only when you ask. A card in Auto, or one an agent is on, is refused: `BUG-0001 is being worked. Move it out of Auto or wait, then retype. Nothing was changed.` A type the board does not have is refused: `Unknown type "epic". Types on this board: bug, enhancement, chore. Nothing was changed.` In the pane, use the `Type` list of the open card (section 8); it asks Claude to do this.
+- **An old ID is followed.** After the retype, `comment on bug 1: still waiting` reaches `ENH-0004` and replies `Comment added to ENH-0004 (was BUG-0001).` `BUG-0001` is never handed out again.
+- **A bare number.** `move 1 to Backlog` works only when one card has the number 1. With `BUG-0001` and `ENH-0001` on the board Claude replies `More than one card is numbered 1: BUG-0001, ENH-0001. Say which, for example "bug 1". Nothing was changed.` and changes nothing.
+- **Backlog.** `move enhancement 2 to Backlog`. Claude replies `ENH-0002 moved Pending -> Backlog.` and does nothing else. The card waits there, and `what's next` does not list it.
+- **Pausing.** `move enhancement 2 to Pending` (or Backlog) while Auto is running it. Claude stops at the next safe point, commits no work in progress, Logs `stopped at step <n>`, keeps the flag and branch, and commits the board as `ENH-0002 board: stopped`.
+- **Discarded.** `move enhancement 2 to Discarded`. Claude stops, Logs `scrapped at step <n>; branch <branch>, PR <pr or none> left for you to close`, and replies with the branch and PR for you to delete. It deletes nothing.
 
 **Ask in chat.** With the pane open, the chat is the board's manager. Type a request that changes the project:
 ```
@@ -275,7 +281,7 @@ Press a card (or choose `Open card` in the menu under its `⋯`) and the pane sh
 - Top row: `◂ Board` goes back to the lanes. `◂ Prev`, a count like `4 of 32`, and `Next ▸` step through the cards in board order.
 - The title, with `Rename` (opens a `Card title` field with `Save` and `Cancel`) and `Copy ID` (puts the ID on the clipboard and shows `Copied <ID>.`).
 - A status box when Claude is on the card: `Working`, the step, the bar of blocks and `5 of 7 steps done`, the last Log line, the branch and pull request.
-- `Lane`, `Model` and `Thinking`. `Lane` moves the card, with the same effect as a drag. `Model` and `Thinking` set a model and thinking level for this card alone; they replace the Planner and Worker settings for that card and nothing else. `Auto` means the Settings values apply.
+- `Type`, `Lane`, `Model` and `Thinking`. `Type` shows the card's type (`No type` for a card whose ID letters the board does not list). Picking another type writes nothing: the pane asks `Retype BUG-0012 as enhancement? Its ID will change.` with `Retype` and `Cancel`, and `Retype` asks Claude, which renames the card (section 7). The header then reads `ENH-0007 (was BUG-0012)`. `Lane` moves the card, with the same effect as a drag. `Model` and `Thinking` set a model and thinking level for this card alone; they replace the Planner and Worker settings for that card and nothing else. `Auto` means the Settings values apply.
 - `Plan`: one line per step, marked done, current or to do. `Show details` draws every step in full; `Hide details` puts it back.
 - `Description`, then `Log`: a `Write a comment for Claude` field with a `Comment` button, and the Log lines, newest first.
 - `Delete card…` at the bottom asks `Delete <ID>? This removes the card and its log.` with `Delete it` and `Keep it`.
@@ -318,6 +324,7 @@ tests/            what `claude plugin test` runs
 ```
 
 Change the board by editing `kanban/board.md` in any editor, or use the Settings tab. The full rules are in `skills/kanban/references/format.md`.
+- Types: `types:` lists them as `name (LETTERS)`, and each has a counter line `next_<letters in lowercase>`. Do not edit a counter down or change a card's ID letters by hand; ask Claude to retype the card.
 - Settings: `workers` is 1 to 5. Models are `haiku`, `sonnet`, `opus`, `fable`; `advisor_model` can also be `none`. `planner_model` is never `none`.
 - Add a lane: a new line under `lanes:` as `Label (role)`. A label is one or two words, letters and digits only. The roles are `intake`, `plan`, `needs-you`, `auto`, `backlog`, `done`, `scrapped` (an older board may also have `manual`, `parked` or `gated`; see `skills/kanban/references/lanes.md`). Behaviour follows the role, not the label.
 - Rename a lane: ask Claude. Do not change a label by hand, or the cards' `status:` lines no longer match. Claude edits every card in that lane.

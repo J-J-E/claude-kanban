@@ -10,8 +10,9 @@ import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, FsEntry, Register, RenderSurface, Timer, UiMessageResult, UiOpenResult } from 'claude-code'
 
 import type { KanbanCard, KanbanFacts, KanbanLane, KanbanLanesView, KanbanQueued, KanbanSnapshot, KanbanWorking } from '../types'
-import { clearSavedDefaults, findLane, groupByLane, moveCard, parseBoard, readCards, saveDefaults, setBoardSetting } from './lib/board.ts'
+import { clearSavedDefaults, DEFAULT_TYPES, findLane, findType, groupByLane, moveCard, parseBoard, readCards, saveDefaults, setBoardSetting, setCounter, typeOfId } from './lib/board.ts'
 import type { Board } from './lib/board.ts'
+import { allocateId, lineage } from './lib/ids.ts'
 import {
   appendLog,
   cardFileName,
@@ -22,7 +23,6 @@ import {
   ID_PATTERN,
   isCardFileName,
   newCardText,
-  nextId,
   nextOrder,
   orderBetween,
   parseCard,
@@ -98,8 +98,8 @@ const MAX_VIEW_LANES = 64
 const MAX_LANE_NAME = 100
 
 const SETUP_PROMPT = 'Kanban: set up a board here with the kanban skill.'
-/** The prompts about one card: a move, a card created in a lane that has an action, and a delete. */
-const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete) ([A-Z]{1,10}-\d{4,}) "/
+/** The prompts about one card: a move, a card created in a lane that has an action, a delete, and a retype. */
+const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete|asked to retype) ([A-Z]{1,10}-\d{4,}) "/
 const KANBAN_FILE = /(^|\/)kanban\/([^/]+\.md)$/
 const WORKING_ID = /^([A-Z]{1,10}-\d{4,})/
 
@@ -128,6 +128,8 @@ const minuteA = atom({ plugin: 'kanban', key: 'minute' } as const, 0)
 const showLogA = atom({ plugin: 'kanban', key: 'showLog' } as const, false)
 const showDetailsA = atom({ plugin: 'kanban', key: 'showDetails' } as const, false)
 const confirmDeleteA = atom({ plugin: 'kanban', key: 'confirmDelete' } as const, false)
+/** The type name picked in the open card's Type list and not yet asked for ('' = none): the question row shows while it differs from the card's own type. */
+const retypePickA = atom({ plugin: 'kanban', key: 'retypePick' } as const, '')
 const renamingA = atom({ plugin: 'kanban', key: 'renaming' } as const, { isOpen: false, title: '' })
 const confirmRestoreA = atom({ plugin: 'kanban', key: 'confirmRestore' } as const, false)
 /** Whether `Restore original defaults` is asking its question in place. */
@@ -136,7 +138,7 @@ const lanesViewA = atom({ plugin: 'kanban', key: 'lanesView' } as const, { fold:
 /** How many times the Settings tab was chosen: it is added to the view's stamp the Client is handed, so the Client drops what is open on it (the small card menu) even though its saved state outlives a remount. */
 const tabChangesA = atom({ plugin: 'kanban', key: 'tabChanges' } as const, 0)
 const findA = atom({ plugin: 'kanban', key: 'find' } as const, '')
-const addA = atom({ plugin: 'kanban', key: 'add' } as const, { isOpen: false, title: '', lane: '' })
+const addA = atom({ plugin: 'kanban', key: 'add' } as const, { isOpen: false, title: '', lane: '', type: '' })
 const paneShownA = atom({ plugin: 'kanban', key: 'paneShown' } as const, null)
 
 /** The board.md key of a Select on the Settings tab: `workers`, or a role's `..._model` or `..._thinking` line. */
@@ -227,6 +229,11 @@ function deletePrompt(owner: string, id: string, title: string): string {
   return `Kanban: ${cleanText(owner, 40)} asked to delete ${id} "${cleanText(title, TITLE_MAX)}". Delete the card with the kanban skill.`
 }
 
+/** The prompt that asks Claude to retype a card; the pane never renames a file itself. */
+function retypePrompt(owner: string, id: string, title: string, type: string): string {
+  return `Kanban: ${cleanText(owner, 40)} asked to retype ${id} "${cleanText(title, TITLE_MAX)}" as ${cleanText(type, 20)}. Retype the card with the kanban skill.`
+}
+
 /** What Claude does when it has a turn running: it starts on the card when that turn is over (spec 14.4 and 11). */
 const AFTER_TURN = ' Claude will start when it finishes what it is doing.'
 
@@ -294,7 +301,6 @@ function isIdOrNull(value: unknown): value is string | null {
 
 const NO_SETTINGS = {
   owner: '',
-  prefix: 'KB',
   workers: DEFAULTS.workers,
   managerModel: DEFAULTS.roles.manager.model,
   plannerModel: DEFAULTS.roles.planner.model,
@@ -318,11 +324,16 @@ function coreOf(s: KanbanSnapshot): string {
   return JSON.stringify({ ...s, rev: 0, changedAt: 0 })
 }
 
+/** The board's ticket types; a snapshot saved before types has none: the library's defaults. */
+function typesOf(s: KanbanSnapshot['settings']): { name: string; prefix: string }[] {
+  return (s.types ?? DEFAULT_TYPES).map((t) => ({ name: t.name, prefix: t.prefix }))
+}
+
 function boardOf(snap: KanbanSnapshot): Board {
   const s = snap.settings
   return {
-    prefix: s.prefix,
-    nextId: 1,
+    types: typesOf(s),
+    counters: {},
     owner: s.owner,
     workers: s.workers,
     managerModel: s.managerModel,
@@ -353,6 +364,8 @@ function toCard(c: KanbanCard): Card {
     thinking: c.thinking ?? '',
     title: c.title,
     log: [],
+    formerIds: c.formerIds ?? [],
+    createdAt: c.createdAt ?? '',
     fileName: c.file,
   }
 }
@@ -440,9 +453,11 @@ function settingsValues(s: KanbanSnapshot['settings']): SettingsValues {
   }
 }
 
-/** The card ID when the snapshot still has that card, else null. */
+/** The card ID when the snapshot still has that card, else the ID an old (retyped) one now has, else null. */
 function cardIdIn(snap: KanbanSnapshot, id: string | null): string | null {
-  return id !== null && snap.cards.some((c) => c.id === id) ? id : null
+  if (id === null) return null
+  if (snap.cards.some((c) => c.id === id)) return id
+  return lineage(snap.cards.map((c) => ({ id: c.id, formerIds: c.formerIds ?? [] }))).get(id) ?? null
 }
 
 /** The lane named by a card's status line (usually its label), compared as the library does. */
@@ -604,11 +619,12 @@ function laneOrder<T extends { id: string; order: number; updated: string }>(
  */
 function shownIds(snap: KanbanSnapshot, view: KanbanLanesView, find: string): string[] {
   const words = findWords(find)
-  const groups = groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes
+  const board = boardOf(snap)
+  const groups = groupByLane(board, snap.cards.map(toCard)).lanes
   const sort = boardSort(view)
   const ids: string[] = []
   for (const g of groups) {
-    const kept = words.length > 0 ? g.cards.filter((c) => matchesFind(c, words)) : g.cards
+    const kept = words.length > 0 ? g.cards.filter((c) => matchesFind(c, words, board.types)) : g.cards
     for (const c of laneOrder({ lane: g.lane, cards: kept }, sort)) ids.push(c.id)
   }
   return ids
@@ -633,8 +649,9 @@ function boardProps(
 ): ClientProps {
   const words = findWords(find)
   const isFiltered = words.length > 0
-  const groups = groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes.map((g) =>
-    isFiltered ? { ...g, cards: g.cards.filter((c) => matchesFind(c, words)) } : g,
+  const board = boardOf(snap)
+  const groups = groupByLane(board, snap.cards.map(toCard)).lanes.map((g) =>
+    isFiltered ? { ...g, cards: g.cards.filter((c) => matchesFind(c, words, board.types)) } : g,
   )
   const isBusy = new Set(working.map((w) => w.id))
   const isQueued = new Set(queued.map((q) => q.id))
@@ -642,6 +659,11 @@ function boardProps(
   const factsOf = new Map(snap.cards.map((c) => [c.id, c.facts] as const))
   const roleOf = new Map<string, string>()
   for (const g of groups) for (const c of g.cards) roleOf.set(c.id, g.lane.role)
+  // A child listed under an ID its card has since left (a retype) is still found, through the card's former IDs.
+  for (const [old, now] of lineage(snap.cards.map((c) => ({ id: c.id, formerIds: c.formerIds ?? [] })))) {
+    const role = roleOf.get(now)
+    if (!roleOf.has(old) && role !== undefined) roleOf.set(old, role)
+  }
   // Claude is in a turn when the running turn is about a card, or any worker is running (a worker lives inside a turn).
   const isClaudeBusy = turnCard !== null || isInTurn || working.length > 0
   const shared = boardSort(view)
@@ -735,10 +757,12 @@ type Ctx = {
   seen: Map<string, string>
   /** A status change seen once with no matching Log line; it is logged only when the next refresh still sees it (Claude writes `status` and its Log line in two edits). */
   pendingMoves: Map<string, { from: string; to: string }>
+  /** Whether the session has a person at the prompt (set at session start); a `-p` run or the SDK never opens the pane. */
+  isInteractive: boolean
 }
 
 function newCtx(): Ctx {
-  return { busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isTicking: false, skip: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
+  return { isInteractive: false, busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isTicking: false, skip: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
 }
 
 // ---------------------------------------------------------------- state helpers
@@ -861,6 +885,9 @@ function buildSnapshot(
     facts: compactFacts(ctx.cache.get(c.fileName ?? '')?.text ?? ''),
     model: c.model,
     thinking: c.thinking,
+    ...(typeOfId(board, c.id) === undefined ? {} : { type: typeOfId(board, c.id)?.name }),
+    formerIds: c.formerIds,
+    createdAt: c.createdAt,
   }))
   return {
     hasBoard: true,
@@ -868,7 +895,7 @@ function buildSnapshot(
     lanes: board.lanes.map((l) => ({ label: l.label, role: l.role, isSide: l.isSide, isClaudeOnly: l.isClaudeOnly })),
     settings: {
       owner: board.owner,
-      prefix: board.prefix,
+      types: board.types.map((t) => ({ name: t.name, prefix: t.prefix })),
       workers: board.workers,
       managerModel: board.managerModel,
       plannerModel: board.plannerModel,
@@ -898,11 +925,12 @@ async function loadWorking($: EngineInterface): Promise<void> {
   } catch {
     return
   }
+  const snap = await read($, snapshotA)
   const list: KanbanWorking[] = []
   for (const a of agents) {
     if (a.status !== 'running' && a.status !== 'pending') continue
     const m = WORKING_ID.exec(a.description)
-    if (m !== null && m[1] !== undefined) list.push({ id: m[1], description: String(a.description).slice(0, FACT_TEXT_MAX) })
+    if (m !== null && m[1] !== undefined) list.push({ id: followedId(snap, m[1]), description: String(a.description).slice(0, FACT_TEXT_MAX) })
   }
   list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.description < b.description ? -1 : a.description > b.description ? 1 : 0))
   // A kept list that differs from the fresh one is replaced.
@@ -910,21 +938,47 @@ async function loadWorking($: EngineInterface): Promise<void> {
   if (JSON.stringify(cur) !== JSON.stringify(list)) await update($, workingA, () => list)
 }
 
-/** Resets what belongs to the card shown: the comment typed, the whole log, the delete question, the Rename field. */
+/** Resets what belongs to the card shown: the comment typed, the whole log, the delete question, the type picked, the Rename field. */
 async function resetCardView($: EngineInterface): Promise<void> {
   await update($, commentA, () => '')
   await update($, showLogA, () => false)
   await update($, showDetailsA, () => false)
   await update($, confirmDeleteA, () => false)
+  await update($, retypePickA, () => '')
   await update($, renamingA, () => ({ isOpen: false, title: '' }))
 }
 
-/** Closes the card view (and what it keeps) once its card is gone or unreadable. */
+/**
+ * A card ID the pane holds across refreshes (the open card, the card the turn is about, a queued prompt's card) that was retyped
+ * follows the card to its new ID (lineage of the fresh cards). An ID with no card and no lineage is returned unchanged.
+ */
+function followedId(snap: KanbanSnapshot | null, id: string): string {
+  return snap === null ? id : (cardIdIn(snap, id) ?? id)
+}
+
+/** Moves the held IDs of a retyped card (the turn's card and the queued prompts) to its new ID. Runs on every refresh. */
+async function followRetypes($: EngineInterface): Promise<void> {
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard) return
+  const turn = await read($, turnCardA)
+  if (turn !== null && followedId(snap, turn) !== turn) await update($, turnCardA, () => followedId(snap, turn))
+  const queued = await read($, queuedA)
+  if (queued.some((q) => followedId(snap, q.id) !== q.id)) await update($, queuedA, (list) => list.map((q) => ({ ...q, id: followedId(snap, q.id) })))
+}
+
+/** Closes the card view (and what it keeps) once its card is gone or unreadable; a retyped card stays open under its new ID. */
 async function dropStaleSelection($: EngineInterface): Promise<void> {
   const selected = await read($, selectedA)
   if (selected === null) return
   const snap = await read($, snapshotA)
-  if (snap !== null && snap.cards.some((c) => c.id === selected)) return
+  const now = snap === null ? null : cardIdIn(snap, selected)
+  if (now === selected) return
+  if (now !== null) {
+    await update($, selectedA, () => now)
+    // The card has a new ID: a type picked for the old one no longer asks anything.
+    await update($, retypePickA, () => '')
+    return
+  }
   await update($, selectedA, () => null)
   await resetCardView($)
 }
@@ -962,6 +1016,10 @@ async function openCardOf(
   const isWorking = working.some((w) => w.id === card.id)
   const childLanes: { [id: string]: string } = {}
   for (const c of snap.cards) childLanes[c.id] = c.status
+  // A child listed under an ID its card has since left (a retype) is still found, through the card's former IDs.
+  for (const [old, now] of lineage(snap.cards.map((c) => ({ id: c.id, formerIds: c.formerIds ?? [] })))) {
+    if (childLanes[old] === undefined && childLanes[now] !== undefined) childLanes[old] = childLanes[now]
+  }
   const built = cardView({
     text,
     fileName: card.file,
@@ -974,6 +1032,7 @@ async function openCardOf(
     agent: agentOf(working, card.id),
     now: stampOf(await $.clock.now()),
     isLogOpen,
+    types: typesOf(snap.settings),
   })
   if (!built.ok) return null
   return { model: built.value, description: cardSections(text).description }
@@ -1062,6 +1121,7 @@ function refresh($: EngineInterface, ctx: Ctx): Promise<void> {
       await load($, ctx)
       await logOutsideMoves($, ctx)
       await loadWorking($)
+      await followRetypes($)
       await dropStaleSelection($)
     })
     .catch(async (err: unknown) => {
@@ -1485,7 +1545,7 @@ async function fileHoldingId($: EngineInterface, id: string, except: string): Pr
  * lane that has an action Claude is then asked to run it, with a `created` prompt; the intake lane sends nothing.
  * Says why in a toast and writes nothing when it refuses. Resolves to whether a card was made.
  */
-async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTitle: string): Promise<boolean> {
+async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTitle: string, typeName: string): Promise<boolean> {
   const refuse = async (text: string): Promise<boolean> => {
     $.ui.toast(text)
     return false
@@ -1494,12 +1554,12 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
   if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was added.`)
   const { title, body, isCut } = titleAndBody(rawTitle)
   if (title === '') return refuse('Type a card title first.')
-  // board.md is rewritten with the next ID, so two adds (or an add and a setting) take turns.
+  // board.md is rewritten with the type's next number, so two adds (or an add and a setting) take turns.
   if (ctx.busy.has('board.md')) return refuse('board.md is being edited by Claude; try again in a moment.')
 
   ctx.busy.add('board.md')
   try {
-    // Reserve first (KB-0059): board.md gets next_id past the number BEFORE the card file is written, so a second writer
+    // Reserve first (KB-0059): board.md gets the type's counter (`next_bug`) past the number BEFORE the card file is written, so a second writer
     // that reads the board afterwards takes the next number. If board.md moved between the read and the write, read it again
     // and compute again rather than overwrite someone else's change.
     for (let attempt = 1; ; attempt++) {
@@ -1513,12 +1573,15 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
       if (lane.isClaudeOnly) return await refuse(`${lane.label} is Claude's lane. Nothing was added.`)
       if (CREATABLE_ROLES.indexOf(lane.role) === -1) return await refuse(`New cards can't be added to ${lane.label}.`)
 
-      const made = nextId(board.prefix, board.nextId, await cardFileNames($))
+      const type = findType(board, typeName)
+      if (type === undefined) return await refuse(`Unknown type "${cleanText(typeName, 40)}". Nothing was added.`)
+      const formerIds = snap.cards.flatMap((c) => c.formerIds ?? [])
+      const made = allocateId(type.prefix, board.counters[type.prefix] ?? 1, await cardFileNames($), formerIds)
       const now = await $.clock.now()
       const orders = snap.cards.filter((c) => findLane(board, c.status)?.label === lane.label).map((c) => c.order)
       const text = newCardText({ id: made.id, title, status: lane.label, order: nextOrder(orders), stamp: stampOf(now), who: board.owner, body, labels: [] })
       if (!text.ok) return await refuse(text.message)
-      const nextBoard = setBoardSetting(boardText, 'next_id', made.n + 1)
+      const nextBoard = setCounter(boardText, type.prefix, made.n + 1)
       if (!nextBoard.ok) return await refuse(nextBoard.message)
 
       const file = cardFileName(made.id, title)
@@ -1567,6 +1630,17 @@ function addLaneOf(snap: KanbanSnapshot, picked: string): string {
   return intake !== undefined ? intake.label : (lanes[0] ?? '')
 }
 
+/** The type NAMES a new card may have, in board order. */
+function addTypesOf(snap: KanbanSnapshot): string[] {
+  return typesOf(snap.settings).map((t) => t.name)
+}
+
+/** The type a new card gets: the one picked while it is still on the board, else the board's first ('' when it has none). */
+function addTypeOf(snap: KanbanSnapshot, picked: string): string {
+  const types = addTypesOf(snap)
+  return types.indexOf(picked) !== -1 ? picked : (types[0] ?? '')
+}
+
 /** Whether some lane with cards is drawn open, by the fold rule and the kept folds (it decides `Collapse all` or `Expand all`). */
 function isAnyLaneOpen(snap: KanbanSnapshot, view: KanbanLanesView): boolean {
   if (!snap.hasBoard) return false
@@ -1579,7 +1653,7 @@ function isAnyLaneOpen(snap: KanbanSnapshot, view: KanbanLanesView): boolean {
 /** What the toolbar draws: the New card row's state from `add` (an older saved state has none: closed), the lanes, the sort. */
 function toolbarProps(
   snap: KanbanSnapshot,
-  add: { isOpen?: boolean; title?: string; lane?: string } | undefined,
+  add: { isOpen?: boolean; title?: string; lane?: string; type?: string } | undefined,
   view: KanbanLanesView,
   columns: number,
   isFresh: boolean,
@@ -1594,11 +1668,13 @@ function toolbarProps(
     title: add?.title ?? '',
     lanes: addLanesOf(snap),
     lane: addLaneOf(snap, add?.lane ?? ''),
+    types: addTypesOf(snap),
+    type: addTypeOf(snap, add?.type ?? ''),
     sort: boardSort(view),
     sortOptions: SORTS.map((s) => ({ value: s.key, label: s.name })),
     count: snap.cards.length,
     find,
-    matched: words.length === 0 ? null : snap.cards.filter((c) => matchesFind({ id: c.id, title: c.title, labels: c.labels ?? [] }, words)).length,
+    matched: words.length === 0 ? null : snap.cards.filter((c) => matchesFind({ id: c.id, title: c.title, labels: c.labels ?? [], formerIds: c.formerIds ?? [] }, words, typesOf(snap.settings))).length,
     isAnyOpen: isAnyLaneOpen(snap, view),
   }
 }
@@ -1611,9 +1687,9 @@ async function openAdd($: EngineInterface, ctx: Ctx): Promise<void> {
   await update($, addA, (a) => ({ ...a, isOpen: true }))
 }
 
-/** `Cancel`: hides the row and forgets the title and the lane picked. */
+/** `Cancel`: hides the row and forgets the title, the lane and the type picked. */
 async function closeAdd($: EngineInterface): Promise<void> {
-  await update($, addA, () => ({ isOpen: false, title: '', lane: '' }))
+  await update($, addA, () => ({ isOpen: false, title: '', lane: '', type: '' }))
 }
 
 /** Keeps the title typed so the one-second redraw gives it back. */
@@ -1625,6 +1701,12 @@ async function pickAddLane($: EngineInterface, label: string): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap === null || addLanesOf(snap).indexOf(label) === -1) return
   await update($, addA, (a) => ({ ...a, lane: label }))
+}
+
+async function pickAddType($: EngineInterface, name: string): Promise<void> {
+  const snap = await read($, snapshotA)
+  if (snap === null || addTypesOf(snap).indexOf(name) === -1) return
+  await update($, addA, (a) => ({ ...a, type: name }))
 }
 
 /**
@@ -1640,7 +1722,7 @@ async function submitAdd($: EngineInterface, ctx: Ctx, value: string | null): Pr
     $.ui.toast('No lane takes new cards.')
     return
   }
-  if (await performAdd($, ctx, lane, value ?? kept.title)) {
+  if (await performAdd($, ctx, lane, value ?? kept.title, addTypeOf(snap, kept.type ?? ''))) {
     ctx.isFocusDue = true
     await update($, addA, (a) => ({ ...a, title: '' }))
   }
@@ -1652,8 +1734,9 @@ async function openFirstMatch($: EngineInterface): Promise<void> {
   if (snap === null || !snap.hasBoard) return
   const words = findWords(await read($, findA))
   if (words.length === 0) return
-  for (const g of groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes) {
-    const hit = g.cards.find((c) => matchesFind(c, words))
+  const board = boardOf(snap)
+  for (const g of groupByLane(board, snap.cards.map(toCard)).lanes) {
+    const hit = g.cards.find((c) => matchesFind(c, words, board.types))
     if (hit !== undefined) {
       await openCard($, hit.id)
       return
@@ -1693,12 +1776,14 @@ async function foldAll($: EngineInterface, isOpen: boolean): Promise<void> {
 
 /** The Client, the top zone or a Close button selected a card, or none. A card the snapshot does not have is ignored. */
 async function pickSelected($: EngineInterface, id: string | null): Promise<void> {
+  let to = id
   if (id !== null) {
     const snap = await read($, snapshotA)
-    if (snap === null || !snap.cards.some((c) => c.id === id)) return
+    to = snap === null ? null : cardIdIn(snap, id)
+    if (to === null) return
   }
-  if ((await read($, selectedA)) === id) return
-  await update($, selectedA, () => id)
+  if ((await read($, selectedA)) === to) return
+  await update($, selectedA, () => to)
   await resetCardView($)
 }
 
@@ -1798,6 +1883,62 @@ async function askDelete($: EngineInterface, id: string): Promise<void> {
 async function confirmedDelete($: EngineInterface, id: string): Promise<void> {
   await update($, confirmDeleteA, () => false)
   await askDelete($, id)
+}
+
+/** What the toast says once Claude was asked to retype a card: it starts at once, or when it is free. */
+function retypeToast(id: string, type: string, isBusy: boolean): string {
+  return isBusy ? `Claude will retype ${id} when it finishes what it is doing.` : `Claude is retyping ${id} as ${type}.`
+}
+
+/**
+ * Retype (confirmed by the person): no file is touched, Claude is asked to retype the card (the pane's file API cannot rename).
+ * Refused with a toast, nothing queued or sent: no such card, a board that cannot be read, a type the board does not have or the
+ * card already is, a duplicate ID, a card in an auto lane or being worked.
+ */
+async function askRetype($: EngineInterface, id: string, type: string): Promise<void> {
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard) return
+  const found = snap.cards.find((c) => c.id === id)
+  if (found === undefined) {
+    $.ui.toast(`No card ${id} on the board.`)
+    return
+  }
+  if (snap.isReadOnly) {
+    $.ui.toast(`${NOT_READABLE} Nothing was asked.`)
+    return
+  }
+  if (!typesOf(snap.settings).some((t) => t.name === type) || typeOfId({ types: typesOf(snap.settings) }, id)?.name === type) return
+  const same = snap.cards.filter((c) => c.id === id)
+  if (same.length > 1) {
+    $.ui.toast(`More than one file has ID ${id}: ${same.map((c) => c.file).join(', ')}. Fix by hand; nothing was changed.`)
+    return
+  }
+  const lane = laneOfCard(snap, found)
+  if ((lane !== undefined && lane.role === 'auto') || workingOf(await read($, workingA)).some((w) => w.id === id) || (await read($, turnCardA)) === id) {
+    $.ui.toast(`${id} is being worked. Move it out of Auto or wait, then retype.`)
+    return
+  }
+  const prompt = retypePrompt(snap.settings.owner, id, found.title, type)
+  const now = await $.clock.now()
+  await update($, queuedA, (list) => [...list, { id, kind: 'retype', text: prompt, at: now }])
+  submitPrompt($, prompt)
+  $.ui.toast(retypeToast(id, type, await claudeIsBusy($)))
+}
+
+/** The Type list picked a name: held until Retype or Cancel; the card's own type (or a name the board lacks) puts the pick away. */
+async function pickType($: EngineInterface, name: string): Promise<void> {
+  const snap = await read($, snapshotA)
+  const selected = await read($, selectedA)
+  const own = snap === null || selected === null ? undefined : snap.cards.find((c) => c.id === selected)
+  if (snap === null || own === undefined || snap.isReadOnly) return
+  const isOther = typeOfId({ types: typesOf(snap.settings) }, own.id)?.name !== name && typesOf(snap.settings).some((t) => t.name === name)
+  await update($, retypePickA, () => (isOther ? name : ''))
+}
+
+/** The pane's own Retype: closes the question (the list goes back to the card's real type), then asks. */
+async function confirmedRetype($: EngineInterface, id: string, type: string): Promise<void> {
+  await update($, retypePickA, () => '')
+  await askRetype($, id, type)
 }
 
 /** What a lane's fold choice may look like when it comes from a Client: untrusted, so only the two fields it is read by. */
@@ -2180,6 +2321,9 @@ async function isPaneShown($: EngineInterface): Promise<boolean> {
 /** The origins that are a person at the prompt: Enter in the terminal or desktop composer, or the Remote Control bridge. */
 const PERSON_ORIGINS = new Set(['composer', 'bridge'])
 
+/** The typed commands, exactly, that ask for the board to be set up and shown. */
+const SETUP_COMMANDS = new Set(['/kanban:kanban', '/kanban:setup'])
+
 /** The cards in a lane of role `needs-you`, in board order, each with its flag (never its title). */
 function needsYouCards(snap: KanbanSnapshot): NoteCard[] {
   const out: NoteCard[] = []
@@ -2223,6 +2367,7 @@ export const register: Register = (on) => {
     // A new session has no turn running.
     await update($, inTurnA, () => false)
     // A `-p` run or the SDK has nobody at the prompt and nothing draws: no pane, no tick, and never a model switch.
+    ctx.isInteractive = e.isInteractive === true
     if (e.isInteractive) {
       await refresh($, ctx)
       ensureTicker($, ctx)
@@ -2262,6 +2407,7 @@ export const register: Register = (on) => {
     const showLog = await read($, showLogA)
     const showDetails = await read($, showDetailsA)
     const confirmDelete = await read($, confirmDeleteA)
+    const retypePick = await read($, retypePickA)
     const renaming = await read($, renamingA)
     const confirmRestore = await read($, confirmRestoreA)
     const confirmOriginal = await read($, confirmOriginalA)
@@ -2340,6 +2486,9 @@ export const register: Register = (on) => {
               },
               pickLane: (label) => {
                 void pickAddLane($, label).catch(() => {})
+              },
+              pickType: (name) => {
+                void pickAddType($, name).catch(() => {})
               },
               pickSort: (key) => {
                 void sortBoard($, key).catch((err: unknown) => noticeError($, err))
@@ -2423,6 +2572,7 @@ export const register: Register = (on) => {
                 columns,
                 comment,
                 confirmDelete,
+                retypePick,
                 renaming,
                 showDetails,
                 step,
@@ -2436,6 +2586,15 @@ export const register: Register = (on) => {
                 },
                 move: (id, from, to) => moveFromView($, ctx, id, from, to),
                 set: (id, field, choice) => setFromView($, ctx, id, field, choice),
+                pickType: (name) => {
+                  void pickType($, name).catch(() => {})
+                },
+                confirmedRetype: (id, type) => {
+                  void confirmedRetype($, id, type).catch((err: unknown) => noticeError($, err))
+                },
+                cancelRetype: () => {
+                  void update($, retypePickA, () => '').catch(() => {})
+                },
                 showLog: () => {
                   void update($, showLogA, () => true).catch(() => {})
                 },
@@ -2543,30 +2702,62 @@ export const register: Register = (on) => {
         const id = /^([A-Z]{1,10}-\d{4,})-/.exec(name)?.[1]
         if (id !== undefined && !(await $.fs.exists('kanban/' + name))) {
           const other = await fileHoldingId($, id, name)
-          if (other !== null) return { deny: `${id} is taken by ${other}. Read next_id again, reserve a new number and write the card under it.` }
+          if (other !== null) {
+            const counter = 'next_' + id.slice(0, id.indexOf('-')).toLowerCase()
+            return { deny: `${id} is taken by ${other}. Read ${counter} again, reserve a new number and write the card under it.` }
+          }
         }
       } catch {
         // cannot tell: let the write through
       }
     }
+    // The first write of board.md by the main session in an interactive run creates the board: the pane opens once it lands.
+    let isNewBoard = false
+    if (e.tool === 'Write' && name === 'board.md' && e.agentId === undefined && ctx.isInteractive) {
+      try {
+        isNewBoard = !(await $.fs.exists('kanban/board.md'))
+      } catch {
+        // cannot tell: no pane
+      }
+    }
     ctx.busy.add(name)
+    let result: Awaited<ReturnType<typeof next>>
     try {
-      const result = await next(e)
+      result = await next(e)
       // A card file written by the main session (a subagent's call carries an agentId) while no card is marked: the turn is about it.
       if (e.agentId === undefined && isCardFileName(name) && !(typeof result === 'object' && result !== null && 'deny' in result)) {
         const id = /^([A-Z]{1,10}-\d{4,})-/.exec(name)?.[1]
         if (id !== undefined && (await read($, turnCardA)) === null) await update($, turnCardA, () => id)
       }
-      return result
     } finally {
       ctx.busy.delete(name)
       ctx.skip = 0
       await refresh($, ctx)
     }
+    if (isNewBoard && !(typeof result === 'object' && result !== null && 'deny' in result)) {
+      try {
+        // A pane a typed command already opened shows the lanes by itself: no second open.
+        if (await isPaneShown($)) return result
+        await openBoard($, ctx, false)
+      } catch {
+        // A refused open costs nothing: /board opens it.
+      }
+    }
+    return result
   }).catch(($, e, next) => next(e))
 
   // The manager note rides on what the person types, as hidden context: the text is never touched, and every other case passes through.
+  // The two commands that ask for a board open the pane as soon as the person sends them: his own typed command is the "asked" that
+  // places it at any width, so it shows "no board yet" while Claude sets up and swaps to the lanes when board.md lands.
   on('prompt.submit', async ($, e, next) => {
+    const kind = e.origin?.kind
+    if (ctx.isInteractive && kind !== undefined && PERSON_ORIGINS.has(kind) && SETUP_COMMANDS.has(String(e.text).trim())) {
+      try {
+        await openBoard($, ctx, false)
+      } catch {
+        // A refused open costs nothing: /board opens it.
+      }
+    }
     const note = await chatNote($, ctx, e.origin?.kind, e.text)
     return next(note === null ? e : { ...e, context: [...(e.context ?? []), note] })
   }).catch(($, e, next) => next(e))
@@ -2576,10 +2767,11 @@ export const register: Register = (on) => {
     await update($, inTurnA, () => true)
     const about = CARD_PROMPT.exec(e.text)
     if (about !== null && about[1] !== undefined && about[2] !== undefined) {
-      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : 'delete'
+      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : about[1] === 'asked to retype' ? 'retype' : 'delete'
       const id = about[2]
       await dequeue($, e.text, (q) => q.kind === kind && q.id === id)
-      await update($, turnCardA, () => id)
+      const held = followedId(await read($, snapshotA), id)
+      await update($, turnCardA, () => held)
     } else if (!String(e.text).trimStart().startsWith('Kanban:')) {
       // A typed prompt that names a card on the board (a full ID, any letter case): that card is the one being worked.
       const named = String(e.text).match(/\b[A-Za-z]{1,10}-\d{4,}\b/g) ?? []

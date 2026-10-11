@@ -46,8 +46,8 @@ async function submitTitle(ui: Pane): Promise<void> {
   await ui.input({ key: 'toolbar-title', text, kind: 'submit' })
 }
 
-// The seven-lane board says next_id: 1 and holds KB-0001..KB-0004, so the first new card is KB-0005.
-const NEW = cardPath('KB-0005', 'call-the-bank')
+// The seven-lane board has no counters and holds KB-0001..KB-0004; the first card Add makes is the first of the first type, bug: BUG-0001.
+const NEW = cardPath('BUG-0001', 'call-the-bank')
 
 test('at rest the toolbar is New card and one Sort; the row of the new card is not there yet', async ($, on) => {
   const { w, ui } = await setup($, on)
@@ -128,14 +128,14 @@ test('Add makes the card in Pending with no prompt, clears the field and leaves 
   await submitTitle(ui)
 
   const card = w.text(NEW)
-  expect(card).toContain('\nid: KB-0005\n')
+  expect(card).toContain('\nid: BUG-0001\n')
   expect(card).toContain('\nstatus: Pending\n')
   expect(card).toContain('\n# Call the bank\n')
-  expect(w.text(BOARD_PATH)).toContain('\nnext_id: 6\n')
+  expect(w.text(BOARD_PATH)).toContain('\nnext_bug: 2\n')
   expect(w.writes).toEqual([BOARD_PATH, NEW])
   expect(w.sent).toEqual([])
-  expect(w.toasts).toEqual(['Added KB-0005 to Pending.'])
-  expect(await laneOf(ui, 'KB-0005')).toBe('Pending')
+  expect(w.toasts).toEqual(['Added BUG-0001 to Pending.'])
+  expect(await laneOf(ui, 'BUG-0001')).toBe('Pending')
   // The field is empty, still open, and takes the focus again for the next card.
   const field = await ui.find({ key: 'toolbar-title' })
   expect(field?.props.value).toBe('')
@@ -148,7 +148,7 @@ test("Enter in the field adds, with the same cleaning of the title as the Client
   await ui.press({ key: 'toolbar-new' })
   await ui.input({ key: 'toolbar-title', text: '  Call   the\nbank  ' })
   expect(w.text(NEW)).toContain('\n# Call the bank\n')
-  expect(w.toasts).toEqual(['Added KB-0005 to Pending.'])
+  expect(w.toasts).toEqual(['Added BUG-0001 to Pending.'])
   expect((await ui.find({ key: 'toolbar-title' }))?.props.value).toBe('')
 })
 
@@ -161,7 +161,7 @@ test('a lane with an action sends the prompt, and Backlog and Pending send none'
   await submitTitle(ui)
   expect(w.text(NEW)).toContain('\nstatus: Auto\n')
   expect(w.sent.map((s) => s.text)).toEqual([
-    'Kanban: John created KB-0005 "Call the bank" in Auto. Do the auto lane action from the kanban skill.',
+    'Kanban: John created BUG-0001 "Call the bank" in Auto. Do the auto lane action from the kanban skill.',
   ])
   // The lane stays picked for the next card.
   expect((await ui.find({ key: 'toolbar-lane' }))?.props.value).toBe('Auto')
@@ -169,15 +169,15 @@ test('a lane with an action sends the prompt, and Backlog and Pending send none'
   await ui.select({ key: 'toolbar-lane', value: 'Backlog' })
   await typeTitle(ui, 'Maybe later')
   await submitTitle(ui)
-  expect(await laneOf(ui, 'KB-0006')).toBe('Backlog')
-  expect(w.toasts.at(-1)).toBe('Added KB-0006 to Backlog.')
+  expect(await laneOf(ui, 'BUG-0002')).toBe('Backlog')
+  expect(w.toasts.at(-1)).toBe('Added BUG-0002 to Backlog.')
   expect(w.sent).toHaveLength(1)
 
   await ui.select({ key: 'toolbar-lane', value: 'Plan' })
   await typeTitle(ui, 'Plan it')
   await submitTitle(ui)
   expect(w.sent).toHaveLength(2)
-  expect(w.sent[1]?.text).toContain('created KB-0007 "Plan it" in Plan. Do the plan lane action')
+  expect(w.sent[1]?.text).toContain('created BUG-0003 "Plan it" in Plan. Do the plan lane action')
 })
 
 test('an empty title makes nothing and keeps the row open; a refusal keeps the title', async ($, on) => {
@@ -212,6 +212,69 @@ test('Cancel closes the row and forgets the title and the lane; reopening starts
   await ui.press({ key: 'toolbar-new' })
   expect((await ui.find({ key: 'toolbar-title' }))?.props.value).toBe('')
   expect((await ui.find({ key: 'toolbar-lane' }))?.props.value).toBe('Pending')
+})
+
+// ---------------------------------------------------------------- the Type list (KB-0054)
+
+test('New card shows a Type list of the board\'s types, between the field and Lane, starting on the first', async ($, on) => {
+  const { ui } = await setup($, on)
+  await ui.press({ key: 'toolbar-new' })
+  const type = await ui.find({ key: 'toolbar-type' })
+  expect(type?.props.label).toBe('Type')
+  expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['bug', 'enhancement', 'chore', 'kb'])
+  expect(type?.props.value).toBe('bug')
+  const order: string[] = []
+  walk((await ui.drawn()) as unknown as Node, (n) => {
+    if (['toolbar-title', 'toolbar-type', 'toolbar-lane'].includes(String(n.props.key))) order.push(String(n.props.key))
+  })
+  expect(order).toEqual(['toolbar-title', 'toolbar-type', 'toolbar-lane'])
+})
+
+test('a board with its own types lists them in its order and starts on its first', async ($, on) => {
+  const files = sevenLaneFiles()
+  files[BOARD_PATH] = (files[BOARD_PATH] as string).replace('\ntypes: [bug, enhancement, chore, kb]\n', '\ntypes: [docs, bug, kb]\n')
+  const { ui } = await setup($, on, files)
+  await ui.press({ key: 'toolbar-new' })
+  const type = await ui.find({ key: 'toolbar-type' })
+  expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['docs', 'bug', 'kb'])
+  expect(type?.props.value).toBe('docs')
+})
+
+test('the Type pick is remembered: it makes the card of that type, stays picked for the next card and survives the one-second redraw', async ($, on) => {
+  const { w, ui } = await setup($, on)
+  await ui.press({ key: 'toolbar-new' })
+  await ui.select({ key: 'toolbar-type', value: 'enhancement' })
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('enhancement')
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('enhancement')
+  await typeTitle(ui, 'Call the bank')
+  await submitTitle(ui)
+  expect(w.text(cardPath('ENH-0001', 'call-the-bank'))).toContain('\nid: ENH-0001\n')
+  expect(w.text(BOARD_PATH)).toContain('\nnext_enh: 2\n')
+  expect(w.toasts).toEqual(['Added ENH-0001 to Pending.'])
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('enhancement')
+})
+
+test('a pick of a type the board no longer has falls back to the first type; a pick that is no type is ignored; Cancel forgets the pick', async ($, on) => {
+  const { w, ui } = await setup($, on)
+  await ui.press({ key: 'toolbar-new' })
+  await ui.select({ key: 'toolbar-type', value: 'chore' })
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('chore')
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('\ntypes: [bug, enhancement, chore, kb]\n', '\ntypes: [bug, docs, kb]\n'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  const type = await ui.find({ key: 'toolbar-type' })
+  expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['bug', 'docs', 'kb'])
+  expect(type?.props.value).toBe('bug')
+  // A value that is no type on the board changes nothing.
+  await ui.select({ key: 'toolbar-type', value: 'docs' })
+  await ui.post({ type: 'pick-type', value: 'nonsense' } as never, { in: 'board' })
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('docs')
+  await ui.press({ key: 'toolbar-cancel' })
+  await ui.press({ key: 'toolbar-new' })
+  expect((await ui.find({ key: 'toolbar-type' }))?.props.value).toBe('bug')
+  expect(w.writes).toEqual([])
 })
 
 test('an older board offers its own creatable lanes: Inbox first, then Plan, Auto and Manual', async ($, on) => {
@@ -262,7 +325,7 @@ test('the toolbar goes while a card is open and while Settings shows, and comes 
 test('on a board that cannot be read there is no New card, the Sort stays, and nothing is added', async ($, on) => {
   const { w, ui } = await setup($, on)
   await ui.press({ key: 'toolbar-new' })
-  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('prefix: KB', 'prefix: 9'))
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('owner: John', 'owner: John\nworkers: 9'))
   await w.clock.advance(1000)
   await w.clock.settle()
   expect(await ui.find({ key: 'toolbar-new' })).toBeUndefined()
@@ -282,12 +345,12 @@ test("the Client's menu message opens no card, whatever the ID; nothing is writt
   expect(w.writes).toEqual([])
 })
 
-for (const columns of [40, 60, 75, 76, 100]) {
-  test(`at ${columns} cells the new-card controls stand ${columns >= 76 ? 'in one row' : 'in two rows'}, with no size taken from a number and no filled button`, async ($, on) => {
+for (const columns of [40, 50, 59, 60, 75, 80, 91, 92, 100, 108]) {
+  test(`at ${columns} cells the new-card controls stand ${columns >= 92 ? 'in one row' : columns >= 60 ? 'in two rows' : 'in three rows'}, with no size taken from a number and no filled button`, async ($, on) => {
     const { ui } = await setup($, on, sevenLaneFiles(), columns)
     await ui.press({ key: 'toolbar-new' })
-    expect((await ui.find({ key: 'toolbar-add-row' })) !== undefined).toBe(columns >= 76)
-    expect((await ui.find({ key: 'toolbar-add-rows' })) !== undefined).toBe(columns < 76)
+    expect((await ui.find({ key: 'toolbar-add-row' })) !== undefined).toBe(columns >= 92)
+    expect((await ui.find({ key: 'toolbar-add-rows' })) !== undefined).toBe(columns < 92)
     let root: Node | undefined
     walk((await ui.drawn()) as unknown as Node, (n) => {
       if (root === undefined && n.props.key === 'toolbar') root = n
@@ -302,6 +365,27 @@ for (const columns of [40, 60, 75, 76, 100]) {
       if (n.type === 'Button' && n.props.variant === 'primary') filled += 1
     })
     expect(filled).toBe(0)
+    // Which controls share a row (KB-0054): from 92 cells one row; from 60 the field has its row and Type, Lane and Cancel share the next; below 60 Type has a row and Lane and Cancel share the last.
+    const keysIn = (n: Node): string[] => {
+      const keys: string[] = []
+      walk(n, (m) => {
+        if (['toolbar-title', 'toolbar-type', 'toolbar-lane', 'toolbar-cancel'].includes(String(m.props.key))) keys.push(String(m.props.key))
+      })
+      return keys
+    }
+    let layout: Node | undefined
+    walk(root, (n) => {
+      if (layout === undefined && (n.props.key === 'toolbar-add-row' || n.props.key === 'toolbar-add-rows')) layout = n
+    })
+    const rows = columns >= 92 ? [keysIn(layout as Node)] : ((layout as Node).children as Node[]).map((r) => keysIn(r))
+    const pick = ['toolbar-type', 'toolbar-lane', 'toolbar-cancel']
+    expect(rows).toEqual(
+      columns >= 92
+        ? [['toolbar-title', ...pick]]
+        : columns >= 60
+          ? [['toolbar-title'], pick]
+          : [['toolbar-title'], ['toolbar-type'], ['toolbar-lane', 'toolbar-cancel']],
+    )
     // The field is there at every width, and so is the way to cancel.
     expect(await ui.find({ key: 'toolbar-title' })).toBeDefined()
     expect(await ui.find({ key: 'toolbar-cancel' })).toBeDefined()
@@ -321,25 +405,28 @@ for (const columns of [45, 60, 80, 108]) {
     expect(row).toBeDefined()
     let box: Node | undefined
     let laneBox: Node | undefined
+    let typeBox: Node | undefined
     walk(row, (n) => {
       if (n.props.key === 'toolbar-title-box') box = n
       if (n.props.key === 'toolbar-lane-box') laneBox = n
+      if (n.props.key === 'toolbar-type-box') typeBox = n
       if (n.type === 'Box') {
         expect(n.props.width).toBeUndefined()
         expect(n.props.height).toBeUndefined()
       }
     })
     expect(box?.props).toMatchObject({ flexGrow: 1, flexShrink: 1, flexDirection: 'column', alignItems: 'stretch' })
-    // Wide: a minimum share of the row so the field never collapses beside Lane and Cancel; narrow: the field has a row of its own.
-    expect(box?.props.minWidth).toBe(columns >= 76 ? '35%' : 0)
+    // Wide: a minimum share of the row so the field never collapses beside Type, Lane and Cancel; narrow: the field has a row of its own.
+    expect(box?.props.minWidth).toBe(columns >= 92 ? '35%' : 0)
     // The Lane Box takes only its value's width: the free room goes to the field, not to a gap before Lane.
     expect(laneBox?.props).toMatchObject({ flexGrow: 0, flexShrink: 0 })
-    // Lane and Cancel stay reachable, in this order.
+    expect(typeBox?.props).toMatchObject({ flexGrow: 0, flexShrink: 0 })
+    // Type, Lane and Cancel stay reachable, in this order.
     const order: string[] = []
     walk(row, (n) => {
-      if (['toolbar-title', 'toolbar-lane', 'toolbar-cancel'].includes(String(n.props.key))) order.push(String(n.props.key))
+      if (['toolbar-title', 'toolbar-type', 'toolbar-lane', 'toolbar-cancel'].includes(String(n.props.key))) order.push(String(n.props.key))
     })
-    expect(order).toEqual(['toolbar-title', 'toolbar-lane', 'toolbar-cancel'])
+    expect(order).toEqual(['toolbar-title', 'toolbar-type', 'toolbar-lane', 'toolbar-cancel'])
   })
 }
 

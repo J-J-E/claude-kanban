@@ -1,6 +1,7 @@
 // Board file, lanes, moves, whole-board checks and DECISIONS.md for
 // skills/kanban/references/format.md sections 6, 9, 10 and 12. Pure: string in, string out, nothing throws.
 import type { Card, Result, Stamp } from './types.ts'
+import type { Frontmatter } from './frontmatter.ts'
 import {
   detectEol,
   fail,
@@ -43,9 +44,23 @@ export type Lane = {
   isClaudeOnly: boolean
 }
 
+/** A ticket type: its lowercase name and the capital letters its card IDs start with. */
+export type TicketType = { name: string; prefix: string }
+
+export const DEFAULT_TYPES: readonly TicketType[] = [
+  { name: 'bug', prefix: 'BUG' },
+  { name: 'enhancement', prefix: 'ENH' },
+  { name: 'chore', prefix: 'CHORE' },
+]
+
+const TYPE_NAME = /^[a-z][a-z0-9-]{0,19}$/
+const TYPE_PREFIX = /^[A-Z]{2,5}$/
+
 export type Board = {
-  prefix: string
-  nextId: number
+  /** The board's ticket types in order; every card has one and its ID starts with that type's prefix. */
+  types: TicketType[]
+  /** The next number for each type, by prefix; a type with no `next_<prefix>` line counts from 1. */
+  counters: Record<string, number>
   owner: string
   workers: number
   managerModel: string
@@ -75,12 +90,6 @@ export type CardFile = { name: string; text: string }
 /** The reason `value` is not allowed for the board setting `key`, or undefined when it is. */
 function settingProblem(key: string, value: string): string | undefined {
   switch (key) {
-    case 'prefix':
-      return /^[A-Z]{1,10}$/.test(value) ? undefined : '"prefix" must be 1 to 10 capital letters.'
-    case 'next_id':
-      return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1
-        ? undefined
-        : '"next_id" must be a whole number, 1 or more.'
     case 'owner':
       if (value === '' || value !== value.trim()) return '"owner" is required: the person\'s first name.'
       if (value.indexOf(':') !== -1) return '"owner" cannot contain a colon (it names the author of Log lines).'
@@ -105,7 +114,7 @@ function settingProblem(key: string, value: string): string | undefined {
   }
 }
 
-const SETTING_KEYS = ['prefix', 'next_id', 'owner', ...SAVED_KEYS]
+const SETTING_KEYS = ['owner', ...SAVED_KEYS]
 
 export function parseBoard(text: string): Result<Board> {
   const parsed = parseFrontmatter(text)
@@ -113,8 +122,6 @@ export function parseBoard(text: string): Result<Board> {
   const fm = parsed.value
   // The built-in value of each of the nine settings, by key.
   const raw: Record<string, string> = {
-    prefix: 'KB',
-    next_id: '1',
     owner: '',
     ...builtInValues(),
   }
@@ -144,6 +151,23 @@ export function parseBoard(text: string): Result<Board> {
     raw[key] = r.value
   }
 
+  const typesResult = readTypes(fm)
+  if (!typesResult.ok) return typesResult
+  const types = typesResult.value
+  const counters: Record<string, number> = {}
+  for (const t of types) {
+    const key = counterKey(t.prefix)
+    const r = getScalar(fm, key)
+    if (!r.ok) return r
+    if (r.value === undefined) {
+      counters[t.prefix] = 1
+      continue
+    }
+    const problem = counterProblem(key, r.value)
+    if (problem !== undefined) return fail('bad-setting', problem, findEntry(fm, key)?.line)
+    counters[t.prefix] = Number(r.value)
+  }
+
   const entry = findEntry(fm, 'lanes')
   if (entry === undefined || (entry.kind === 'scalar' && entry.scalar === '') || (entry.kind !== 'scalar' && entry.items.length === 0)) {
     return fail('no-intake', 'The board needs a "lanes:" list with at least one intake lane.', entry?.line)
@@ -169,8 +193,8 @@ export function parseBoard(text: string): Result<Board> {
   if (!lanes.some((l) => l.role === 'intake')) return fail('no-intake', 'The board needs at least one lane with role "intake".', entry.line)
 
   return ok({
-    prefix: raw.prefix,
-    nextId: Number(raw.next_id),
+    types,
+    counters,
     owner: raw.owner,
     workers: Number(raw.workers),
     managerModel: raw.manager_model,
@@ -185,6 +209,55 @@ export function parseBoard(text: string): Result<Board> {
     savedDefaults,
     lanes,
   })
+}
+
+/** The board.md key that holds a type's counter: `next_` and the prefix in lowercase. */
+function counterKey(prefix: string): string {
+  return 'next_' + prefix.toLowerCase()
+}
+
+function counterProblem(key: string, value: string): string | undefined {
+  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1 ? undefined : `"${key}" must be a whole number, 1 or more.`
+}
+
+/** The `types` list: absent is DEFAULT_TYPES; each item is `name (PREFIX)` or a bare `name`. */
+function readTypes(fm: Frontmatter): Result<TicketType[]> {
+  const entry = findEntry(fm, 'types')
+  if (entry === undefined) return ok(DEFAULT_TYPES.map((t) => ({ ...t })))
+  if (entry.kind === 'scalar') {
+    if (entry.scalar === '') return fail('bad-setting', '"types" must list at least one type.', entry.line)
+    return fail('type-mismatch', '"types" must be a list, not a single value.', entry.line)
+  }
+  if (entry.items.length === 0) return fail('bad-setting', '"types" must list at least one type.', entry.line)
+  const types: TicketType[] = []
+  for (let i = 0; i < entry.items.length; i++) {
+    const at = entry.kind === 'block' ? entry.itemLines[i] : entry.line
+    const item = entry.items[i]
+    const m = /^([^\s(]+)(?:\s*\((.*)\))?$/.exec(item.trim())
+    if (!m) return fail('bad-setting', `The type "${item}" does not fit "name (PREFIX)" or a bare "name".`, at)
+    const name = m[1]
+    if (!TYPE_NAME.test(name)) {
+      return fail('bad-setting', `The type name "${name}" must be 1 to 20 characters: a lowercase letter, then lowercase letters, digits or hyphens.`, at)
+    }
+    let prefix: string
+    if (m[2] !== undefined) {
+      prefix = m[2].trim()
+      if (prefix === 'ID') return fail('bad-setting', 'The type prefix "ID" is not allowed.', at)
+      if (!TYPE_PREFIX.test(prefix)) return fail('bad-setting', `The prefix "${prefix}" of type "${name}" must be 2 to 5 capital letters.`, at)
+    } else {
+      prefix = name.length <= 5 ? name.toUpperCase() : name.slice(0, 3).toUpperCase()
+      if (prefix === 'ID') return fail('bad-setting', 'The type prefix "ID" is not allowed.', at)
+      if (!TYPE_PREFIX.test(prefix)) {
+        return fail('bad-setting', `The type "${name}" gives no valid prefix; write it as "${name} (PREFIX)" with 2 to 5 capital letters.`, at)
+      }
+    }
+    for (const t of types) {
+      if (t.name === name) return fail('bad-setting', `The type name "${name}" appears twice.`, at)
+      if (t.prefix === prefix) return fail('bad-setting', `The prefix "${prefix}" is used by both "${t.name}" and "${name}".`, at)
+    }
+    types.push({ name, prefix })
+  }
+  return ok(types)
 }
 
 /** The built-in value of each of the nine settings, as the text of a board.md line. */
@@ -230,7 +303,7 @@ function currentValues(b: Board): Record<string, string> {
   }
 }
 
-/** A new board.md for `owner`: prefix, next_id, owner and the seven default lanes only (every setting takes its default), LF, trailing newline. */
+/** A new board.md for `owner`: owner and the seven default lanes only (every setting takes its default), LF, trailing newline. */
 export function defaultBoardText(owner: string): Result<string> {
   const problem = settingProblem('owner', owner)
   if (problem !== undefined) return fail('bad-setting', problem)
@@ -238,8 +311,6 @@ export function defaultBoardText(owner: string): Result<string> {
   if (!ownerLine.ok) return fail('bad-setting', ownerLine.message)
   const lines = [
     '---',
-    'prefix: KB',
-    'next_id: 1',
     ownerLine.value,
     'lanes:',
     ...DEFAULT_LANES.map((l) => '  - ' + l),
@@ -261,6 +332,25 @@ export function setBoardSetting(text: string, key: string, value: string | numbe
   const problem = settingProblem(key, v)
   if (problem !== undefined) return fail('bad-setting', problem)
   return setScalar(text, key, v)
+}
+
+/**
+ * Write the counter of the type with this prefix (`next_bug: 13`), adding the line when the board has none. The
+ * counter only ever goes up: a lower number than the board's current one is refused.
+ */
+export function setCounter(text: string, prefix: string, n: number): Result<string> {
+  const parsed = parseBoard(text)
+  if (!parsed.ok) return parsed
+  const board = parsed.value
+  const type = board.types.find((t) => t.prefix === prefix)
+  if (type === undefined) return fail('bad-setting', `"${prefix}" is not the prefix of a type on this board.`)
+  const key = counterKey(type.prefix)
+  const problem = counterProblem(key, String(n))
+  if (problem !== undefined) return fail('bad-setting', problem)
+  if (n < board.counters[type.prefix]) {
+    return fail('bad-setting', `"${key}" is ${board.counters[type.prefix]}; a counter cannot be lowered to ${n}.`)
+  }
+  return setScalar(text, key, String(n))
 }
 
 /**
@@ -310,6 +400,27 @@ export function findLane(board: { lanes: readonly Lane[] }, name: string): Lane 
 
 export function unknownLaneMessage(board: { lanes: readonly Lane[] }, name: string): string {
   return `Unknown lane "${name}". Lanes on this board: ${board.lanes.map((l) => l.label).join(', ')}. Nothing was changed.`
+}
+
+// ---------------------------------------------------------------- types
+
+/** The type with this name or prefix, in any letter case; undefined when none. */
+export function findType(board: { types: readonly TicketType[] }, word: string): TicketType | undefined {
+  const key = String(word).trim().toLowerCase()
+  for (const t of board.types) if (t.name === key || t.prefix.toLowerCase() === key) return t
+  return undefined
+}
+
+/** The type whose prefix is the letters of this card ID (`BUG-0012` is bug); undefined when none. */
+export function typeOfId(board: { types: readonly TicketType[] }, id: string): TicketType | undefined {
+  const m = /^([A-Z]+)-/.exec(String(id))
+  if (!m) return undefined
+  for (const t of board.types) if (t.prefix === m[1]) return t
+  return undefined
+}
+
+export function unknownTypeMessage(board: { types: readonly TicketType[] }, word: string): string {
+  return `Unknown type "${word}". Types on this board: ${board.types.map((t) => t.name).join(', ')}. Nothing was changed.`
 }
 
 export function claudeOnlyMessage(lane: string): string {
@@ -413,6 +524,13 @@ export function readCards(board: Board, files: readonly CardFile[]): { cards: Ca
         file: f.name,
         code: 'unknown-lane',
         message: `${card.value.id} has status "${card.value.status}", which is not a lane on this board. Lanes on this board: ${board.lanes.map((l) => l.label).join(', ')}.`,
+      })
+    }
+    if (typeOfId(board, card.value.id) === undefined) {
+      problems.push({
+        file: f.name,
+        code: 'unknown-type',
+        message: `${card.value.id} has ID letters that are no type on this board. Types on this board: ${board.types.map((t) => `${t.name} (${t.prefix})`).join(', ')}.`,
       })
     }
   }

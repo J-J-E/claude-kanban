@@ -6,7 +6,6 @@ import {
   formatLogLine,
   isCardFileName,
   newCardText,
-  nextId,
   nextOrder,
   orderBetween,
   parseCard,
@@ -15,7 +14,9 @@ import {
   cardPinText,
   clearCardField,
   setCardField,
+  retypeCardText,
   setOrder,
+  setParent,
   setStatus,
   setTitle,
   slugify,
@@ -58,48 +59,6 @@ describe('slugify', () => {
 
   test('a title of exactly 40 characters is untouched', () => {
     expect(slugify('b'.repeat(40))).toBe('b'.repeat(40))
-  })
-})
-
-describe('nextId', () => {
-  test('starts at 1 in an empty folder', () => {
-    expect(nextId('KB', 1, [])).toEqual({ id: 'KB-0001', n: 1 })
-  })
-
-  test('uses the board counter when it is ahead of the files', () => {
-    expect(nextId('KB', 13, ['KB-0007-x.md', 'KB-0003-y.md'])).toEqual({ id: 'KB-0013', n: 13 })
-  })
-
-  test('uses highest existing + 1 when the files are ahead of the counter', () => {
-    expect(nextId('KB', 3, ['KB-0007-x.md', 'KB-0002-y.md'])).toEqual({ id: 'KB-0008', n: 8 })
-  })
-
-  test('never fills a gap', () => {
-    expect(nextId('KB', 1, ['KB-0001-a.md', 'KB-0003-c.md']).id).toBe('KB-0004')
-  })
-
-  test('grows past 9999', () => {
-    expect(nextId('KB', 10000, []).id).toBe('KB-10000')
-    expect(nextId('KB', 1, ['KB-9999-last.md']).id).toBe('KB-10000')
-    expect(nextId('KB', 1, ['KB-10000-big.md']).id).toBe('KB-10001')
-  })
-
-  test('ignores other prefixes, other files and wrong case', () => {
-    const names = ['board.md', 'DECISIONS.md', 'OTHER-0099-x.md', 'KBX-0050-y.md', 'kb-0099-z.md', 'notes.md', 'KB-0099-x.txt']
-    expect(nextId('KB', 1, names).id).toBe('KB-0001')
-  })
-
-  test('counts a hand-made file with no slug, so a name is never reused', () => {
-    expect(nextId('KB', 1, ['KB-0005.md']).id).toBe('KB-0006')
-  })
-
-  test('works for another prefix', () => {
-    expect(nextId('ABC', 1, ['ABC-0002-a.md', 'KB-0009-b.md']).id).toBe('ABC-0003')
-  })
-
-  test('a nonsense board counter falls back to the files', () => {
-    expect(nextId('KB', 0, ['KB-0004-a.md']).id).toBe('KB-0005')
-    expect(nextId('KB', NaN, []).id).toBe('KB-0001')
   })
 })
 
@@ -176,6 +135,8 @@ describe('parseCard', () => {
       thinking: '',
       title: 'Fix the morning summary date',
       log: [FIRST_LOG, SECOND_LOG],
+      formerIds: [],
+      createdAt: '2026-10-08 09:10',
       fileName: 'KB-0012-fix-the-morning-summary-date.md',
     })
   })
@@ -613,5 +574,60 @@ describe('setTitle', () => {
     expect(codeOf(setTitle(CARD_EXAMPLE, 'a\nb', NOW, 'John'))).toBe('bad-value')
     expect(codeOf(setTitle(CARD_EXAMPLE, 'x', NOW, 'Jo:hn'))).toBe('bad-value')
     expect(codeOf(setTitle(lines('---', 'id: KB-0012', 'status: Auto', '---', 'no heading'), 'x', NOW, 'John'))).toBe('missing-field')
+  })
+})
+
+describe('formerIds and createdAt', () => {
+  test('createdAt is the created date plus the first Log line time', () => {
+    expect(must(parseCard(CARD_EXAMPLE)).createdAt).toBe('2026-10-08 09:10')
+  })
+  test('createdAt without a Log ends 00:00', () => {
+    const text = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('## Log'))
+    expect(must(parseCard(text)).createdAt).toBe('2026-10-08 00:00')
+  })
+  test('formerIds come from the retype lines, oldest first', () => {
+    const text = CARD_EXAMPLE + '- 2026-10-09 10:00 John: retyped from KB-0012 to BUG-0003\n- 2026-10-09 11:00 John: retyped from BUG-0003 to ENH-0007\n'
+    expect(must(parseCard(text)).formerIds).toEqual(['KB-0012', 'BUG-0003'])
+    expect(must(parseCard(CARD_EXAMPLE)).formerIds).toEqual([])
+  })
+})
+
+describe('retypeCardText', () => {
+  const expected = CARD_EXAMPLE.replace('id: KB-0012', 'id: BUG-0003')
+    .replace('updated: 2026-10-08', 'updated: 2026-10-09')
+    .concat('- 2026-10-09 14:05 John: retyped from KB-0012 to BUG-0003\n')
+
+  test('rewrites id and updated and appends one Log line, whole output compared', () => {
+    expect(must(retypeCardText(CARD_EXAMPLE, 'BUG-0003', NOW, 'John'))).toBe(expected)
+  })
+  test('CRLF and BOM are kept', () => {
+    expect(must(retypeCardText(crlf(CARD_EXAMPLE), 'BUG-0003', NOW, 'John'))).toBe(crlf(expected))
+    expect(must(retypeCardText(BOM + crlf(CARD_EXAMPLE), 'BUG-0003', NOW, 'John'))).toBe(BOM + crlf(expected))
+  })
+  test('the result parses with the new ID and the old one as former', () => {
+    const card = must(parseCard(must(retypeCardText(CARD_EXAMPLE, 'BUG-0003', NOW, 'John'))))
+    expect(card.id).toBe('BUG-0003')
+    expect(card.formerIds).toEqual(['KB-0012'])
+  })
+  test('refuses the ID the card already has', () => {
+    expect(codeOf(retypeCardText(CARD_EXAMPLE, 'KB-0012', NOW, 'John'))).toBe('bad-value')
+  })
+  test('refuses what is not an ID', () => {
+    for (const id of ['', 'bug-3', 'BUG-3', 'BUG0003', 'BUG-0003-x']) {
+      expect(codeOf(retypeCardText(CARD_EXAMPLE, id, NOW, 'John'))).toBe('bad-id')
+    }
+  })
+})
+
+describe('setParent', () => {
+  test('rewrites only the parent line', () => {
+    expect(must(setParent(CARD_EXAMPLE, 'KB-0047'))).toBe(CARD_EXAMPLE.replace('parent:\n', 'parent: KB-0047\n'))
+  })
+  test('empty clears it, CRLF and BOM kept', () => {
+    const withParent = BOM + crlf(CARD_EXAMPLE.replace('parent:\n', 'parent: KB-0047\n'))
+    expect(must(setParent(withParent, ''))).toBe(BOM + crlf(CARD_EXAMPLE))
+  })
+  test('refuses what is not an ID', () => {
+    expect(codeOf(setParent(CARD_EXAMPLE, 'kb-47'))).toBe('bad-value')
   })
 })

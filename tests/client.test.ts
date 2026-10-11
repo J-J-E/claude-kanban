@@ -1440,3 +1440,64 @@ test('theme: a card is the surface key, the card in hand and the menu block too;
   // Text on a filled card is the default colour or a theme key / dim, never a fixed colour: no Text inside carries a colour that is not a key.
   for (const tx of find(rest, (n) => n.type === 'Text')) if (tx.props.color !== undefined) expect(['claude', 'warning', 'error', 'inactive', 'subtle']).toContain(tx.props.color)
 })
+
+// ---- Typed IDs: the ID column is the longest ID + 1 (KB-0054 step 2) ----
+
+/** BUG-0012, ENH-0007 and CHORE-0001 (the longest, 10 characters: an ID column of 11), the last one with a status line (2 rows). */
+function typedProps(): BoardProps {
+  const p = props()
+  const long = 'A title that is much too long to fit in the width this pane has, so the layout cuts it'
+  ;(p.lanes[0] as BoardLane).cards = [card('BUG-0012', { title: long }), card('ENH-0007')]
+  ;(p.lanes[0] as BoardLane).total = 2
+  ;(p.lanes[3] as BoardLane).cards = [card('CHORE-0001', { status: { kind: 'plan', text: 'Plan: 4 steps', colour: 'dim' as const, bar: null, time: '' } })]
+  ;(p.lanes[3] as BoardLane).total = 1
+  ;(p.lanes[2] as BoardLane).cards = []
+  ;(p.lanes[2] as BoardLane).total = 0
+  ;(p.lanes[5] as BoardLane).cards = []
+  ;(p.lanes[5] as BoardLane).total = 0
+  ;(p.lanes[6] as BoardLane).cards = []
+  ;(p.lanes[6] as BoardLane).total = 0
+  return p
+}
+
+for (const columns of [45, 60, 80, 108]) {
+  test(`at ${columns} cells a typed board draws an 11-cell ID column on both rows of every card, the titles 3 cells narrower than on a KB board, the ghost too`, async () => {
+    const p = typedProps()
+    const h = await board(p, columns)
+    const tree = h.render()
+    const l = lay(p, {}, columns)
+    expect(l.idWidth).toBe(11)
+    for (const id of ['BUG-0012', 'ENH-0007', 'CHORE-0001']) {
+      const t = tile(l, id)
+      const node = tileNode(tree, id) as Node
+      const row1 = (node.children[0] as Node).children[0] as Node
+      const idBox = row1.children[0] as Node
+      expect(idBox.props.width).toBe(11)
+      expect(t.idRect.w).toBe(11)
+      expect(text(idBox)).toBe(id)
+      expect((idBox.children[0] as Node).props.wrap).toBe('truncate-end')
+      // the title starts right after the ID column and is cut (truncate-end) in what is left
+      expect(t.titleRect.x).toBe(t.idRect.x + 11)
+      expect(((row1.children[1] as Node).children[0] as Node).props.wrap).toBe('truncate-end')
+    }
+    // Row 2 of the 2-row card is indented by the same 11 cells and ends with the text.
+    const chore = tile(l, 'CHORE-0001')
+    expect(chore.rows).toBe(2)
+    const row2 = find(tileNode(tree, 'CHORE-0001') as Node, (n) => n.type === 'Box' && n.props.marginLeft !== undefined)[0] as Node
+    expect(row2.props.marginLeft).toBe(11)
+    expect(chore.statusRect?.x).toBe(chore.idRect.x + 11)
+    // The same card on a KB board has 3 more cells for its title.
+    const kb = props()
+    ;(kb.lanes[0] as BoardLane).cards = [card('KB-0012'), card('KB-0007')]
+    ;(kb.lanes[0] as BoardLane).total = 2
+    const kbTile = tile(lay(kb, {}, columns), 'KB-0012')
+    expect(kbTile.idRect.w).toBe(8)
+    expect(kbTile.titleRect.w - tile(l, 'BUG-0012').titleRect.w).toBe(3)
+    // The ghost of a dragged card has the same column.
+    const at = { x: tile(l, 'ENH-0007').rect.x + 6, y: tile(l, 'ENH-0007').rect.y }
+    drag(h, at, { x: at.x + 2, y: tile(l, 'CHORE-0001').rect.y + 1 }, false)
+    const ghost = ghostOf(h.render()) as Node
+    const ghostId = find(ghost, (n) => n.type === 'Box' && n.props.width === 11)
+    expect(ghostId.length).toBeGreaterThan(0)
+  })
+}

@@ -9,7 +9,7 @@ import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import { cellWidth } from '../hooks/lib/layout.ts'
 import type { BoardProps } from '../hooks/lib/layout.ts'
-import { PADDING, panelLayout } from '../hooks/lib/lanes.ts'
+import { PADDING, idWidth, panelLayout } from '../hooks/lib/lanes.ts'
 import type { CardTile, LanePanel, PanelLayout, PanelLayoutView, PanelView, Rect } from '../hooks/lib/lanes.ts'
 import { BOARD_PATH, cardPath, cardText, defaultFiles, mountPane, startSession, stubs } from './fixtures.ts'
 
@@ -1370,4 +1370,71 @@ test('the Settings tab and back shows the lanes with no menu', async ($, on) => 
   await ui.resize({ columns: 64, rows: 120, in: 'board' })
   expect(await ui.find({ type: 'Client', key: 'board' })).toBeDefined()
   expect(await noMenu(ui)).toBe(true)
+})
+
+// ---- Typed IDs: the ID column is the longest ID + 1 (KB-0054 step 2) ----
+
+function idLane(ids: string[], status = false): BoardProps['lanes'][number] {
+  const cards = ids.map((id) => ({ id, title: 'Title of ' + id, flag: '', isWorking: false, isQueued: false, isTurn: false, order: 1000, ...(status ? { status: { kind: 'plan', text: 'Plan: 4 steps', colour: 'dim' as const, bar: null, time: '' } } : {}) }))
+  return { name: 'Inbox', role: 'intake', isSide: false, isClaudeOnly: false, total: cards.length, cards } as BoardProps['lanes'][number]
+}
+
+function idBoard(ids: string[], status = false): BoardProps {
+  return { rev: 1, isReadOnly: false, selected: null, lanes: [idLane(ids, status)] } as BoardProps
+}
+
+test('idWidth: an empty board is 8, 7-character IDs are 8, CHORE-0001 is 11, a 14-character ID is 12', () => {
+  expect(idWidth([])).toBe(8)
+  expect(idWidth(['KB-0047'])).toBe(8)
+  expect(idWidth(['KB-0047', 'BUG-0012'])).toBe(9)
+  expect(idWidth(['BUG-0012', 'ENH-0007', 'CHORE-0001'])).toBe(11)
+  expect(idWidth(['ABCDE-0012345'])).toBe(12)
+  expect(idWidth(['ABCDE-00123456'])).toBe(12)
+})
+
+for (const columns of [45, 60, 80, 108]) {
+  test(`at ${columns} cells a board of BUG-0012, ENH-0007 and CHORE-0001 has an 11-cell ID column in every row, 3 cells off each title, and nothing overlaps`, () => {
+    const typed = panelLayout(idBoard(['BUG-0012', 'ENH-0007', 'CHORE-0001'], true), columns)
+    const kb = panelLayout(idBoard(['KB-0012', 'KB-0007', 'KB-0001'], true), columns)
+    expect(typed.idWidth).toBe(11)
+    expect(kb.idWidth).toBe(8)
+    const tiles = typed.panels.flatMap((x) => x.cards)
+    const kbTiles = kb.panels.flatMap((x) => x.cards)
+    expect(tiles).toHaveLength(3)
+    tiles.forEach((t, i) => {
+      const k = kbTiles[i] as CardTile
+      expect(t.idRect.w).toBe(11)
+      expect(t.titleRect.x).toBe(t.idRect.x + 11)
+      expect(k.titleRect.w - t.titleRect.w).toBe(3)
+      expect(t.statusRect?.x).toBe(t.idRect.x + 11)
+      expect(t.statusRect?.w).toBe((k.statusRect as Rect).w - 3)
+      // Row 1: ID, title, (label and changed columns), the ⋯ zone: side by side, in order, none over another.
+      const row = [t.idRect, t.titleRect, ...(t.labelRect !== null ? [t.labelRect] : []), ...(t.changedRect !== null ? [t.changedRect] : []), t.menuRect]
+      for (let j = 1; j < row.length; j++) expect((row[j - 1] as Rect).x + (row[j - 1] as Rect).w).toBeLessThanOrEqual((row[j] as Rect).x)
+      expect(t.menuRect.x + t.menuRect.w + PADDING).toBe(t.rect.x + t.rect.w)
+    })
+  })
+}
+
+test('at 45 cells the typed board is laid out exactly so (the golden): ID 11 cells, title the rest, ⋯ at the right, row 2 in line with the title', () => {
+  const l = panelLayout(idBoard(['BUG-0012', 'ENH-0007', 'CHORE-0001'], true), 45)
+  const rects = l.panels.flatMap((x) => x.cards).map((t) => ({ id: t.id, rows: t.rows, tile: t.rect, idRect: t.idRect, titleRect: t.titleRect, statusRect: t.statusRect, menuRect: t.menuRect }))
+  const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h })
+  expect(rects).toEqual(
+    [2, 5, 8].map((y, i) => ({
+      id: ['BUG-0012', 'ENH-0007', 'CHORE-0001'][i],
+      rows: 2,
+      tile: r(4, y, 37, 2),
+      idRect: r(6, y, 11, 1),
+      titleRect: r(17, y, 19, 1),
+      statusRect: r(17, y + 1, 22, 1),
+      menuRect: r(36, y, 3, 1),
+    })),
+  )
+})
+
+test('a board whose IDs are all 7 characters keeps the 8-cell ID column', () => {
+  const l = panelLayout(idBoard(['KB-0047', 'KB-0048']), 64)
+  expect(l.idWidth).toBe(8)
+  expect(l.panels.flatMap((x) => x.cards).every((t) => t.idRect.w === 8 && t.titleRect.x === t.idRect.x + 8)).toBe(true)
 })

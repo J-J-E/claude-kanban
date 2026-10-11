@@ -71,7 +71,10 @@ iw    = B - 4                      // inside a panel (2 cells of padding each si
 tile  = iw                         // outer tile width (one card per row at every width)
 text  = tile - 4                   // text inside a tile
 wide  = iw >= 100                  // the Label and Changed columns appear
+idw   = clamp(longest ID on the board + 1, 8, 12)   // the ID column (`idWidth` in hooks/lib/lanes.ts)
 ```
+
+**The ID column.** IDs are typed (`BUG-0012`, `ENH-0007`, `CHORE-0001`), so they differ in length. The ID column of a card row, its second row's indent and the dragged card's ID zone are `idw` cells: the longest ID of any card on the board (every lane, not only the cards drawn) plus one gap cell, never under 8 and never over 12. It is one width for the whole board, so the titles line up in every lane. A board of `BUG-` and `ENH-` IDs gets 9, one with `CHORE-0001` gets 11; an ID longer than 11 characters is cut like any over-long text. `text` and `tile` do not change; the title simply has `idw - 8` cells less.
 
 The board is one column at every width. Cards never flow across. The board is left aligned; above 150 cells the rest is empty. These widths are for the lanes. The header, toolbar and Settings tab are flex rows and change their layout at the pane widths named in sections 3, 4 and 11.
 
@@ -106,11 +109,11 @@ Built from the pane's own native controls (`hooks/ui/header.tsx`, words in `hook
 
 | Part | Text | Colour |
 |---|---|---|
-| Who | `●` then `Claude is on KB-0014` (`Claude is on 2 cards` when agents run on different cards; `Claude is idle` when none). The words are a plain `Button` that opens that card (the first when there are several); idle, plain text | dot `claude` (`dimColor` when idle) |
+| Who | `●` then `Claude is on ENH-0014` (`Claude is on 2 cards` when agents run on different cards; `Claude is idle` when none). The words are a plain `Button` that opens that card (the first when there are several); idle, plain text | dot `claude` (`dimColor` when idle) |
 | Step | `step 3 of 5: lane panels and spacing`: the step in hand and what the agent is doing; only when Claude is active and the card has a plan. No bar. Cut with `…` | `dimColor` |
 | Workers | `1 of 3 workers`, only when Claude is active and the limit is above 1 | `dimColor` |
 | Waiting to start | `○ 1 waiting to start` (`○ 1 waiting` below `W` 60), only when above 0 | `claude`, bold |
-| This turn | `▶ this turn: KB-0016`, only when a turn is on a card and `W` >= 100 | `claude` |
+| This turn | `▶ this turn: BUG-0016`, only when a turn is on a card and `W` >= 100 | `claude` |
 | Changed | `changed 11:33` (hours and minutes, no seconds), at the right of the first Claude row | `dimColor` |
 
 The count behind `Claude is on` is the agents whose description starts with a card ID (planning agents and step workers alike).
@@ -233,7 +236,7 @@ A collapsed lane is one row: `x = 2`, width `B`, 1 row high, surface fill, lane 
 
 A card is **plain** when it has nothing to say about where it stands (status kind `new`, section 8): 1 row. Otherwise 2 rows. Width `tile` (section 2), x from 4. Surface fill, outline as in 7.3. Left and right padding 2 cells.
 
-Row 1, left to right, inside the padding: ID (8 cells, `dimColor`), title (flex, `truncate-end`), the marks (7.2), the pin chip when the card has its own model or thinking (18.5), then either the plain card's labels or the wide columns, then the menu zone.
+Row 1, left to right, inside the padding: ID (`idw` cells, section 2; `dimColor`), title (flex, `truncate-end`), the marks (7.2), the pin chip when the card has its own model or thinking (18.5), then either the plain card's labels or the wide columns, then the menu zone.
 
 | Part | Width | When |
 |---|---|---|
@@ -242,7 +245,7 @@ Row 1, left to right, inside the padding: ID (8 cells, `dimColor`), title (flex,
 | Changed column | 14, right aligned, `dimColor`: `today`, `yesterday`, `Oct 6` | `wide` (all cards) |
 | Menu zone | 3, right aligned | `⋯`, always drawn (dim, bright under the pointer). A press on it opens the small menu under the card (section 12) |
 
-Row 2 (2-row cards), at an 8-cell indent under the title, width `text - 8`: the status line (section 8), then the time it last moved, right aligned, `dimColor`. The time is dropped first when the row is too narrow.
+Row 2 (2-row cards), at an `idw`-cell indent under the title, width `text - idw`: the status line (section 8), then the time it last moved, right aligned, `dimColor`. The time is dropped first when the row is too narrow.
 
 ### 7.2 The marks (on row 1)
 
@@ -285,7 +288,7 @@ The card's second line (and its progress) is derived on every refresh from the c
 | `total` steps | number of numbered steps under `## Plan` (none: no bar) |
 | `done` steps | the highest `N` in a Log line `step N done: <what>` |
 | `retry r of 3` | the latest Log line `retry r of 3: <what failed>` that comes after the latest `step N done` line; otherwise none |
-| `agent` text | the running agent's description with the card ID and `step N:` removed (`KB-0012 step 2: fix date format` gives `fix date format`); if there is none, the plan's text for step `done + 1` |
+| `agent` text | the running agent's description with the card ID and `step N:` removed (`BUG-0012 step 2: fix date format` gives `fix date format`); if there is none, the plan's text for step `done + 1` |
 | Last event, time | the last Log line (its text and its `YYYY-MM-DD HH:MM`) |
 | Time shown | under 1 minute `just now`; under 60 minutes `4 min ago`; under 24 hours `3 h ago`; the day before `yesterday`; older `Oct 6` |
 | Branch, PR | `branch:` and `pr:` on the card |
@@ -301,9 +304,9 @@ The text, by first match (kind, then colour, then text):
 | 1 | queued | a turn is queued for the card and no worker is on it | `Waiting for Claude to start. It is busy with another turn.` (when no turn is running: `Claude is starting this.`) | `claude` | the done steps, if any |
 | 2 | working | a worker is on the card | `Step 3 of 5: lane panels and spacing`; with a retry `Step 3 of 5, retry 2 of 3: tests failed`; no plan: `Working: fix date format` | default | yes |
 | 3 | waiting | flag set and card in a Claude-only lane | the reason line (7 below) | flag colour | on a held card only |
-| 4 | children | the card has a `waiting on` line | `Waiting on KB-0017 and KB-0018: 1 of 2 done` | default | no |
+| 4 | children | the card has a `waiting on` line | `Waiting on BUG-0017 and BUG-0018: 1 of 2 done` | default | no |
 | 5 | parked | lane role `parked` | `Parked at step 3: finish the tests` | `dimColor` | no |
-| 6 | done | lane role `done` | `Merged kb-0003` (and `, PR 14` when it has one) | `dimColor` | no |
+| 6 | done | lane role `done` | `Merged bug-3-fix-date` (and `, PR 14` when it has one) | `dimColor` | no |
 | 7 | idle | role `auto` or `manual`, a plan, no worker | `3 of 5 steps done. No worker running.` (manual: `3 of 5 steps done. Say which step is next.`) | `dimColor` | yes |
 | 8 | plan | a plan, any other lane | `Plan: 4 steps` | `dimColor` | no |
 | 9 | new | none of the above | (no row 2: the card is 1 row; its labels go on row 1) | | |
@@ -331,7 +334,7 @@ Reason lines (kind 3):
 | Card row 1 | `○ Waiting to start` (accent, bold) |
 | Card row 2 | `Waiting for Claude to start. It is busy with another turn.` (idle Claude: `Claude is starting this.`), time `just now` |
 | Open card | no flag box and no buttons; an accent box: `○ Waiting for Claude to start`, `You approved this just now. Claude is busy with another turn and starts this one next. There is nothing more for you to do.`, `You can still change your mind with the Lane menu.` |
-| Toast on the move | `KB-0015 moved to Auto. Claude will start when it finishes what it is doing.` |
+| Toast on the move | `BUG-0015 moved to Auto. Claude will start when it finishes what it is doing.` |
 | Open card, `Lane` | the `Lane` Select reads `Auto`; no error on a repeat |
 
 When a worker starts on it, the card becomes Working: the `● Working` label, the bar, the accent outline; the header's `○ 1 waiting to start` goes and the worker count changes.
@@ -342,14 +345,16 @@ Click a card (its `⋯` opens a small menu with `Open card`, section 12), press 
 
 | Rows | What |
 |---|---|
-| 1 | Title bar, no fill: `◂ Board` (a plain button), `KB-0015  in Needs You` (`dimColor`, cut at the end when narrow), then a flexible gap, then `◂ Prev`, the count (`3 of 32`, dim) and `Next ▸`. Prev and Next open the neighbour in the order the board draws the cards: lanes top to bottom, each lane by the board sort (Done newest first), only Find's matches while Find has words, folded lanes counted. No wrap: at the first or last card that control is dim text, not a button. A card Find hides shows no Prev, count or Next. The bar may wrap to a second row when narrow |
-| 1 gap, then the title, then 1 | Title, bold, wrapped: the boldest text on the card (the section headings `Plan`, `Description` and `Log` are bold and dim). Under it one row of two quiet plain buttons, `Rename` and `Copy ID` (`dimColor`; Rename is not drawn when the board cannot be read, nor while the Rename field is open). `Rename` swaps the title for one row: a native `Input` holding the title, placeholder `Card title`, with its own submit labelled `Save` (Enter does the same), and a plain `Cancel` button beside it. (The app draws the Input at its own width; a plugin cannot widen it.) Save writes the card's `# ` title line, `updated` and one Log line `renamed from "old title"`, cleaned as the toolbar's Add cleans a title (one line, quotes removed); a title over 120 characters is refused, not cut, with the toast `A title can be at most 120 characters; this one is 131. Nothing was written.`, the field keeps what was typed; refused with a toast while Claude is editing the file or the file changed meanwhile (as a comment is); the file name never changes. Toast `Renamed KB-0015 to "New title".`. An empty title toasts `Type a card title first.` and keeps the field; the same title writes nothing and closes the field; `Cancel`, another card and `◂ Board` close it unsaved |
+| 1 | Title bar, no fill: `◂ Board` (a plain button), `BUG-0015  in Needs You` (`dimColor`, cut at the end when narrow; a card that was retyped reads `ENH-0007 (was BUG-0012)  in Pending`, its newest old ID), then a flexible gap, then `◂ Prev`, the count (`3 of 32`, dim) and `Next ▸`. Prev and Next open the neighbour in the order the board draws the cards: lanes top to bottom, each lane by the board sort (Done newest first), only Find's matches while Find has words, folded lanes counted. No wrap: at the first or last card that control is dim text, not a button. A card Find hides shows no Prev, count or Next. The bar may wrap to a second row when narrow |
+| 1 gap, then the title, then 1 | Title, bold, wrapped: the boldest text on the card (the section headings `Plan`, `Description` and `Log` are bold and dim). Under it one row of two quiet plain buttons, `Rename` and `Copy ID` (`dimColor`; Rename is not drawn when the board cannot be read, nor while the Rename field is open). `Rename` swaps the title for one row: a native `Input` holding the title, placeholder `Card title`, with its own submit labelled `Save` (Enter does the same), and a plain `Cancel` button beside it. (The app draws the Input at its own width; a plugin cannot widen it.) Save writes the card's `# ` title line, `updated` and one Log line `renamed from "old title"`, cleaned as the toolbar's Add cleans a title (one line, quotes removed); a title over 120 characters is refused, not cut, with the toast `A title can be at most 120 characters; this one is 131. Nothing was written.`, the field keeps what was typed; refused with a toast while Claude is editing the file or the file changed meanwhile (as a comment is); the file name never changes on a rename (only a retype, 12.5, changes the ID in it). Toast `Renamed BUG-0015 to "New title".`. An empty title toasts `Type a card title first.` and keeps the field; the same title writes nothing and closes the field; `Cancel`, another card and `◂ Board` close it unsaved |
 | 1 gap, then the box | Status box, only when there is something to say (below): surface fill, no outline (the heading carries the colour), 2 cells of padding, 1 row above and below |
-| 1 gap, then 2 | Three native `Select`s in one row, each taking an equal share, 2 cells apart; below 60 cells they stand one under the other. **`Lane`**, whose value is the lane the card is in now (`Needs You` for a card in Needs You, never the first lane in the list; options: every lane that accepts his drops, plus the current lane, which is shown as the value and not selectable when it is Claude-only; choosing another lane moves the card as a drop would, 14.4); **`Model`**, options `Auto (sonnet)`, `haiku`, `sonnet`, `opus`, `fable`; **`Thinking`**, options `Auto (medium)`, `low`, `medium`, `high`, `extra`, `max`, with `(recommended)` on the level the app recommends for the card's model (the card's own model, else the one Auto gives it; opus `medium`, fable `high`, sonnet `medium`, haiku `medium`) and no `Not set`. `Auto` carries in brackets what Settings give this card: the Planner's model and thinking in the Plan lane, the Worker's anywhere else. The value is the card's own, `Auto` when it has none. Choosing writes the card at once (18.4) with the toasts of 12.2. Not drawn when the board cannot be read |
-| 0 gap, then 1 | The line under the selects, hugging them (`truncate-end`): with an override, `Set on this card: opus, medium.` in bold default followed by `  It stays with the card until you choose Auto or the card is done.` in `dimColor`; with none, `Auto: Settings decide. Planner opus, high; worker sonnet, medium.` in `dimColor` (the board's current values; a Not set thinking is left out) |
+| 1 gap, then 2 | Four native `Select`s, each taking an equal share, 2 cells apart: in one row from 90 cells, in two rows of two (`Type` and `Lane`, then `Model` and `Thinking`) from 60 to 89, one under the other below 60. **`Type`** (12.5), the first of the four, whose value is the card's type name, read from its ID's letters (`bug`), or `No type` for a card whose letters are no type on the board (shown as the value only, never offered); **`Lane`**, whose value is the lane the card is in now (`Needs You` for a card in Needs You, never the first lane in the list; options: every lane that accepts his drops, plus the current lane, which is shown as the value and not selectable when it is Claude-only; choosing another lane moves the card as a drop would, 14.4); **`Model`**, options `Auto (sonnet)`, `haiku`, `sonnet`, `opus`, `fable`; **`Thinking`**, options `Auto (medium)`, `low`, `medium`, `high`, `extra`, `max`, with `(recommended)` on the level the app recommends for the card's model (the card's own model, else the one Auto gives it; opus `medium`, fable `high`, sonnet `medium`, haiku `medium`) and no `Not set`. `Auto` carries in brackets what Settings give this card: the Planner's model and thinking in the Plan lane, the Worker's anywhere else. The value is the card's own, `Auto` when it has none. Choosing writes the card at once (18.4) with the toasts of 12.2. Not drawn when the board cannot be read |
+| 0 gap, then 1 | Only while Claude's newest Log line `suggests type <type>: <reason>` is newer than the newest `retyped from … to …` line: a dim wrapped line under the selects, `Claude suggests enhancement: <reason>`. It is only a line; nothing is offered by it, and the person picks the type in `Type`. Not drawn when the board cannot be read |
+| 1 gap, then 1 | Only while a type other than the card's own is picked in `Type` (12.5): the question row `Retype BUG-0012 as enhancement? Its ID will change.` with a `Retype` and a `Cancel` button after it, wrapping when narrow |
+| 0 gap, then 1 | The line under the selects, hugging them (under the suggestion and the question when they show; `truncate-end`): with an override, `Set on this card: opus, medium.` in bold default followed by `  It stays with the card until you choose Auto or the card is done.` in `dimColor`; with none, `Auto: Settings decide. Planner opus, high; worker sonnet, medium.` in `dimColor` (the board's current values; a Not set thinking is left out) |
 | 2 gap, then 1 + step rows | `Plan` (bold) with `2 of 5 done` right in `dimColor`, then one row per step, with no step numbers (the mark is the only marker). The mark stands in a Box 2 cells wide at the top of the row, on the step's first line: `✓` and `○` (dim), `▶` (accent) on the step in hand. On the step in hand its first sentence is bold and the rest of its text (up to `Files:` or `Check:`) is dim, wrapped; `Files:` and `Check:` are shown only under `Show details`. Every other step shows its first sentence only, `dimColor`, on one line (`truncate-end`). A plain `Show details` button under the steps (only when some step has more than its first sentence, or the step in hand has Files or Check) shows every step whole, dim, wrapped; it then reads `Hide details`. Reset when the card changes. Only if the card has a plan |
 | 2 gap, then 1 + text | `Description` (bold) and the card text as `Markdown`, which flows. Only if the card has text |
-| 2 gap, then 1 + 1 + lines | `Log` (bold), then straight under it **one** native `Input`, placeholder `Write a comment for Claude` (`Type your answer` on a question), with its own submit labelled `Comment` (`submitLabel`). No separate Comment button: the app draws the submit beside the field, and a second one is a bug. Enter or the submit adds the comment to the log as his. Toast `Comment added to KB-0015.`. A comment is one Log line (line breaks become spaces) with no length limit: any length is written whole, never cut and never refused for length. Then the lines, **newest first, every line shown whole, wrapped over as many rows as it needs: nothing in the open card is cut with an ellipsis.** Every line is one tone, whoever wrote it: the time stamp (`2026-10-09 06:35`, in a Box of fixed width so the words start at the same place on every line) is `dimColor` and the words (`Claude: step 2 done`) are the default colour; a long line wraps under its words. The newest 6 lines are shown; older ones behind a `Show the whole log` button, under the lines, that expands in place |
+| 2 gap, then 1 + 1 + lines | `Log` (bold), then straight under it **one** native `Input`, placeholder `Write a comment for Claude` (`Type your answer` on a question), with its own submit labelled `Comment` (`submitLabel`). No separate Comment button: the app draws the submit beside the field, and a second one is a bug. Enter or the submit adds the comment to the log as his. Toast `Comment added to BUG-0015.`. A comment is one Log line (line breaks become spaces) with no length limit: any length is written whole, never cut and never refused for length. Then the lines, **newest first, every line shown whole, wrapped over as many rows as it needs: nothing in the open card is cut with an ellipsis.** Every line is one tone, whoever wrote it: the time stamp (`2026-10-09 06:35`, in a Box of fixed width so the words start at the same place on every line) is `dimColor` and the words (`Claude: step 2 done`) are the default colour; a long line wraps under its words. The newest 6 lines are shown; older ones behind a `Show the whole log` button, under the lines, that expands in place |
 | 2 gap, then 1 | `Delete card…` (a plain, dim button), alone at the left, last on the card. Pressing it swaps the row for the question of 12.4 |
 
 The status box:
@@ -358,8 +363,8 @@ The status box:
 |---|---|---|
 | Waiting on him | the flag's | bold: glyph and `Plan ready: 3 steps. Claude is waiting for you to approve it.` / the question / `A step failed 4 times. Open the log to see why.` / `Held: reason. Claude will not go on until you approve.`; then the buttons (below), or for a question `Type your answer in the comment box below.` |
 | Waiting to start | `claude` | the three lines of section 9 |
-| Working | `claude` | the `● Working` label (accent, bold, no fill) and `Step 3 of 5: lane panels and spacing` (bold); the bar and `2 of 5 steps done`; `Last: step 2 done: header, 4 min ago`; `Branch kb-0014-board. No pull request yet.` (or `Pull request 14.`) |
-| Has children | default | `Waiting on KB-0017 and KB-0018: 1 of 2 done` and a plain button per child that opens it |
+| Working | `claude` | the `● Working` label (accent, bold, no fill) and `Step 3 of 5: lane panels and spacing` (bold); the bar and `2 of 5 steps done`; `Last: step 2 done: header, 4 min ago`; `Branch enh-14-board. No pull request yet.` (or `Pull request 14.`) |
+| Has children | default | `Waiting on BUG-0017 and BUG-0018: 1 of 2 done` and a plain button per child that opens it |
 | Otherwise | | no box |
 
 Flag button (one per flag; it moves the card like a drop on that lane, with that lane's toast; it is left out when the board has no Auto lane):
@@ -378,10 +383,11 @@ The view follows the live card. When the card moves out of the lane it was waiti
 
 The toolbar (`hooks/ui/toolbar.tsx`) sits between the header and the lanes on the Board tab, and is not drawn while a card is open. Two rows of native controls. Row 1: the `New card` button at the left (not drawn when the board cannot be read), the `Find` field in the growing space (section 13.1), and the one `Sort` (section 13) at the right edge. Row 2, a quiet sub-row one blank row under row 1 with its count text lined up with the label of `New card`: the dim card count (`32 cards`, or `4 of 32 match` while Find is on) at the left, and at the right ONE quiet plain button that names what it will do: `Collapse all` while any lane with cards is open, else `Expand all` (section 5). While Find is on the button is not drawn (lanes with matches are open whatever the folds say). When Find matches nothing the count is replaced by the line `No card matches "zzzz"` with its own `Clear`, and Enter in the Find field says the same in a toast. Two blank rows stand between the toolbar and the first lane.
 
-- **Press `New card`.** A second row opens under it: the title `Input` (placeholder `What needs doing?`), a `Lane` `Select`, `Cancel`; the one `Add` is the field's own submit (`submitLabel`), which the app draws beside the field, as in the comment field (section 11): no separate `Add` button, since a second one is a bug. Enter or that submit adds the card, the field clears and stays open. From `W` 76 the field, the lane and `Cancel` share one row; below that the field has the row to itself and the lane and `Cancel` sit under it. The field takes all the free width of its row (its Box has `flexGrow` 1, is a column so the native field stretches across it, and from 76 cells keeps at least 35% of the row); the `Lane` Box sizes to its value and does not grow; no Box in the row has a fixed width. Text longer than the field scrolls inside it as a native field does; there is no longest title. Nothing typed is lost: text that fits a title (one line, quotes removed, at most 120 characters) is the title and the card's body is empty; longer text becomes the card's body, word for word (its quotes and line breaks kept, control characters as spaces, a line starting `## ` given a leading backslash so it is not a section), and the title is its beginning, cut between words (a hard cut at 119 characters only when there is no space) and ended with `…`, 120 characters at most. The field takes the keyboard when the row opens, and **only then**.
+- **Press `New card`.** A second row opens under it: the title `Input` (placeholder `What needs doing?`), a `Type` `Select`, a `Lane` `Select`, `Cancel`; the one `Add` is the field's own submit (`submitLabel`), which the app draws beside the field, as in the comment field (section 11): no separate `Add` button, since a second one is a bug. Enter or that submit adds the card, the field clears and stays open. Three layouts: from `W` 92 the field, `Type`, `Lane` and `Cancel` share one row; from 60 to 91 the field has the row to itself and `Type`, `Lane` and `Cancel` share the row under it; below 60 the field has a row, `Type` has the next on its own, and `Lane` and `Cancel` share the last. The field takes all the free width of its row (its Box has `flexGrow` 1, is a column so the native field stretches across it, and from 92 cells keeps at least 35% of the row); the `Type` and `Lane` Boxes size to their values and do not grow; no Box in the row has a fixed width. Text longer than the field scrolls inside it as a native field does; there is no longest title. Nothing typed is lost: text that fits a title (one line, quotes removed, at most 120 characters) is the title and the card's body is empty; longer text becomes the card's body, word for word (its quotes and line breaks kept, control characters as spaces, a line starting `## ` given a leading backslash so it is not a section), and the title is its beginning, cut between words (a hard cut at 119 characters only when there is no space) and ended with `…`, 120 characters at most. The field takes the keyboard when the row opens, and **only then**.
+- **The types offered** are the board's types (`board.md` `types:`; unless it lists others: `bug`, `enhancement`, `chore`), by name in board order. The list starts on the board's first type and keeps the last pick for as long as the pane is open and that type is still on the board; the card gets that type, so its ID is that type's letters and the next number of that type (`BUG-0012`, `ENH-0007`: each type counts from 1 on its own).
 - **The lanes offered** are the lanes a person may create in, in board order: roles `intake`, `plan`, `auto`, `manual` and `backlog`, never a Claude-only lane. The lane shown is the one picked, else the first `intake` lane (Pending).
-- **Enter** in the field, or `Add`: makes the card at the end of the lane, empties the field, keeps the row open and gives the field the keyboard again. `Cancel` closes the row and drops what was typed. With no lane that takes cards the toast is `No lane takes new cards.`
-- Toast: `Added KB-0016 to Pending.` plus ` Claude is writing the plan.` (plan), ` Claude is starting.` (auto) or ` Claude is planning the first step.` (manual); when Claude is busy: ` Claude will start when it finishes what it is doing.` A card made in Pending or Backlog starts nothing. When the text was longer than a title the toast ends ` The full text is in the card.` The `created` prompt carries the short title.
+- **Enter** in the field, or `Add`: makes the card at the end of the lane, empties the field, keeps the row open and gives the field the keyboard again. `Cancel` closes the row and drops what was typed. With no lane that takes cards the toast is `No lane takes new cards.` A type the board does not have (the board changed meanwhile) is refused with `Unknown type "x". Nothing was added.`
+- Toast: `Added BUG-0016 to Pending.` plus ` Claude is writing the plan.` (plan), ` Claude is starting.` (auto) or ` Claude is planning the first step.` (manual); when Claude is busy: ` Claude will start when it finishes what it is doing.` A card made in Pending or Backlog starts nothing. When the text was longer than a title the toast ends ` The full text is in the card.` The `created` prompt carries the short title.
 - One field open at a time.
 
 The lane's own `+` and its create field are removed (KB-0024); the toolbar's `New card` row replaced them.
@@ -393,9 +399,9 @@ A press on a card's `⋯` opens no card. It shows a small menu directly under th
 | Level | Rows | What a press does |
 |---|---|---|
 | First (3 rows) | `Open card` | opens the card (section 10) |
-| | `Copy ID` | copies the ID, toast `Copied KB-0015.` |
+| | `Copy ID` | copies the ID, toast `Copied BUG-0015.` |
 | | `Delete card…` | goes to the delete level |
-| Delete (4 rows) | `Delete KB-0015?` (`error`), `This removes the card and its log.` (`dimColor`) | nothing; the menu stays |
+| Delete (4 rows) | `Delete BUG-0015?` (`error`), `This removes the card and its log.` (`dimColor`) | nothing; the menu stays |
 | | `Delete it` | asks Claude to delete the card (12.4 gives the toasts) |
 | | `Keep it` | back to the three rows |
 
@@ -403,7 +409,7 @@ One menu at a time, and none on a board that cannot be read (no `⋯` is drawn t
 
 ### 12.2 Model and thinking
 
-The open card's `Model` and `Thinking` `Select`s (section 10). Choosing writes the field at once; `Auto` removes it. Toasts: `KB-0015 will use opus.` `KB-0015 will think at medium.` `KB-0015 model is back to Auto.` `KB-0015 thinking is back to Auto.` When a worker is running add ` It takes effect from the next step.` (`thinking` reads with the pane's word, `extra` for `xhigh`.)
+The open card's `Model` and `Thinking` `Select`s (section 10). Choosing writes the field at once; `Auto` removes it. Toasts: `BUG-0015 will use opus.` `BUG-0015 will think at medium.` `BUG-0015 model is back to Auto.` `BUG-0015 thinking is back to Auto.` When a worker is running add ` It takes effect from the next step.` (`thinking` reads with the pane's word, `extra` for `xhigh`.)
 
 ### 12.3 Lane
 
@@ -411,7 +417,16 @@ The open card's `Lane` `Select` (it was `Move to`, which read as an order beside
 
 ### 12.4 Delete
 
-`Delete card…` in the open card asks in place (the small menu asks the same in its delete level, section 12): `Delete KB-0015? This removes the card and its log.` (`error`), then `Delete it` and `Keep it` buttons. Delete it asks Claude to delete the card (no file is touched) with the toast `Claude is deleting KB-0015.`, or, when Claude has a turn running or a worker on a card, `Claude will delete KB-0015 when it finishes what it is doing.` Keep it: the question goes.
+`Delete card…` in the open card asks in place (the small menu asks the same in its delete level, section 12): `Delete BUG-0015? This removes the card and its log.` (`error`), then `Delete it` and `Keep it` buttons. Delete it asks Claude to delete the card (no file is touched) with the toast `Claude is deleting BUG-0015.`, or, when Claude has a turn running or a worker on a card, `Claude will delete BUG-0015 when it finishes what it is doing.` Keep it: the question goes.
+
+### 12.5 Type and retype
+
+The open card's `Type` `Select` (section 10) holds the board's type names in board order (`bug`, `enhancement`, `chore` unless `board.md` lists others); its value is the card's own type. A card whose ID letters are no type on the board shows `No type` as its value only. **Picking another type writes nothing.** The list shows the pick and the question row of section 10 appears: `Retype BUG-0012 as enhancement? Its ID will change.` with `Retype` and `Cancel`.
+- `Cancel`, `Retype`, picking the card's own type again, opening another card, `◂ Board` and a new ID for the open card (Claude retyped it) put the pick away; the list goes back to the card's real type. Picking the card's own type, or a name that is no type on the board, does nothing else and shows no toast.
+- `Retype` asks Claude; no file is touched, since the pane cannot rename a file. It sends the prompt `Kanban: <owner> asked to retype BUG-0012 "Fix the morning summary date" as enhancement. Retype the card with the kanban skill.` (queue kind `retype`) and toasts `Claude is retyping BUG-0012 as enhancement.`, or, when Claude has a turn running or a worker on a card, `Claude will retype BUG-0012 when it finishes what it is doing.`
+- Claude then runs the skill's `retype` verb (`references/format.md` section 7): the card takes the next number of the new type, the file is renamed, `id:` changes, a Log line `retyped from BUG-0012 to ENH-0007` is added and the cards that name it as `parent:` follow. The open card, the card a worker or a turn is on, and prompts waiting in the queue follow the card to its new ID through its old ones, so the view stays open on the same card and its header reads `ENH-0007 (was BUG-0012)  in Pending`.
+- **Refused**, nothing queued or sent, with a toast: a card in an `auto` lane, one with a worker on it or the one the running turn is about (`BUG-0012 is being worked. Move it out of Auto or wait, then retype.`); a card no longer on the board (`No card BUG-0012 on the board.`); more than one file with the ID (`More than one file has ID BUG-0012: <files>. Fix by hand; nothing was changed.`); and a board that cannot be read (`The board file can't be read. Nothing was asked.`; the lists are not drawn then).
+- Claude never retypes on its own. When it thinks a card has another type it adds a Log line `suggests type enhancement: <reason>`, which the open card shows as the dim line of section 10 until a retype comes after it.
 
 ## 13. Sorting
 
@@ -420,8 +435,8 @@ The open card's `Lane` `Select` (it was `Move to`, which read as an order beside
 | Option | Orders by | Ties |
 |---|---|---|
 | `Your order` | the card's `order` number, ascending | the ID |
-| `Newest first` | ID, descending (IDs are in creation order) | |
-| `Oldest first` | ID, ascending | |
+| `Newest first` | creation time, newest first: the `created` date and the time of the card's first Log line. IDs no longer say which card is newer, since each type counts on its own | the ID, descending |
+| `Oldest first` | creation time, oldest first. A card with no creation time (made before the pane read one) counts as the oldest | the ID, ascending |
 | `Recently changed` | `updated` date, newest first | `order` |
 | `Title A to Z` | title, case-insensitive | `order` |
 | `Needs you first` | cards waiting on him first (section 9) | `order` |
@@ -437,7 +452,7 @@ The open card's `Lane` `Select` (it was `Move to`, which read as an order beside
 
 The toolbar's `Find` is a native `Input` (placeholder `Find a card`) in row 1 between `New card` and `Sort`; the app draws it at its own width. Below 60 cells it takes a row of its own under row 1. Its text is the `find` state value, empty when the session starts (it is not remembered).
 
-- **What matches.** Every word typed (split on spaces, ignoring case) must be a substring of the card's ID, its title or one of its labels (`hooks/lib/find.ts`). Not the card text.
+- **What matches.** Every word typed (split on spaces, ignoring case) must be a substring of the card's ID, one of its old IDs (`BUG-0012` finds the card that is `ENH-0007` now), the name of its type (`enhancement`), its title or one of its labels (`hooks/lib/find.ts`). Not the card text.
 - **Typing filters** at once (`onInput`). `Clear` (a plain button at the right of the field) shows while text is typed and empties it. **Enter** opens the first match in board order (lane by lane, each lane by card order); with no match nothing happens.
 - **The board while filtering.** Props carry only the matches, each lane's count is its matches, and `isFiltered` is true. A lane with matches opens whatever its fold and shows every match; a lane with none stays its one line with `0`; the empty-board hint never shows. Row 2 reads `4 of 32 match`.
 
@@ -476,14 +491,14 @@ The sentence is bold in the lane's colour (default for plain, `dimColor` for sam
 
 ### 14.3 The card in hand (ghost)
 
-A box of width `min(source card width, 44)` and height 2, `bmid` outline (colour of the lane under the pointer: `error` refuse, `claude` acts, default plain), opaque, drawn last. It sits so the pointer stays where he took hold, clamped inside the region. Row 1: ID zone 8 cells (`dimColor`), title bold, one row. Row 2: the sentence from 14.2 for the lane under the pointer, in its colour (`Drop on a lane. Let go anywhere else to cancel.` over no lane).
+A box of width `min(source card width, 44)` and height 2, `bmid` outline (colour of the lane under the pointer: `error` refuse, `claude` acts, default plain), opaque, drawn last. It sits so the pointer stays where he took hold, clamped inside the region. Row 1: ID zone `idw` cells (section 2; `dimColor`), title bold, one row. Row 2: the sentence from 14.2 for the lane under the pointer, in its colour (`Drop on a lane. Let go anywhere else to cancel.` over no lane).
 
 ### 14.4 What a release does
 
 | Release over | Result | Toast |
 |---|---|---|
-| the card's own lane | nothing (a place drop is 14.5) | `KB-0012 is already in {inbox}.` |
-| a refusing lane | the card goes back; nothing is written | `Needs You is Claude's lane. KB-0012 stays in Pending.` (error colour) |
+| the card's own lane | nothing (a place drop is 14.5) | `BUG-0012 is already in {inbox}.` |
+| a refusing lane | the card goes back; nothing is written | `Needs You is Claude's lane. BUG-0012 stays in Pending.` (error colour) |
 | an accepting lane | the move is sent; the card shows pending (7.3) until the board confirms, 2 s at most | below |
 | after the board changed under him | nothing moves | `The board changed while you were dragging. Try again.` |
 | read-only board | nothing moves | `The board file can't be read. Nothing was moved.` |
@@ -492,15 +507,15 @@ Accepted moves (card ID first; lane labels as on the board). `idle` / `busy` is 
 
 | Into | Toast |
 |---|---|
-| `intake` | `KB-0012 moved to Pending.` |
-| `backlog` | `KB-0012 moved to Backlog.` Nothing runs. |
-| `plan` | idle `KB-0012 moved to Plan. Claude is writing the plan.` busy `KB-0012 moved to Plan. Claude will start when it finishes what it is doing.` |
-| `auto` | idle `KB-0012 moved to Auto. Claude is starting.` busy `KB-0012 moved to Auto. Claude will start when it finishes what it is doing.` |
-| `auto`, flagged `GATE` from `needs-you` (or `gated`) | idle `KB-0007 approved. Claude is carrying on in Auto.` busy `KB-0007 approved. Claude will carry on in Auto when it finishes what it is doing.` |
-| `manual` | idle `KB-0012 moved to Manual. Claude is planning the first step.` busy as `plan` |
-| `done` | `KB-0012 marked finished.` |
-| `parked` | `KB-0012 parked.` |
-| `scrapped` (Discarded) | `KB-0012 scrapped.` |
+| `intake` | `BUG-0012 moved to Pending.` |
+| `backlog` | `BUG-0012 moved to Backlog.` Nothing runs. |
+| `plan` | idle `BUG-0012 moved to Plan. Claude is writing the plan.` busy `BUG-0012 moved to Plan. Claude will start when it finishes what it is doing.` |
+| `auto` | idle `BUG-0012 moved to Auto. Claude is starting.` busy `BUG-0012 moved to Auto. Claude will start when it finishes what it is doing.` |
+| `auto`, flagged `GATE` from `needs-you` (or `gated`) | idle `BUG-0007 approved. Claude is carrying on in Auto.` busy `BUG-0007 approved. Claude will carry on in Auto when it finishes what it is doing.` |
+| `manual` | idle `BUG-0012 moved to Manual. Claude is planning the first step.` busy as `plan` |
+| `done` | `BUG-0012 marked finished.` |
+| `parked` | `BUG-0012 parked.` |
+| `scrapped` (Discarded) | `BUG-0012 scrapped.` |
 
 Add ` It sits where Title A to Z puts it.` (the lane's sort) when the target lane is not in `Your order`. The same sentences are used for a move from the open card's `Lane` or a flag-box button.
 
@@ -508,7 +523,7 @@ Add ` It sits where Title A to Z puts it.` (the lane's sort) when the target lan
 
 ### 14.5 Placing a card between two others
 
-When the lane under the pointer is in `Your order` and accepts the drop, a **slot** shows where the card will sit: a 1-row box in the gap row nearest the pointer (the gap under the card the pointer is in the bottom half of, or above the one it is in the top half of), full tile width, surface fill, `claude` outline, bold `claude` text centred: `Place between KB-0008 and KB-0009`, `Place first`, or `Place last`. It sits in the gap row that already exists, so nothing moves. In any other sort there is no slot.
+When the lane under the pointer is in `Your order` and accepts the drop, a **slot** shows where the card will sit: a 1-row box in the gap row nearest the pointer (the gap under the card the pointer is in the bottom half of, or above the one it is in the top half of), full tile width, surface fill, `claude` outline, bold `claude` text centred: `Place between BUG-0008 and BUG-0009`, `Place first`, or `Place last`. It sits in the gap row that already exists, so nothing moves. In any other sort there is no slot.
 
 On release the move carries `before`: the ID of the card the slot is above, or `null` for the end. The module writes `order` midway between the two neighbours (at the ends, 1000 beyond the first or last; when two neighbours have no number between them, renumber the lane in steps of 1000). Cards that are not placed (any other sort, creating, Claude's moves) go to the end of the lane's order.
 
@@ -530,7 +545,7 @@ Left button. A right press does nothing in the board region (the app opens its o
 | `⋯` zone | `⋯` bright | open the small menu under the card; pressed again, close it | none |
 | Menu row `Open card`, `Copy ID`, `Delete card…` | the row lights | open the card / copy the ID / ask to delete (12) | none |
 | Menu row `Delete it`, `Keep it` | the row lights | ask Claude to delete / back to the three rows | none |
-| Menu row `Delete KB-0015?`, the note | none | nothing (the menu stays) | none |
+| Menu row `Delete BUG-0015?`, the note | none | nothing (the menu stays) | none |
 | Lane title bar: chevron, name, count | none | collapse the lane | drop zone |
 | Collapsed lane line | `Open` bright | open the lane | drop zone |
 | `+ 3 more` | underline | show the rest | none |
@@ -567,11 +582,11 @@ Other strings:
 | Where | Text |
 |---|---|
 | Empty board, Pending body, 3 rows | `The board is empty.` (bold) / `Click + to add a card, or tell Claude what to build.` / `Then drag a card to Plan, Auto or Manual to hand it to Claude.` (`dimColor`; use the board's own lane labels) |
-| Delete question | `Delete KB-0015? This removes the card and its log.` then `Delete it` and `Keep it` buttons (12.4) |
-| Toasts | `Copied KB-0012.` `Deleted KB-0012.` `Comment added to KB-0015.` `Could not delete KB-0012: reason.` and the move, create and settings toasts above |
+| Delete question | `Delete BUG-0015? This removes the card and its log.` then `Delete it` and `Keep it` buttons (12.4) |
+| Toasts | `Copied BUG-0012.` `Deleted BUG-0012.` `Comment added to BUG-0015.` `Could not delete BUG-0012: reason.` and the move, create and settings toasts above |
 | Board unreadable | a row under the header and toolbar in `error`: `The board file can't be read. Showing the last good copy; moves are off.` |
 | Unreadable card files | under the lanes, a `dimColor` row `2 cards in kanban/ can't be read.` |
-| No board in the project | the whole region: `This project has no board yet. Ask Claude to set one up.` |
+| No board in the project | the whole region: `This project has no board yet.` and a `Set up a board` button. It also shows from the moment the person presses Enter on `/kanban:setup` or `/kanban:kanban`, until the lanes appear |
 
 ## 17. Hit rectangles, `W = 80` (`B = 76`, `iw = 72`)
 
@@ -677,20 +692,20 @@ The pane makes the main session the board's manager (`hooks/register.tsx` `promp
 | Part | Text |
 |---|---|
 | Always | `Kanban board: this project has kanban/board.md (owner <owner>). You are its manager. Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").` |
-| When cards wait in a Needs You lane | a second line `Waiting on <owner>: KB-0036 PLAN READY; KB-0041 QUESTION: which colour?`: at most 5 cards, each as ID and flag (the flag cut at 60 characters, the ID alone when the flag is empty), then `and N more` |
+| When cards wait in a Needs You lane | a second line `Waiting on <owner>: BUG-0036 PLAN READY; ENH-0041 QUESTION: which colour?`: at most 5 cards, each as ID and flag (the flag cut at 60 characters, the ID alone when the flag is empty), then `and N more` |
 
 - **When.** Only for a prompt the person types in the composer or sends through Remote Control, in a project whose board can be read and written. Never for a `Kanban:` prompt, a slash command, an SDK or scheduled prompt, or a read-only board. The cost is about 45 tokens a prompt, more when cards wait.
 - **Never carries** a card title, a card body or a Log line: the owner, IDs and flags only.
 
 **Busy during any turn.** The pane is busy from the start of every turn (`inTurn`), not only a turn it started, and idle again when the main session's turn completes.
 
-**Cards named in chat count as worked.** A typed prompt that contains a full card ID on the board (any letter case) marks that card as the one being worked, and so does a card file the main session writes in a turn not started by a `Kanban:` prompt. The header then reads `Claude is on KB-0057`, as for a pane prompt, until the turn completes.
+**Cards named in chat count as worked.** A typed prompt that contains a full card ID on the board (any letter case) marks that card as the one being worked, and so does a card file the main session writes in a turn not started by a `Kanban:` prompt. The header then reads `Claude is on ENH-0057`, as for a pane prompt, until the turn completes.
 
-**Reserve-first Add.** The pane's `Add` (section 11) writes `next_id` in `board.md` first and the card file second, so two writers never take one number. If a file for the number already exists the pane writes no card and shows the toast `KB-0016 was just taken. Press Add again.` A `Write` that would create a second file for an ID that already has one is denied.
+**Reserve-first Add.** The pane's `Add` (section 11) writes the chosen type's counter line (`next_bug`, `next_enh`, `next_chore`: one per type, its letters in lowercase) in `board.md` first and the card file second, so two writers never take one number of a type. The number is the larger of the counter, one more than the highest file of that type, and one more than any old ID of that type. If a file for the ID already exists the pane writes no card and shows the toast `BUG-0016 was just taken. Press Add again.` A `Write` that would create a second file for an ID that already has one is denied. A retype (12.5) is the one thing that changes a card's ID; it reserves the new type's counter the same way, and the old ID is never handed out again.
 
 ## 21. Live updates
 
-The pane re-draws from the board about once a second and at once after Claude edits a card. Everything in section 8 is recomputed each time. The chosen tab, the open card menu, the open card, an open create field, fold choices, the sort of each lane and the scroll position are kept across redraws. A card Claude moves while he is dragging does not cancel the drag; the release is judged against the board as it is then (14.4, stale). The open card follows the card by ID.
+The pane re-draws from the board about once a second and at once after Claude edits a card. Everything in section 8 is recomputed each time. The chosen tab, the open card menu, the open card, an open create field, fold choices, the sort of each lane and the scroll position are kept across redraws. A card Claude moves while he is dragging does not cancel the drag; the release is judged against the board as it is then (14.4, stale). The open card follows the card by ID, and through a retype (12.5) by its old IDs, so it stays open on the same card under its new ID.
 
 A card moved outside the pane (in Obsidian's Bases board, which writes only `status`) is noticed by the same refresh: when a card's `status` differs from the last refresh and its newest `moved <old> -> <new>` Log line does not name the new lane, and the next refresh still sees it (Claude writes `status` and its Log line in two edits), the pane appends one Log line `moved <old> -> <new> in Obsidian` (by the board owner; `updated` is set with it). No prompt is sent, no toast shows, `order` is not changed, and the Log line it writes is what stops a second one.
 
@@ -701,7 +716,7 @@ The builders work from this list. Each line is a change to `hooks/board.tsx`, `h
 **Layout and drawing**
 1. Cell size is 8.25 by 20 px; fills paint (`userMessageBackground`); borders are zero-cell on the desktop (section 0, `b`).
 2. Margins: 2 cells left and right of everything (was 0 and 1).
-3. **Native header** (section 3): flex rows of native controls with no fill and no outline. Row 1 is what waits on him (one filled `3 need you` button, the kinds beside it) and the two tabs; the rows under it are what Claude is doing (`● Claude is on KB-0014`, the step, `1 of 3 workers`, `○ 1 waiting to start`) and `changed 11:33` without seconds. `queued` is renamed `waiting to start` everywhere.
+3. **Native header** (section 3): flex rows of native controls with no fill and no outline. Row 1 is what waits on him (one filled `3 need you` button, the kinds beside it) and the two tabs; the rows under it are what Claude is doing (`● Claude is on ENH-0014`, the step, `1 of 3 workers`, `○ 1 waiting to start`) and `changed 11:33` without seconds. `queued` is renamed `waiting to start` everywhere.
 4. **Lane panels** (section 5): a lane with cards is an outlined panel with a surface-filled title bar and 1-row gaps. Replaces the bare header line directly over butted tiles.
 5. **Every lane is a row** (sections 5 and 6): in board order, an empty lane or a collapsed lane is one line in its place, and `done`, `backlog`, `parked` and `scrapped` start collapsed. There is no strip of pills.
 6. **No sentence on a lane with cards.** The rule sentence is not drawn on hover (reveals are off); an empty lane's line carries a short hint, and a lane being dragged over shows its drop sentence.
@@ -710,8 +725,8 @@ The builders work from this list. Each line is a change to `hooks/board.tsx`, `h
 9. **The card's second line** is its status and progress (section 8), with the time it last moved.
 10. **Working** card: unchanged label, now with a step bar and step text. **Waiting to start** is a new state (section 9).
 11. **Waiting on him** is flag **and** Claude-only lane; stale flags are ignored (section 9).
-12. **Open card:** the log, plan steps and description are shown in full, wrapped; one comment field with its own submit; `Lane` shows the card's real lane; status box; plan steps; the log's last 6 lines. New: a row of three selects, `Lane`, `Model`, `Thinking`, with a line under them (section 10).
-13. **Creating a card** (section 11): from the toolbar's `New card` row (title, lane, `Add`, `Cancel`). The lane's own `+` field is removed (KB-0024).
+12. **Open card:** the log, plan steps and description are shown in full, wrapped; one comment field with its own submit; `Lane` shows the card's real lane; status box; plan steps; the log's last 6 lines. New: four selects, `Type`, `Lane`, `Model`, `Thinking`, with a line under them (section 10); `Type` asks before it retypes (12.5).
+13. **Creating a card** (section 11): from the toolbar's `New card` row (title, type, lane, `Add`, `Cancel`). The lane's own `+` field is removed (KB-0024).
 14. **Widening is option B and nothing else** (decided): cards never flow across; at `iw >= 100` the Label and Changed columns appear and the title bar shows their headings; the board stops growing at 150 cells. Remove the `t = floor(W/49)` rule. Options A, C, D, E are gone from this spec and from the mock.
 15. **Tabs** (section 3, 4): `Board` and `Settings`, drawn in the header's first row. **Settings is a tab** that replaces the lanes, not a box that opens under the header and pushes them down.
 16. **Settings tab** (section 4): the five settings become Workers at once plus, for each of Manager, Planner, Worker, Advisor, a model Select and a thinking Select beside it, as flex rows with no outline; the default and a `Reset` show only on a row that differs; the app's own usage sentence in place of a cost table; `Restore all defaults`. The built Settings was five Selects in one flat row, with the label inside each, and had no thinking.
@@ -759,10 +774,14 @@ The builders work from this list. Each line is a change to `hooks/board.tsx`, `h
 10. Fresh install: the Settings tab says `Everything is at its default`; no `Reset` shows; Workers at once reads `2`; the models read `opus`, `opus`, `sonnet`, `fable` and the thinking Selects `medium (recommended)`, `high`, `medium (recommended)`, `high (recommended)`.
 11. Change Planner thinking to `extra`: the row shows `Default: opus, high thinking` and `Reset`, and `Restore all defaults` appears (pressing it asks `Put every setting back to its default?`; `Keep` writes nothing); `Reset` puts `high` back and the saved key is gone.
 11a. Change Planner thinking to `extra` and press `Save as defaults` (toast `Saved as your defaults.`): the row now reads as at its default and `Restore original defaults` appears; change it to `low` and the row shows `Default: opus, extra thinking` and `Reset` puts `extra` back; press `Restore original defaults` and `Restore` (toast `All settings are back to the original defaults.`): Planner thinking reads `high` and the saved defaults are gone; another board is unchanged throughout.
-12. Open KB-0015, choose Model `opus` and Thinking `medium`: the card shows `opus, medium` at once; move it to Auto and back: the chip stays; the next planner or worker agent for it starts on opus at medium; `Auto` in a select removes that line from the file; when Claude moves the card to Done both lines are removed.
+12. Open BUG-0015, choose Model `opus` and Thinking `medium`: the card shows `opus, medium` at once; move it to Auto and back: the chip stays; the next planner or worker agent for it starts on opus at medium; `Auto` in a select removes that line from the file; when Claude moves the card to Done both lines are removed.
 13. A card on Auto uses Settings, Planner for its plan and Settings, Worker for its steps.
 14. No `%` appears anywhere on the Settings tab.
 15. The header at `W` = 60 shows both tabs and `changed`; no part of it overlaps.
 16. The default board shows seven lanes in order: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. An empty Plan or Backlog is one line; Done and Backlog start collapsed; a collapsed line takes a drop.
 17. A right press on a card opens nothing of ours; a click on a card opens it.
-17a. At `W` = 45, 60, 80 and 108: a card's `⋯` opens no card but shows `Open card`, `Copy ID` and `Delete card…` whole, as wide as the card, directly under it, and the next card sits 3 rows lower; `Delete card…` turns it into `Delete KB-0015?`, `This removes the card and its log.`, `Delete it`, `Keep it` over 4 rows, the next card 4 rows lower, and `Keep it` goes back to three; `Copy ID` toasts `Copied KB-0015.` and closes it; `Open card` opens the card; `Delete it` toasts `Claude is deleting KB-0015.`; pressing the same `⋯` again, another card, the lane title bar, or the Settings tab closes it; the one-second refresh keeps it open; on a board that cannot be read there is no `⋯`.
+17a. At `W` = 45, 60, 80 and 108: a card's `⋯` opens no card but shows `Open card`, `Copy ID` and `Delete card…` whole, as wide as the card, directly under it, and the next card sits 3 rows lower; `Delete card…` turns it into `Delete BUG-0015?`, `This removes the card and its log.`, `Delete it`, `Keep it` over 4 rows, the next card 4 rows lower, and `Keep it` goes back to three; `Copy ID` toasts `Copied BUG-0015.` and closes it; `Open card` opens the card; `Delete it` toasts `Claude is deleting BUG-0015.`; pressing the same `⋯` again, another card, the lane title bar, or the Settings tab closes it; the one-second refresh keeps it open; on a board that cannot be read there is no `⋯`.
+18. The ID column: a board whose longest ID is `BUG-0012` (8 characters) draws it 9 cells wide in every lane; one with `CHORE-0001` 11; the row-2 text and the dragged card's ID zone use the same width; a board of 11-character IDs or more stops at 12 and cuts the ID; the title column has `idw - 8` cells less than with an 8-cell column.
+19. The `New card` row at `W` = 59, 60, 91 and 92: at 92 the field, `Type`, `Lane` and `Cancel` are one row; at 91 and 60 the field has a row and `Type`, `Lane`, `Cancel` share the next; at 59 `Type` has a row of its own and `Lane` and `Cancel` the last. `Type` starts on the board's first type; after adding an `enhancement` it still reads `enhancement`; the new card is `ENH-` and its number is that type's own next (a board with `BUG-0012` and no `ENH-` card gives `ENH-0001`); `board.md` holds `next_enh` before the card file exists.
+20. Open `BUG-0012` in Pending, pick `enhancement` in `Type`: nothing is written and the question `Retype BUG-0012 as enhancement? Its ID will change.` shows with `Retype` and `Cancel`; `Cancel` puts `bug` back. `Retype` toasts `Claude is retyping BUG-0012 as enhancement.` and sends the retype prompt; when Claude has finished, the same card is open and the header reads `ENH-0001 (was BUG-0012)  in Pending`. In Auto, or with a worker on it, `Retype` toasts `BUG-0012 is being worked. Move it out of Auto or wait, then retype.` and sends nothing. A card whose letters are no type shows `No type`. A Log line `suggests type enhancement: ...` shows `Claude suggests enhancement: ...` until a `retyped` line follows it. The four lists are one row at `W` = 90, two rows of two at 89 and 60, stacked at 59.
+21. `Find a card` with `bug` finds every `BUG-` card; with `BUG-0012` it finds the card that is `ENH-0001` now. `Newest first` puts the card made last first even when its number is lower than an older card of another type; a card with no creation time sorts as the oldest.

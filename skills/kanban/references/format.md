@@ -6,7 +6,7 @@ The one source of truth. `hooks/lib/*.ts` (hand-rolled parser) and `skills/kanba
 
 - `kanban/board.md`: settings and lanes.
 - `kanban/DECISIONS.md`: decision log.
-- `kanban/<ID>-<slug>.md`: one card, e.g. `kanban/KB-0012-fix-the-morning-summary-date.md`. A card file is a top-level `kanban/*.md` whose name matches `^[A-Z]{1,10}-\d{4,}-.+\.md$`.
+- `kanban/<ID>-<slug>.md`: one card, e.g. `kanban/BUG-0012-fix-the-morning-summary-date.md`. A card file is a top-level `kanban/*.md` whose name matches `^[A-Z]{1,10}-\d{4,}-.+\.md$`. A retype renames the file to the new ID and the same slug (`ENH-0007-fix-the-morning-summary-date.md`); nothing else renames a card file.
 - `kanban/` sits at the repo root. Nothing else is read: other files and all subfolders are ignored.
 
 ## 2. Frontmatter subset grammar
@@ -34,7 +34,7 @@ Written in this order. Required: `id`, `status`. Every other field is written on
 
 | Field | Type | Default | Written by | Notes |
 |---|---|---|---|---|
-| `id` | `<PREFIX>-<n>` | none (required) | skill or pane, at creation | Section 7. Never changes. |
+| `id` | `<TYPE LETTERS>-<n>` | none (required) | skill or pane, at creation | Section 7. Changes only on a retype, which Logs the old one. |
 | `status` | lane label | none (required) | either | Spelled as in `board.md`; read case-insensitively, trimmed. Pane writes it on a drop. |
 | `order` | integer `^\d+$` | lane max + 1000 | either | Section 9. Absent or empty reads as 0. Pane writes it on a drop. |
 | `created` | date | today | skill or pane, at creation | Never changes. |
@@ -42,7 +42,7 @@ Written in this order. Required: `id`, `status`. Every other field is written on
 | `flag` | free text | empty | skill | Shown as a badge: `PLAN READY`, `QUESTION: <question>`, `FAILED`, `GATE: <reason>`. |
 | `branch` | free text | empty | skill | Branch name. |
 | `pr` | free text | empty | skill | PR number or URL. |
-| `parent` | card ID | empty | skill | Parent card's ID on a child card. |
+| `parent` | card ID | empty | skill | Parent card's ID on a child card. A retype of the parent repoints it. |
 | `labels` | inline list | `[]` | skill | `claude` marks Claude's own suggestions. Readers also accept a block list. |
 | `model` | `haiku` `sonnet` `opus` `fable` | absent (Auto) | pane, or skill when asked | The card's own model. Absent, empty or any other word means Auto: the board's setting applies. Written only when set, removed on Auto, never written as `auto`. |
 | `thinking` | `low` `medium` `high` `xhigh` `max` | absent (Auto) | pane, or skill when asked | The card's own thinking level, with the same rules as `model`. A card can pin one and leave the other on Auto. |
@@ -74,6 +74,10 @@ One line per event, appended after the last non-blank line of `## Log`, newest l
 - `retry n of 3: <what failed>`: an Auto retry failed, e.g. `retry 2 of 3: tests failed`.
 - `question: <the question>`: Claude stopped to ask.
 - `approved: <flag text>`: the owner dragged a card flagged `GATE` out of Needs You; the text is the flag that was held.
+- `retyped from <old ID> to <new ID>`: the card's type changed, e.g. `retyped from BUG-0012 to ENH-0007`. Exactly this text: the old IDs of a card are read from these lines (section 7).
+- `spawned from <ID>`: on a card made from another card; `<ID>` is the source.
+- `spawned <ID>: <title>`: on the source card, for the card made from it.
+- `suggests type <type>: <reason>`: Claude thinks the card has another type. It never retypes on its own.
 - `merged <branch>`: the branch was merged.
 - `waiting on <child IDs>`: a parent stopped because those child cards are not Done.
 - `closed by <owner>: <outstanding or nothing outstanding>`: the owner dropped a card into Done.
@@ -90,8 +94,8 @@ Timestamps come from the shell, never guessed: bash `date "+%Y-%m-%d %H:%M"`, Po
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `prefix` | `[A-Z]{1,10}` | `KB` | |
-| `next_id` | integer, 1 or more | `1` | Section 7. |
+| `types` | list of `name (LETTERS)` or `name` | `bug (BUG)`, `enhancement (ENH)`, `chore (CHORE)` | The card types; section 7. Written like `lanes:`. |
+| `next_<letters>` | integer, 1 or more | `1` | One line per type, its letters in lowercase: `next_bug: 13`. The type's next number; section 7. |
 | `owner` | text | none (required) | The person's first name; `<who>` for their Log lines. |
 | `workers` | integer 1-5 | `2` | Max concurrent agents, planning agents included. |
 | `manager_model` | `haiku` `sonnet` `opus` `fable` | `opus` | |
@@ -104,7 +108,9 @@ Timestamps come from the shell, never guessed: bash `date "+%Y-%m-%d %H:%M"`, Po
 | `advisor_thinking` | `low` `medium` `high` `xhigh` `max` `none` | `high` | The Agent tool's `effort` for the advisor. |
 | `default_workers`, `default_manager_model`, `default_manager_thinking`, `default_planner_model`, `default_planner_thinking`, `default_worker_model`, `default_worker_thinking`, `default_advisor_model`, `default_advisor_thinking` | as the setting named after `default_` | none | The board's saved default for that setting. |
 
-An absent key takes its `default_` key if the board has one, else its built-in default (the Default column), so a new board holds only `prefix`, `next_id`, `owner` and `lanes:` and a person's change adds one line. A `default_` line belongs to its board alone: another board, and a board made later, keep the built-in defaults. For a thinking key the word `none` means Not set: no `effort` is passed and the model uses its own default; any other word is the level. Every level is allowed with every model. The pane shows `xhigh` as "extra"; files and Agent calls keep `xhigh`. "Ultracode" is the app's own multi-agent mode, chosen in the app's effort control: it is never written to a thinking line and never passed as an agent's `effort`. The pane marks the level the app recommends for a role's model (opus medium, fable high, sonnet medium, haiku medium); changing a role's model does not change its thinking. The only usage figure is the app's own sentence: "Claude thinks longer with Max effort and can consume 3.5× or more usage than Medium." The pane's `Reset` removes the key's line, and `Restore all defaults` removes every settings line (`workers` and the eight model and thinking keys), so each lands on the board's saved default, else the built-in one; `prefix`, `next_id`, `owner` and `lanes:` stay. `Save as defaults` writes, for each of the nine settings, its current value to its `default_` line when that differs from the built-in value (added just before the closing `---`, or replaced in place) and removes that `default_` line when it equals the built-in value, then removes the nine settings lines; the board reads the same values. `Restore original defaults` (the pane asks first) removes every `default_` line and every settings line, so each setting reads its built-in value. A line equal to its default is allowed and reads the same as no line. A `default_` line takes the same values as its setting; any other value, or a missing `owner`, is `bad-setting`.
+An absent key takes its `default_` key if the board has one, else its built-in default (the Default column), so a new board holds only `owner` and `lanes:` and a person's change adds one line. A `default_` line belongs to its board alone: another board, and a board made later, keep the built-in defaults. For a thinking key the word `none` means Not set: no `effort` is passed and the model uses its own default; any other word is the level. Every level is allowed with every model. The pane shows `xhigh` as "extra"; files and Agent calls keep `xhigh`. "Ultracode" is the app's own multi-agent mode, chosen in the app's effort control: it is never written to a thinking line and never passed as an agent's `effort`. The pane marks the level the app recommends for a role's model (opus medium, fable high, sonnet medium, haiku medium); changing a role's model does not change its thinking. The only usage figure is the app's own sentence: "Claude thinks longer with Max effort and can consume 3.5× or more usage than Medium." The pane's `Reset` removes the key's line, and `Restore all defaults` removes every settings line (`workers` and the eight model and thinking keys), so each lands on the board's saved default, else the built-in one; `types:`, the `next_<letters>` lines, `owner` and `lanes:` stay. `Save as defaults` writes, for each of the nine settings, its current value to its `default_` line when that differs from the built-in value (added just before the closing `---`, or replaced in place) and removes that `default_` line when it equals the built-in value, then removes the nine settings lines; the board reads the same values. `Restore original defaults` (the pane asks first) removes every `default_` line and every settings line, so each setting reads its built-in value. A line equal to its default is allowed and reads the same as no line. A `default_` line takes the same values as its setting; any other value, or a missing `owner`, is `bad-setting`.
+
+**Types.** `types:` is a list, written like `lanes:`; each item is `name (LETTERS)` or a bare `name`. A name fits `^[a-z][a-z0-9-]{0,19}$`; letters fit `^[A-Z]{2,5}$` and are not `ID`. A bare name's letters are the name in capitals when it has 5 letters or fewer, else its first 3. Names are unique, letters are unique; a type that breaks a rule, or an empty list, is `bad-setting`. No `types:` means the three defaults. Every type has one counter line `next_<letters lowercase>`; an absent line counts as 1, a value that is not a whole number of 1 or more is `bad-setting`. A leftover `prefix:` or `next_id:` line in an older `board.md` is ignored and kept as it is.
 
 **Lanes.** `lanes:` is a block list; list order is board order. Each item is `Label (role)`; the exact pattern is under "Roles older boards may list" below.
 
@@ -131,17 +137,20 @@ An absent key takes its `default_` key if the board has one, else its built-in d
 
 ## 7. IDs
 
-`<PREFIX>-<n>`, `n` zero-padded to 4 digits (more digits past 9999). Valid IDs match `^[A-Z]{1,10}-\d{4,}$`. The branch for a card is `kb-<n>-<slug>` with `n` unpadded (`kb-12-fix-the-morning-summary-date`); see lanes.md Auto step 3.
+`<LETTERS>-<n>`: the letters of the card's type (section 6) and a number, `n` zero-padded to 4 digits (more digits past 9999). Valid IDs match `^[A-Z]{1,10}-\d{4,}$`. Every card has exactly one type, read from its ID: there is no `type:` line. Each type counts from 1 on its own, so `BUG-0001`, `ENH-0001` and `CHORE-0001` can all exist. The branch for a card is `<letters lowercase>-<n>-<slug>` with `n` unpadded (`bug-12-fix-the-morning-summary-date`); see lanes.md Auto step 3.
 
-- Allocate `n = max(next_id from board.md, highest existing n + 1)`. Highest existing n: scan top-level `kanban/*.md` names matching `^<PREFIX>-(\d+)(-.*)?\.md$` for this prefix, case-sensitive; other prefixes, `board.md` and `DECISIONS.md` are ignored. This scan is deliberately looser than section 1, so a hand-made file never causes reuse. With no cards, the highest existing n is 0.
-- Reserve first, write after. With `n` from the line above and `k` the number of cards about to be made (1 for a single add; all the child cards of a plan split together), replace the exact line `next_id: <next_id as you read it>` with `next_id: <n + k>` in one edit of `board.md`. If that exact line is no longer in the file (someone else changed it meanwhile), re-read `board.md` and start again from the new value. Only after the reservation succeeded, write the card file(s), numbered `n` to `n + k - 1`.
+- Allocate `n = max(the type's counter, highest existing n + 1, highest retired n + 1)`. The counter is the line `next_<letters lowercase>` in `board.md` (absent is 1). Highest existing n: scan top-level `kanban/*.md` names matching `^<LETTERS>-(\d+)(-.*)?\.md$` for these letters, case-sensitive; other letters, `board.md` and `DECISIONS.md` are ignored. This scan is deliberately looser than section 1, so a hand-made file never causes reuse. Highest retired n: the same letters among the old IDs of every card (the `retyped from` Log lines, below). With neither, the highest is 0.
+- Reserve first, write after. With `n` from the line above and `k` the number of cards about to be made (1 for a single add; all the child cards of a plan split together), replace the exact line `next_<letters>: <counter as you read it>` with `next_<letters>: <n + k>` in one edit of `board.md`. If the type has no counter line, add `next_<letters>: <n + k>` just before the closing `---` (section 11) instead. If that exact line is no longer in the file (someone else changed it meanwhile), or a line has appeared, re-read `board.md` and start again from the new value. Only after the reservation succeeded, write the card file(s), numbered `n` to `n + k - 1`. A counter never goes down.
 - Before writing a card file, check that no file in `kanban/` already starts with `<ID>-`; if one does, reserve a new number. A reserved number is never given back, so a card that fails half-way leaves a gap, which is fine.
-- IDs are never renumbered and never reused; gaps stay. A card's filename starts with `<id>-`.
+- An ID changes only on a retype; no ID is ever handed out twice; gaps stay. A card's filename starts with `<id>-`.
+- **Retype.** A card gets another type: it takes the next number of the new type (allocated and reserved as above), and in this order: the file is renamed to `<new ID>-<same slug>.md` (section 8); `id:` is set to the new ID and `updated:` to today; one Log line `retyped from <old ID> to <new ID>` is appended (section 5); `parent:` is set to the new ID in every card whose `parent:` is the old ID (their other lines, `updated` included, stay). Nothing else changes: `branch:`, `pr:`, the branch itself, the body, mentions in other cards and DECISIONS.md keep the old ID. A retype is refused while the card is in an `auto` lane or an agent is on it (`being-worked`), and for a type the board does not have (`unknown-type`). Claude retypes only when asked.
+- **Old IDs.** The old IDs of a card are the `<old ID>` of its `retyped from` Log lines, so a card retyped twice has two. An old ID is retired for good and always resolves to the card that holds it now (chains included): asking for `BUG-0012` after the retype answers with `ENH-0007`, and the reply names both.
+- **Shorthand.** `BUG-0012`, `bug-12`, `bug 12` and `enhancement 7` all name a card: the type's name or letters in any case, then the number, padded or not. Letters that are no type on the board are still read (`KB-0034` finds the card that was `KB-0034`). A bare `12` names a card only when exactly one card has that number (its current ID first; when no card has it now, a retired ID); otherwise the candidates are listed (`ambiguous-number`) and nothing changes. Text that fits none of these is not an ID.
 - A duplicate or junk card is deleted outright. Abandoned real work goes to the lane with role `scrapped`.
 
 ## 8. Slug
 
-Computed from the title, fixed at creation (a title change never renames the file):
+Computed from the title, fixed at creation (a title change never renames the file; a retype changes the ID in the file name and keeps the slug):
 1. Lowercase; strip diacritics (decompose, drop combining marks).
 2. Every run of characters outside `[a-z0-9]` becomes one `-`; trim leading and trailing `-`.
 3. If longer than 40, keep 40 characters; unless the 41st is `-`, drop the cut word back to the last `-` (a lone word over 40 is hard-cut); trim trailing `-`.
@@ -151,7 +160,7 @@ Computed from the title, fixed at creation (a title change never renames the fil
 
 ## 9. Order within a lane
 
-`order` is an integer; a lane is sorted by `order`, ties by ID.
+`order` is an integer; a lane is sorted by `order`, ties by ID (letters, then number).
 - A new or moved card takes the lane's highest `order` + 1000 (1000 when the lane is empty). A moved card is not counted in its target lane.
 - Between two cards: the midpoint, `floor((a + b) / 2)`.
 - No integer gap (`b - a < 2`): renumber that one lane 1000, 2000, ... in sorted order, editing only the `order:` lines. No other lane changes.
@@ -172,10 +181,10 @@ A `# Decisions` heading, a blank line, then one line per decision. The line, the
 
 ## 11. Editing rules
 
-- Edit only the named lines: a card's `status`, `order`, `updated`; the `# ` title line (a rename, with `updated` and one Log line; the file name never changes); a card's `model` and `thinking` (set, removed on Auto, or removed when Claude moves the card to the lane with role `done`, with `updated`); one appended Log line; the settings lines in `board.md`; `next_id`; one appended DECISIONS line. The skill also edits `flag`, `branch`, `pr`, `parent`, `labels`, the body and `## Plan`, only when asked to.
+- Edit only the named lines: a card's `status`, `order`, `updated`; the `# ` title line (a rename, with `updated` and one Log line; the file name never changes); a card's `model` and `thinking` (set, removed on Auto, or removed when Claude moves the card to the lane with role `done`, with `updated`); one appended Log line; the settings lines in `board.md`; a type's `next_<letters>` counter line; one appended DECISIONS line. A retype (section 7) edits, besides its counter line: the card's file name, its `id` and `updated` lines, one appended Log line, and the `parent` line alone of each child card. The skill also edits `flag`, `branch`, `pr`, `parent`, `labels`, the body and `## Plan`, only when asked to.
 - Replace the line in place. If the key is absent, add the line just before the closing `---`. To remove a key (a settings Reset, or a `default_` line), take its whole line, and for a block list its item lines, and nothing else.
 - Keep every other byte: unknown keys, key order, body, BOM, the file's EOL. A write that would change nothing is skipped.
-- The pane's permitted writes are exactly: a card's `status:`, `order:` and `updated:` lines; the `order:` lines alone of the cards of one lane when it places a card (its own and, when no whole number fits, the lane's renumbering); a card's `model:` and `thinking:` lines (added when set, removed on Auto); the `# ` title line with `updated` and one Log line `renamed from "old title"` (a rename in the open card; the file name stays, section 8); one Log line (a move or a comment); the settings lines in `board.md` (set, or removed whole by Reset and Restore all defaults), the `default_` lines (written or removed whole by Save as defaults, all removed by Restore original defaults) and `next_id`; and creating one new card file per add, built by the rules of sections 3, 4, 7, 8 and 9 with an empty body. It never deletes or renames files.
+- The pane's permitted writes are exactly: a card's `status:`, `order:` and `updated:` lines; the `order:` lines alone of the cards of one lane when it places a card (its own and, when no whole number fits, the lane's renumbering); a card's `model:` and `thinking:` lines (added when set, removed on Auto); the `# ` title line with `updated` and one Log line `renamed from "old title"` (a rename in the open card; the file name stays, section 8); one Log line (a move or a comment); the settings lines in `board.md` (set, or removed whole by Reset and Restore all defaults), the `default_` lines (written or removed whole by Save as defaults, all removed by Restore original defaults) and a type's `next_<letters>` counter line (added when absent); and creating one new card file per add, built by the rules of sections 3, 4, 7, 8 and 9 with an empty body. It never deletes or renames files, so it cannot retype a card; it asks Claude.
 
 ## 12. Problem codes
 
@@ -191,6 +200,9 @@ Shared by the library and the skill's "Fix needed" line.
 | `bad-value` | A non-empty card value does not fit its type (`order` not an integer, `created`/`updated` not a date), or a value cannot be written. |
 | `missing-field` | `id` or `status` is absent, or the body has no `# Title`. |
 | `bad-id` | `id` does not match `^[A-Z]{1,10}-\d{4,}$`. |
+| `unknown-type` | A card's ID letters are no type on the board, or a retype names a type the board does not have. The card still shows, and the board is not read-only. |
+| `ambiguous-number` | A bare number names more than one card (section 7). Nothing changes; the candidates are listed. |
+| `being-worked` | A retype of a card that is in an `auto` lane or has an agent on it. Nothing changes. |
 | `id-name-mismatch` | The filename does not start with `<id>-`. |
 | `duplicate-id` | Two card files have the same `id`. |
 | `unknown-lane` | A card's `status`, or a move target, is not a label in `board.md`. |
@@ -204,17 +216,17 @@ Shared by the library and the skill's "Fix needed" line.
 
 ## 13. Worked examples
 
-Card `kanban/KB-0012-fix-the-morning-summary-date.md`:
+Card `kanban/BUG-0012-fix-the-morning-summary-date.md`:
 
 ```
 ---
-id: KB-0012
+id: BUG-0012
 status: Auto
 order: 2000
 created: 2026-10-08
 updated: 2026-10-08
 flag:
-branch: kb-12-fix-the-morning-summary-date
+branch: bug-12-fix-the-morning-summary-date
 pr:
 parent:
 labels: [claude]
@@ -228,7 +240,35 @@ The requirement in John's words. Open questions stay here.
 
 ## Log
 - 2026-10-08 09:10 John: moved Pending -> Auto
-- 2026-10-08 09:11 Claude: started: kb-12-fix-the-morning-summary-date
+- 2026-10-08 09:11 Claude: started: bug-12-fix-the-morning-summary-date
+```
+
+The same card after Claude retypes it to enhancement on 2026-10-09 at 14:05, which gave it `ENH-0007`: the file is now `kanban/ENH-0007-fix-the-morning-summary-date.md`, and `id`, `updated` and the last Log line are the only changes. The branch keeps its name:
+
+```
+---
+id: ENH-0007
+status: Auto
+order: 2000
+created: 2026-10-08
+updated: 2026-10-09
+flag:
+branch: bug-12-fix-the-morning-summary-date
+pr:
+parent:
+labels: [claude]
+---
+# Fix the morning summary date
+
+The requirement in John's words. Open questions stay here.
+
+## Plan
+1. ...
+
+## Log
+- 2026-10-08 09:10 John: moved Pending -> Auto
+- 2026-10-08 09:11 Claude: started: bug-12-fix-the-morning-summary-date
+- 2026-10-09 14:05 Claude: retyped from BUG-0012 to ENH-0007
 ```
 
 The same card with its own model and thinking set from the pane; the two lines follow `labels`, and clearing both returns the file to the card above with a new `updated`:
@@ -240,12 +280,10 @@ thinking: medium
 ---
 ```
 
-Board `kanban/board.md`, as init writes it (`next_id: 1`, no settings lines: every setting takes its default):
+Board `kanban/board.md`, as init writes it (`owner` and `lanes:` only: no settings lines, so every setting takes its default; the types are bug, enhancement and chore, and every counter starts at 1):
 
 ```
 ---
-prefix: KB
-next_id: 1
 owner: John
 lanes:
   - Needs You (needs-you)
@@ -261,12 +299,10 @@ lanes:
 Free text.
 ```
 
-The same board after a person has changed some settings (each line is one change; `planner_thinking: high` is also the default, so that line reads the same as none; removing it changes nothing):
+The same board after use, with a fourth type of its own and some changed settings (each settings line is one change; `planner_thinking: high` is also the default, so that line reads the same as none; removing it changes nothing). The counters say bug 13, enhancement 8 and chore 2 are next; `docs` has no counter line yet, so its first card is `DOCS-0001`:
 
 ```
 ---
-prefix: KB
-next_id: 13
 owner: John
 workers: 1
 manager_model: opus
@@ -274,6 +310,14 @@ planner_model: opus
 worker_model: sonnet
 advisor_model: fable
 planner_thinking: high
+types:
+  - bug (BUG)
+  - enhancement (ENH)
+  - chore (CHORE)
+  - docs (DOCS)
+next_bug: 13
+next_enh: 8
+next_chore: 2
 lanes:
   - Needs You (needs-you)
   - Pending (intake)

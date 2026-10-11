@@ -144,8 +144,8 @@ describe('parseFrontmatter', () => {
 describe('setScalar', () => {
   test('replaces exactly one line of a CRLF file with a BOM, whole output compared', () => {
     const original = BOM + crlf(BOARD_EXAMPLE)
-    const expected = BOM + crlf(BOARD_EXAMPLE.replace('next_id: 13', 'next_id: 14'))
-    const out = must(setScalar(original, 'next_id', '14'))
+    const expected = BOM + crlf(BOARD_EXAMPLE.replace('workers: 1', 'workers: 2'))
+    const out = must(setScalar(original, 'workers', '2'))
     expect(out).toBe(expected)
     expect(out.split('\n').length).toBe(out.split('\r\n').length)
     expect(out.charCodeAt(0)).toBe(0xfeff)
@@ -234,7 +234,7 @@ describe('setScalar', () => {
 describe('removeKey', () => {
   test('removes a scalar line and keeps every other byte, whole output compared', () => {
     expect(must(removeKey(BOARD_EXAMPLE, 'workers'))).toBe(BOARD_EXAMPLE.replace('workers: 1\n', ''))
-    expect(must(removeKey(BOARD_EXAMPLE, 'prefix'))).toBe(BOARD_EXAMPLE.replace('prefix: KB\n', ''))
+    expect(must(removeKey(BOARD_EXAMPLE, 'planner_thinking'))).toBe(BOARD_EXAMPLE.replace('planner_thinking: high\n', ''))
   })
 
   test('removes an inline list and a whole block list, items included', () => {

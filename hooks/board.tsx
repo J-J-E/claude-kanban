@@ -23,7 +23,7 @@ import type { ClientElements, ClientModule, ClientPointerEvent, ClientSurface, R
 import { flagReason } from './lib/flags.ts'
 import { DRAG_CELLS, MARK_PENDING, boardLabels, cellWidth, clip, menuOf, titleOf, withPending } from './lib/layout.ts'
 import type { BoardCard, BoardFold, BoardLane, BoardPost, BoardProps, BoardState } from './lib/layout.ts'
-import { CHANGED_COL_W, ID_W, LABEL_COL_W, MENU_ZONE_W, PADDING, dropAt, ghostOf, hitAt, panelLayout, placeSlotAt } from './lib/lanes.ts'
+import { CHANGED_COL_W, LABEL_COL_W, MENU_ZONE_W, PADDING, dropAt, ghostOf, hitAt, panelLayout, placeSlotAt } from './lib/lanes.ts'
 import type { CardTile, LanePanel, PanelLayout, PanelProps, PlaceSlot } from './lib/lanes.ts'
 import { sortKeyOf } from './lib/sort.ts'
 import { barGlyphs, statusWords } from './lib/status.ts'
@@ -377,7 +377,7 @@ function drawStatusRow(p: Parts, t: CardTile, card: BoardCard, isSource: boolean
   const isTimeShown = s.time !== ''
   const wordStyle = s.kind === 'queued' || s.colour === 'default' ? { dimColor: true } : styleOfColour(s.colour, isSource)
   return (
-    <Box height={1} marginLeft={ID_W} flexDirection="row">
+    <Box height={1} marginLeft={p.lay.idWidth} flexDirection="row">
       {glyphs !== null && barCells > 0 ? (
         <Box height={1} marginRight={1} flexShrink={0} flexDirection="row">
           {glyphs.filled > 0 ? <Text color={card.isWorking ? 'claude' : BAR_FILLED} dimColor={isSource}>{BLOCK_FULL.repeat(glyphs.filled)}</Text> : null}
@@ -678,7 +678,7 @@ function drawGhost(p: Parts, card: BoardCard): RenderElement | null {
     >
       <Box position="absolute" top={0} left={0} width={r.w} height={r.h} flexDirection="column" paddingLeft={PADDING} paddingRight={PADDING} overflow="hidden">
         <Box height={1} flexDirection="row">
-          <Box width={ID_W} height={1} flexShrink={0}>
+          <Box width={p.lay.idWidth} height={1} flexShrink={0}>
             <Text dimColor wrap="truncate-end">
               {card.id}
             </Text>

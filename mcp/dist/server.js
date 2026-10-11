@@ -1502,37 +1502,37 @@ var require_dataType = __commonJS({
       DataType2[DataType2["Wrong"] = 1] = "Wrong";
     })(DataType || (exports.DataType = DataType = {}));
     function getSchemaTypes(schema) {
-      const types = getJSONTypes(schema.type);
-      const hasNull = types.includes("null");
+      const types2 = getJSONTypes(schema.type);
+      const hasNull = types2.includes("null");
       if (hasNull) {
         if (schema.nullable === false)
           throw new Error("type: null contradicts nullable: false");
       } else {
-        if (!types.length && schema.nullable !== void 0) {
+        if (!types2.length && schema.nullable !== void 0) {
           throw new Error('"nullable" cannot be used without "type"');
         }
         if (schema.nullable === true)
-          types.push("null");
+          types2.push("null");
       }
-      return types;
+      return types2;
     }
     exports.getSchemaTypes = getSchemaTypes;
     function getJSONTypes(ts) {
-      const types = Array.isArray(ts) ? ts : ts ? [ts] : [];
-      if (types.every(rules_1.isJSONType))
-        return types;
-      throw new Error("type must be JSONType or JSONType[]: " + types.join(","));
+      const types2 = Array.isArray(ts) ? ts : ts ? [ts] : [];
+      if (types2.every(rules_1.isJSONType))
+        return types2;
+      throw new Error("type must be JSONType or JSONType[]: " + types2.join(","));
     }
     exports.getJSONTypes = getJSONTypes;
-    function coerceAndCheckDataType(it, types) {
+    function coerceAndCheckDataType(it, types2) {
       const { gen, data, opts } = it;
-      const coerceTo = coerceToTypes(types, opts.coerceTypes);
-      const checkTypes = types.length > 0 && !(coerceTo.length === 0 && types.length === 1 && (0, applicability_1.schemaHasRulesForType)(it, types[0]));
+      const coerceTo = coerceToTypes(types2, opts.coerceTypes);
+      const checkTypes = types2.length > 0 && !(coerceTo.length === 0 && types2.length === 1 && (0, applicability_1.schemaHasRulesForType)(it, types2[0]));
       if (checkTypes) {
-        const wrongType = checkDataTypes(types, data, opts.strictNumbers, DataType.Wrong);
+        const wrongType = checkDataTypes(types2, data, opts.strictNumbers, DataType.Wrong);
         gen.if(wrongType, () => {
           if (coerceTo.length)
-            coerceData(it, types, coerceTo);
+            coerceData(it, types2, coerceTo);
           else
             reportTypeError(it);
         });
@@ -1541,15 +1541,15 @@ var require_dataType = __commonJS({
     }
     exports.coerceAndCheckDataType = coerceAndCheckDataType;
     var COERCIBLE = /* @__PURE__ */ new Set(["string", "number", "integer", "boolean", "null"]);
-    function coerceToTypes(types, coerceTypes) {
-      return coerceTypes ? types.filter((t) => COERCIBLE.has(t) || coerceTypes === "array" && t === "array") : [];
+    function coerceToTypes(types2, coerceTypes) {
+      return coerceTypes ? types2.filter((t) => COERCIBLE.has(t) || coerceTypes === "array" && t === "array") : [];
     }
-    function coerceData(it, types, coerceTo) {
+    function coerceData(it, types2, coerceTo) {
       const { gen, data, opts } = it;
       const dataType = gen.let("dataType", (0, codegen_1._)`typeof ${data}`);
       const coerced = gen.let("coerced", (0, codegen_1._)`undefined`);
       if (opts.coerceTypes === "array") {
-        gen.if((0, codegen_1._)`${dataType} == 'object' && Array.isArray(${data}) && ${data}.length == 1`, () => gen.assign(data, (0, codegen_1._)`${data}[0]`).assign(dataType, (0, codegen_1._)`typeof ${data}`).if(checkDataTypes(types, data, opts.strictNumbers), () => gen.assign(coerced, data)));
+        gen.if((0, codegen_1._)`${dataType} == 'object' && Array.isArray(${data}) && ${data}.length == 1`, () => gen.assign(data, (0, codegen_1._)`${data}[0]`).assign(dataType, (0, codegen_1._)`typeof ${data}`).if(checkDataTypes(types2, data, opts.strictNumbers), () => gen.assign(coerced, data)));
       }
       gen.if((0, codegen_1._)`${coerced} !== undefined`);
       for (const t of coerceTo) {
@@ -1625,19 +1625,19 @@ var require_dataType = __commonJS({
         return checkDataType(dataTypes[0], data, strictNums, correct);
       }
       let cond;
-      const types = (0, util_1.toHash)(dataTypes);
-      if (types.array && types.object) {
+      const types2 = (0, util_1.toHash)(dataTypes);
+      if (types2.array && types2.object) {
         const notObj = (0, codegen_1._)`typeof ${data} != "object"`;
-        cond = types.null ? notObj : (0, codegen_1._)`!${data} || ${notObj}`;
-        delete types.null;
-        delete types.array;
-        delete types.object;
+        cond = types2.null ? notObj : (0, codegen_1._)`!${data} || ${notObj}`;
+        delete types2.null;
+        delete types2.array;
+        delete types2.object;
       } else {
         cond = codegen_1.nil;
       }
-      if (types.number)
-        delete types.integer;
-      for (const t in types)
+      if (types2.number)
+        delete types2.integer;
+      for (const t in types2)
         cond = (0, codegen_1.and)(cond, checkDataType(t, data, strictNums, correct));
       return cond;
     }
@@ -2237,7 +2237,7 @@ var require_resolve = __commonJS({
     }
     function getFullPath(resolver, id = "", normalize) {
       if (normalize !== false)
-        id = normalizeId2(id);
+        id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
     }
@@ -2248,12 +2248,12 @@ var require_resolve = __commonJS({
     }
     exports._getFullPath = _getFullPath;
     var TRAILING_SLASH_HASH = /#\/?$/;
-    function normalizeId2(id) {
+    function normalizeId(id) {
       return id ? id.replace(TRAILING_SLASH_HASH, "") : "";
     }
-    exports.normalizeId = normalizeId2;
+    exports.normalizeId = normalizeId;
     function resolveUrl(resolver, baseId, id) {
-      id = normalizeId2(id);
+      id = normalizeId(id);
       return resolver.resolve(baseId, id);
     }
     exports.resolveUrl = resolveUrl;
@@ -2262,7 +2262,7 @@ var require_resolve = __commonJS({
       if (typeof schema == "boolean")
         return {};
       const { schemaId, uriResolver } = this.opts;
-      const schId = normalizeId2(schema[schemaId] || baseId);
+      const schId = normalizeId(schema[schemaId] || baseId);
       const baseIds = { "": schId };
       const pathPrefix = getFullPath(uriResolver, schId, false);
       const localRefs = {};
@@ -2279,7 +2279,7 @@ var require_resolve = __commonJS({
         baseIds[jsonPtr] = innerBaseId;
         function addRef(ref) {
           const _resolve = this.opts.uriResolver.resolve;
-          ref = normalizeId2(innerBaseId ? _resolve(innerBaseId, ref) : ref);
+          ref = normalizeId(innerBaseId ? _resolve(innerBaseId, ref) : ref);
           if (schemaRefs.has(ref))
             throw ambiguos(ref);
           schemaRefs.add(ref);
@@ -2288,7 +2288,7 @@ var require_resolve = __commonJS({
             schOrRef = this.refs[schOrRef];
           if (typeof schOrRef == "object") {
             checkAmbiguosRef(sch, schOrRef.schema, ref);
-          } else if (ref !== normalizeId2(fullPath)) {
+          } else if (ref !== normalizeId(fullPath)) {
             if (ref[0] === "#") {
               checkAmbiguosRef(sch, localRefs[ref], ref);
               localRefs[ref] = sch;
@@ -2442,9 +2442,9 @@ var require_validate = __commonJS({
     function typeAndKeywords(it, errsCount) {
       if (it.opts.jtd)
         return schemaKeywords(it, [], false, errsCount);
-      const types = (0, dataType_1.getSchemaTypes)(it.schema);
-      const checkedTypes = (0, dataType_1.coerceAndCheckDataType)(it, types);
-      schemaKeywords(it, types, !checkedTypes, errsCount);
+      const types2 = (0, dataType_1.getSchemaTypes)(it.schema);
+      const checkedTypes = (0, dataType_1.coerceAndCheckDataType)(it, types2);
+      schemaKeywords(it, types2, !checkedTypes, errsCount);
     }
     function checkRefsAndKeywords(it) {
       const { schema, errSchemaPath, opts, self } = it;
@@ -2494,7 +2494,7 @@ var require_validate = __commonJS({
       if (items instanceof codegen_1.Name)
         gen.assign((0, codegen_1._)`${evaluated}.items`, items);
     }
-    function schemaKeywords(it, types, typeErrors, errsCount) {
+    function schemaKeywords(it, types2, typeErrors, errsCount) {
       const { gen, schema, data, allErrors, opts, self } = it;
       const { RULES } = self;
       if (schema.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema, RULES))) {
@@ -2502,7 +2502,7 @@ var require_validate = __commonJS({
         return;
       }
       if (!opts.jtd)
-        checkStrictTypes(it, types);
+        checkStrictTypes(it, types2);
       gen.block(() => {
         for (const group of RULES.rules)
           groupKeywords(group);
@@ -2514,7 +2514,7 @@ var require_validate = __commonJS({
         if (group.type) {
           gen.if((0, dataType_2.checkDataType)(group.type, data, opts.strictNumbers));
           iterateKeywords(it, group);
-          if (types.length === 1 && types[0] === group.type && typeErrors) {
+          if (types2.length === 1 && types2[0] === group.type && typeErrors) {
             gen.else();
             (0, dataType_2.reportTypeError)(it);
           }
@@ -2538,27 +2538,27 @@ var require_validate = __commonJS({
         }
       });
     }
-    function checkStrictTypes(it, types) {
+    function checkStrictTypes(it, types2) {
       if (it.schemaEnv.meta || !it.opts.strictTypes)
         return;
-      checkContextTypes(it, types);
+      checkContextTypes(it, types2);
       if (!it.opts.allowUnionTypes)
-        checkMultipleTypes(it, types);
+        checkMultipleTypes(it, types2);
       checkKeywordTypes(it, it.dataTypes);
     }
-    function checkContextTypes(it, types) {
-      if (!types.length)
+    function checkContextTypes(it, types2) {
+      if (!types2.length)
         return;
       if (!it.dataTypes.length) {
-        it.dataTypes = types;
+        it.dataTypes = types2;
         return;
       }
-      types.forEach((t) => {
+      types2.forEach((t) => {
         if (!includesType(it.dataTypes, t)) {
           strictTypesError(it, `type "${t}" not allowed by context "${it.dataTypes.join(",")}"`);
         }
       });
-      narrowSchemaTypes(it, types);
+      narrowSchemaTypes(it, types2);
     }
     function checkMultipleTypes(it, ts) {
       if (ts.length > 1 && !(ts.length === 2 && ts.includes("null"))) {
@@ -2978,7 +2978,7 @@ var require_compile = __commonJS({
       }
     }
     exports.compileSchema = compileSchema;
-    function resolveRef2(root, baseId, ref) {
+    function resolveRef3(root, baseId, ref) {
       var _a3;
       ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
       const schOrFunc = root.refs[ref];
@@ -2995,7 +2995,7 @@ var require_compile = __commonJS({
         return;
       return root.refs[ref] = inlineOrCompile.call(this, _sch);
     }
-    exports.resolveRef = resolveRef2;
+    exports.resolveRef = resolveRef3;
     function inlineOrCompile(sch) {
       if ((0, resolve_1.inlineRef)(sch.schema, this.opts.inlineRefs))
         return sch.schema;
@@ -9884,9 +9884,9 @@ var ZodUnion = class extends ZodType {
     return this._def.options;
   }
 };
-ZodUnion.create = (types, params) => {
+ZodUnion.create = (types2, params) => {
   return new ZodUnion({
-    options: types,
+    options: types2,
     typeName: ZodFirstPartyTypeKind.ZodUnion,
     ...processCreateParams(params)
   });
@@ -26004,10 +26004,10 @@ function _properties(shape, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _mime(types, params) {
+function _mime(types2, params) {
   return new $ZodCheckMimeType({
     check: "mime_type",
-    mime: types,
+    mime: types2,
     ...normalizeParams(params)
   });
 }
@@ -26594,7 +26594,7 @@ function compactTypeUnion(schema) {
   const options = schema.anyOf;
   if (!Array.isArray(options) || options.length === 0 || schema.type !== void 0)
     return;
-  const types = [];
+  const types2 = [];
   for (const option of options) {
     if (!option || typeof option !== "object")
       return;
@@ -26606,12 +26606,12 @@ function compactTypeUnion(schema) {
     for (const member of Array.isArray(type) ? type : [type]) {
       if (typeof member !== "string")
         return;
-      if (!types.includes(member))
-        types.push(member);
+      if (!types2.includes(member))
+        types2.push(member);
     }
   }
   delete schema.anyOf;
-  schema.type = types.length === 1 ? types[0] : types;
+  schema.type = types2.length === 1 ? types2[0] : types2;
 }
 var FOLDABLE_KEYS = /* @__PURE__ */ new Set(["type", "properties", "required", "additionalProperties"]);
 var UNION_KEYS = ["oneOf", "anyOf"];
@@ -27410,8 +27410,8 @@ function stringifyKeyNames(bySchema, json2, visited) {
     if (mapped.some((branch, i) => branch !== branches[i]))
       json2 = { ...json2, [keyword]: mapped };
   }
-  const types = Array.isArray(json2.type) ? json2.type : [json2.type];
-  const numericType = !types.includes("string") && types.some((t) => t === "number" || t === "integer");
+  const types2 = Array.isArray(json2.type) ? json2.type : [json2.type];
+  const numericType = !types2.includes("string") && types2.some((t) => t === "number" || t === "integer");
   const values = json2.enum ?? (json2.const !== void 0 ? [json2.const] : void 0);
   if (!numericType && !values?.some((v) => typeof v === "number"))
     return json2;
@@ -27424,7 +27424,7 @@ function stringifyKeyNames(bySchema, json2, visited) {
     return rest;
   rest.type = "string";
   if (!values)
-    rest.pattern = (types.includes("number") ? number : integer).source;
+    rest.pattern = (types2.includes("number") ? number : integer).source;
   return rest;
 }
 var pendingRecords = /* @__PURE__ */ new WeakMap();
@@ -29801,7 +29801,7 @@ var ZodFile = /* @__PURE__ */ $constructor("ZodFile", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => fileProcessor(inst, ctx, json2, params);
   inst.min = (size, params) => inst.check(_minSize(size, params));
   inst.max = (size, params) => inst.check(_maxSize(size, params));
-  inst.mime = (types, params) => inst.check(_mime(Array.isArray(types) ? types : [types], params));
+  inst.mime = (types2, params) => inst.check(_mime(Array.isArray(types2) ? types2 : [types2], params));
 });
 function file(params) {
   return _file(ZodFile, params);
@@ -33299,15 +33299,15 @@ function parseUnionDef(def, refs) {
     return asAnyOf(def, refs);
   const options = def.options instanceof Map ? Array.from(def.options.values()) : def.options;
   if (options.every((x) => x._def.typeName in primitiveMappings && (!x._def.checks || !x._def.checks.length))) {
-    const types = options.reduce((types2, x) => {
+    const types2 = options.reduce((types3, x) => {
       const type = primitiveMappings[x._def.typeName];
-      return type && !types2.includes(type) ? [...types2, type] : types2;
+      return type && !types3.includes(type) ? [...types3, type] : types3;
     }, []);
     return {
-      type: types.length > 1 ? types : types[0]
+      type: types2.length > 1 ? types2 : types2[0]
     };
   } else if (options.every((x) => x._def.typeName === "ZodLiteral" && !x.description)) {
-    const types = options.reduce((acc, x) => {
+    const types2 = options.reduce((acc, x) => {
       const type = typeof x._def.value;
       switch (type) {
         case "string":
@@ -33326,8 +33326,8 @@ function parseUnionDef(def, refs) {
           return acc;
       }
     }, []);
-    if (types.length === options.length) {
-      const uniqueTypes = types.filter((x, i, a) => a.indexOf(x) === i);
+    if (types2.length === options.length) {
+      const uniqueTypes = types2.filter((x, i, a) => a.indexOf(x) === i);
       return {
         type: uniqueTypes.length > 1 ? uniqueTypes : uniqueTypes[0],
         enum: options.reduce((acc, x) => {
@@ -33615,8 +33615,8 @@ var parseReadonlyDef = (def, refs) => {
 };
 
 // node_modules/zod-to-json-schema/dist/esm/selectParser.js
-var selectParser = (def, typeName, refs) => {
-  switch (typeName) {
+var selectParser = (def, typeName2, refs) => {
+  switch (typeName2) {
     case ZodFirstPartyTypeKind.ZodString:
       return parseStringDef(def, refs);
     case ZodFirstPartyTypeKind.ZodNumber:
@@ -33686,7 +33686,7 @@ var selectParser = (def, typeName, refs) => {
     case ZodFirstPartyTypeKind.ZodSymbol:
       return void 0;
     default:
-      return /* @__PURE__ */ ((_) => void 0)(typeName);
+      return /* @__PURE__ */ ((_) => void 0)(typeName2);
   }
 };
 
@@ -36541,7 +36541,7 @@ var StdioServerTransport = class {
 };
 
 // src/store.ts
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, parse as parse3, resolve } from "node:path";
 
 // ../hooks/lib/frontmatter.ts
@@ -36771,6 +36771,79 @@ var SAVED_KEYS = [
 ];
 var DEFAULT_KEYS = SAVED_KEYS.map((k) => `default_${k}`);
 
+// ../hooks/lib/ids.ts
+var RETYPED = /^retyped from ([A-Z]{1,10}-\d{4,}) to ([A-Z]{1,10}-\d{4,})$/;
+function pad(n) {
+  return String(n).padStart(4, "0");
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function formerIdsOf(log) {
+  const out = [];
+  for (const entry of log) {
+    const m = RETYPED.exec(entry.text);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+function lineage(cards) {
+  const map2 = /* @__PURE__ */ new Map();
+  for (const card of cards) for (const old of card.formerIds) if (!map2.has(old)) map2.set(old, card.id);
+  return map2;
+}
+function allocateId(prefix, counter, names, formerIds) {
+  const file2 = new RegExp("^" + escapeRegExp(prefix) + "-(\\d+)(-.*)?\\.md$");
+  const retired = new RegExp("^" + escapeRegExp(prefix) + "-(\\d+)$");
+  let highest = 0;
+  for (const name of names) {
+    const m = file2.exec(name);
+    if (m) highest = Math.max(highest, parseInt(m[1], 10));
+  }
+  for (const id of formerIds) {
+    const m = retired.exec(id);
+    if (m) highest = Math.max(highest, parseInt(m[1], 10));
+  }
+  const fromCounter = Number.isInteger(counter) && counter > 0 ? counter : 1;
+  const n = Math.max(fromCounter, highest + 1);
+  return { id: prefix + "-" + pad(n), n };
+}
+function resolveRef2(raw, board, cards) {
+  const text = String(raw).trim();
+  const bare = /^(\d+)$/.exec(text);
+  const named = /^([A-Za-z][A-Za-z0-9-]*?)(?:-|\s+)(\d+)$/.exec(text);
+  const old = lineage(cards);
+  if (bare) {
+    const n = parseInt(bare[1], 10);
+    const numberOf = (id2) => parseInt(id2.slice(id2.lastIndexOf("-") + 1), 10);
+    const live = cards.filter((c) => numberOf(c.id) === n).map((c) => c.id);
+    if (live.length === 1) return { kind: "one", id: live[0] };
+    if (live.length > 1) return { kind: "many", ids: live };
+    const retired = [...old.keys()].filter((id2) => numberOf(id2) === n);
+    if (retired.length === 1) return { kind: "one", id: old.get(retired[0]), was: retired[0] };
+    if (retired.length > 1) return { kind: "many", ids: retired };
+    return { kind: "none" };
+  }
+  if (!named) return { kind: "not-an-id" };
+  const word = named[1].toLowerCase();
+  const type = board.types.find((t) => t.name === word || t.prefix.toLowerCase() === word);
+  const prefix = type ? type.prefix : word.toUpperCase();
+  if (!/^[A-Z]{1,10}$/.test(prefix)) return { kind: "not-an-id" };
+  const id = prefix + "-" + pad(parseInt(named[2], 10));
+  if (cards.some((c) => c.id === id)) return { kind: "one", id };
+  const now = old.get(id);
+  if (now !== void 0) return { kind: "one", id: now, was: id };
+  return { kind: "none" };
+}
+function slugOf(fileName) {
+  const base = fileName.slice(Math.max(fileName.lastIndexOf("/"), fileName.lastIndexOf("\\")) + 1);
+  return base.replace(/\.md$/, "").replace(/^[A-Z]{1,10}-\d+-?/, "");
+}
+function retypedFileName(newId, oldName) {
+  const slug = slugOf(oldName);
+  return slug === "" ? newId + ".md" : newId + "-" + slug + ".md";
+}
+
 // ../hooks/lib/cards.ts
 var BOM2 = "\uFEFF";
 var ID_PATTERN = /^[A-Z]{1,10}-\d{4,}$/;
@@ -36808,23 +36881,6 @@ function slugify2(title) {
     s = cut.replace(/-+$/, "");
   }
   return s === "" ? "card" : s;
-}
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function nextId(prefix, nextIdFromBoard, names) {
-  const re = new RegExp("^" + escapeRegExp(prefix) + "-(\\d+)(-.*)?\\.md$");
-  let highest = 0;
-  for (const name of names) {
-    const m = re.exec(name);
-    if (m) {
-      const v = parseInt(m[1], 10);
-      if (v > highest) highest = v;
-    }
-  }
-  const fromBoard = Number.isInteger(nextIdFromBoard) && nextIdFromBoard > 0 ? nextIdFromBoard : 1;
-  const n = Math.max(fromBoard, highest + 1);
-  return { id: prefix + "-" + String(n).padStart(4, "0"), n };
 }
 function cardFileName(id, title) {
   return id + "-" + slugify2(title) + ".md";
@@ -36971,7 +37027,9 @@ function parseCard(text, fileName) {
     model: allowedOrAuto(model.value, MODELS),
     thinking: allowedOrAuto(thinking.value, THINKING_LEVELS),
     title,
-    log
+    log,
+    formerIds: formerIdsOf(log),
+    createdAt: scalars.created + " " + (log.length > 0 ? log[0].time : "00:00")
   };
   if (fileName !== void 0) card.fileName = fileName;
   return ok(card);
@@ -36986,6 +37044,21 @@ function setStatus(text, status, stamp) {
   const withStatus = setScalar(text, "status", status);
   if (!withStatus.ok) return withStatus;
   return setScalar(withStatus.value, "updated", stamp.date);
+}
+function setParent(text, id) {
+  if (typeof id !== "string" || id !== "" && !ID_PATTERN.test(id)) {
+    return fail("bad-value", `"parent" must be a card ID like KB-0012, or empty to clear it, not "${id}".`);
+  }
+  return setScalar(text, "parent", id);
+}
+function retypeCardText(text, newId, stamp, who2) {
+  if (typeof newId !== "string" || !ID_PATTERN.test(newId)) return fail("bad-id", `"${newId}" is not a card ID like BUG-0012.`);
+  const card = parseCard(text);
+  if (!card.ok) return card;
+  if (card.value.id === newId) return fail("bad-value", `The card already has the ID ${newId}.`);
+  const withId = setScalar(text, "id", newId);
+  if (!withId.ok) return withId;
+  return appendLog(withId.value, { date: stamp.date, time: stamp.time, who: who2, text: `retyped from ${card.value.id} to ${newId}` });
 }
 function newCardText(input2) {
   if (!ID_PATTERN.test(input2.id)) return fail("bad-id", `"${input2.id}" is not a card ID like KB-0012.`);
@@ -37029,12 +37102,15 @@ function newCardText(input2) {
 var BOM3 = "\uFEFF";
 var LANE_PATTERN = /^([\p{L}\p{N}]+( [\p{L}\p{N}]+)?) \(([a-z-]+)(, side)?\)$/u;
 var ROLES2 = ["intake", "plan", "needs-you", "auto", "backlog", "manual", "gated", "done", "parked", "scrapped"];
+var DEFAULT_TYPES = [
+  { name: "bug", prefix: "BUG" },
+  { name: "enhancement", prefix: "ENH" },
+  { name: "chore", prefix: "CHORE" }
+];
+var TYPE_NAME = /^[a-z][a-z0-9-]{0,19}$/;
+var TYPE_PREFIX = /^[A-Z]{2,5}$/;
 function settingProblem(key, value) {
   switch (key) {
-    case "prefix":
-      return /^[A-Z]{1,10}$/.test(value) ? void 0 : '"prefix" must be 1 to 10 capital letters.';
-    case "next_id":
-      return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1 ? void 0 : '"next_id" must be a whole number, 1 or more.';
     case "owner":
       if (value === "" || value !== value.trim()) return `"owner" is required: the person's first name.`;
       if (value.indexOf(":") !== -1) return '"owner" cannot contain a colon (it names the author of Log lines).';
@@ -37056,14 +37132,12 @@ function settingProblem(key, value) {
       return `"${key}" is not a board setting.`;
   }
 }
-var SETTING_KEYS = ["prefix", "next_id", "owner", ...SAVED_KEYS];
+var SETTING_KEYS = ["owner", ...SAVED_KEYS];
 function parseBoard(text) {
   const parsed = parseFrontmatter(text);
   if (!parsed.ok) return parsed;
   const fm = parsed.value;
   const raw = {
-    prefix: "KB",
-    next_id: "1",
     owner: "",
     ...builtInValues()
   };
@@ -37091,6 +37165,22 @@ function parseBoard(text) {
     if (problem !== void 0) return fail("bad-setting", problem, line2);
     raw[key] = r.value;
   }
+  const typesResult = readTypes(fm);
+  if (!typesResult.ok) return typesResult;
+  const types2 = typesResult.value;
+  const counters = {};
+  for (const t of types2) {
+    const key = counterKey(t.prefix);
+    const r = getScalar(fm, key);
+    if (!r.ok) return r;
+    if (r.value === void 0) {
+      counters[t.prefix] = 1;
+      continue;
+    }
+    const problem = counterProblem(key, r.value);
+    if (problem !== void 0) return fail("bad-setting", problem, findEntry(fm, key)?.line);
+    counters[t.prefix] = Number(r.value);
+  }
   const entry = findEntry(fm, "lanes");
   if (entry === void 0 || entry.kind === "scalar" && entry.scalar === "" || entry.kind !== "scalar" && entry.items.length === 0) {
     return fail("no-intake", 'The board needs a "lanes:" list with at least one intake lane.', entry?.line);
@@ -37115,8 +37205,8 @@ function parseBoard(text) {
   }
   if (!lanes2.some((l) => l.role === "intake")) return fail("no-intake", 'The board needs at least one lane with role "intake".', entry.line);
   return ok({
-    prefix: raw.prefix,
-    nextId: Number(raw.next_id),
+    types: types2,
+    counters,
     owner: raw.owner,
     workers: Number(raw.workers),
     managerModel: raw.manager_model,
@@ -37131,6 +37221,50 @@ function parseBoard(text) {
     savedDefaults,
     lanes: lanes2
   });
+}
+function counterKey(prefix) {
+  return "next_" + prefix.toLowerCase();
+}
+function counterProblem(key, value) {
+  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= 1 ? void 0 : `"${key}" must be a whole number, 1 or more.`;
+}
+function readTypes(fm) {
+  const entry = findEntry(fm, "types");
+  if (entry === void 0) return ok(DEFAULT_TYPES.map((t) => ({ ...t })));
+  if (entry.kind === "scalar") {
+    if (entry.scalar === "") return fail("bad-setting", '"types" must list at least one type.', entry.line);
+    return fail("type-mismatch", '"types" must be a list, not a single value.', entry.line);
+  }
+  if (entry.items.length === 0) return fail("bad-setting", '"types" must list at least one type.', entry.line);
+  const types2 = [];
+  for (let i = 0; i < entry.items.length; i++) {
+    const at = entry.kind === "block" ? entry.itemLines[i] : entry.line;
+    const item = entry.items[i];
+    const m = /^([^\s(]+)(?:\s*\((.*)\))?$/.exec(item.trim());
+    if (!m) return fail("bad-setting", `The type "${item}" does not fit "name (PREFIX)" or a bare "name".`, at);
+    const name = m[1];
+    if (!TYPE_NAME.test(name)) {
+      return fail("bad-setting", `The type name "${name}" must be 1 to 20 characters: a lowercase letter, then lowercase letters, digits or hyphens.`, at);
+    }
+    let prefix;
+    if (m[2] !== void 0) {
+      prefix = m[2].trim();
+      if (prefix === "ID") return fail("bad-setting", 'The type prefix "ID" is not allowed.', at);
+      if (!TYPE_PREFIX.test(prefix)) return fail("bad-setting", `The prefix "${prefix}" of type "${name}" must be 2 to 5 capital letters.`, at);
+    } else {
+      prefix = name.length <= 5 ? name.toUpperCase() : name.slice(0, 3).toUpperCase();
+      if (prefix === "ID") return fail("bad-setting", 'The type prefix "ID" is not allowed.', at);
+      if (!TYPE_PREFIX.test(prefix)) {
+        return fail("bad-setting", `The type "${name}" gives no valid prefix; write it as "${name} (PREFIX)" with 2 to 5 capital letters.`, at);
+      }
+    }
+    for (const t of types2) {
+      if (t.name === name) return fail("bad-setting", `The type name "${name}" appears twice.`, at);
+      if (t.prefix === prefix) return fail("bad-setting", `The prefix "${prefix}" is used by both "${t.name}" and "${name}".`, at);
+    }
+    types2.push({ name, prefix });
+  }
+  return ok(types2);
 }
 function builtInValues() {
   return {
@@ -37156,12 +37290,19 @@ function defaultsFrom(v) {
     }
   };
 }
-function setBoardSetting(text, key, value) {
-  if (SETTING_KEYS.indexOf(key) === -1) return fail("bad-setting", `"${key}" is not a board setting.`);
-  const v = String(value);
-  const problem = settingProblem(key, v);
+function setCounter(text, prefix, n) {
+  const parsed = parseBoard(text);
+  if (!parsed.ok) return parsed;
+  const board = parsed.value;
+  const type = board.types.find((t) => t.prefix === prefix);
+  if (type === void 0) return fail("bad-setting", `"${prefix}" is not the prefix of a type on this board.`);
+  const key = counterKey(type.prefix);
+  const problem = counterProblem(key, String(n));
   if (problem !== void 0) return fail("bad-setting", problem);
-  return setScalar(text, key, v);
+  if (n < board.counters[type.prefix]) {
+    return fail("bad-setting", `"${key}" is ${board.counters[type.prefix]}; a counter cannot be lowered to ${n}.`);
+  }
+  return setScalar(text, key, String(n));
 }
 function findLane(board, name) {
   const key = String(name).trim().toLowerCase();
@@ -37170,6 +37311,20 @@ function findLane(board, name) {
 }
 function unknownLaneMessage(board, name) {
   return `Unknown lane "${name}". Lanes on this board: ${board.lanes.map((l) => l.label).join(", ")}. Nothing was changed.`;
+}
+function findType(board, word) {
+  const key = String(word).trim().toLowerCase();
+  for (const t of board.types) if (t.name === key || t.prefix.toLowerCase() === key) return t;
+  return void 0;
+}
+function typeOfId(board, id) {
+  const m = /^([A-Z]+)-/.exec(String(id));
+  if (!m) return void 0;
+  for (const t of board.types) if (t.prefix === m[1]) return t;
+  return void 0;
+}
+function unknownTypeMessage(board, word) {
+  return `Unknown type "${word}". Types on this board: ${board.types.map((t) => t.name).join(", ")}. Nothing was changed.`;
 }
 function claudeOnlyMessage(lane) {
   return `"${lane}" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.`;
@@ -37246,6 +37401,13 @@ function readCards(board, files) {
         file: f.name,
         code: "unknown-lane",
         message: `${card.value.id} has status "${card.value.status}", which is not a lane on this board. Lanes on this board: ${board.lanes.map((l) => l.label).join(", ")}.`
+      });
+    }
+    if (typeOfId(board, card.value.id) === void 0) {
+      problems.push({
+        file: f.name,
+        code: "unknown-type",
+        message: `${card.value.id} has ID letters that are no type on this board. Types on this board: ${board.types.map((t) => `${t.name} (${t.prefix})`).join(", ")}.`
       });
     }
   }
@@ -37341,25 +37503,43 @@ function loadCards(state) {
   const { cards, problems } = readCards(state.board, files);
   return { files, cards, problems, names };
 }
-function normalizeId(raw, prefix) {
-  const m = /^\s*(?:([A-Za-z]{1,10})-)?(\d+)\s*$/.exec(String(raw));
-  if (!m) return void 0;
-  return `${(m[1] ?? prefix).toUpperCase()}-${m[2].padStart(4, "0")}`;
-}
 function missingCardMessage(id) {
   return `No card ${id} in kanban/. Nothing was changed.`;
 }
 function duplicateIdMessage(id, files) {
   return `More than one file has ID ${id}: ${files.join(", ")}. Fix by hand; nothing was changed.`;
 }
+function missingName(raw, board) {
+  const m = /^([A-Za-z][A-Za-z0-9-]*?)(?:-|\s+)(\d+)$/.exec(String(raw).trim());
+  if (!m) return `numbered ${String(raw).trim()}`;
+  const prefix = findType(board, m[1])?.prefix ?? m[1].toUpperCase();
+  return `${prefix}-${m[2].padStart(4, "0")}`;
+}
+function exampleWord(board, id) {
+  return typeOfId(board, id)?.name ?? id.slice(0, id.indexOf("-")).toLowerCase();
+}
+function nameOf(f) {
+  return f.was === void 0 ? f.id : `${f.id} (was ${f.was})`;
+}
 function findCardFile(state, raw) {
-  const id = normalizeId(raw, state.board.prefix);
-  if (id === void 0) return refuse(`"${raw}" is not a card ID like ${state.board.prefix}-0012. Nothing was changed.`);
+  const { board } = state;
+  const sample = `${board.types[0]?.prefix ?? "BUG"}-0012`;
+  const ref = resolveRef2(raw, board, loadCards(state).cards);
+  if (ref.kind === "not-an-id") return refuse(`"${raw}" is not a card ID like ${sample}. Nothing was changed.`);
+  if (ref.kind === "none") return refuse(missingCardMessage(missingName(raw, board)));
+  const ids = [...new Set(ref.kind === "many" ? ref.ids : [ref.id])];
+  if (ids.length > 1) {
+    const n = parseInt(ids[0].slice(ids[0].lastIndexOf("-") + 1), 10);
+    return refuse(`More than one card is numbered ${n}: ${ids.join(", ")}. Say which, for example "${exampleWord(board, ids[0])} ${n}". Nothing was changed.`);
+  }
+  const id = ids[0];
   const names = readdirSync(state.dir).filter((n) => n.startsWith(id + "-") && n.endsWith(".md"));
   if (names.length === 0) return refuse(missingCardMessage(id));
   if (names.length > 1) return refuse(duplicateIdMessage(id, names));
   const path = join(state.dir, names[0]);
-  return { ok: true, message: "", found: { id, name: names[0], path, text: readFileSync(path, "utf8"), mtime: statSync(path).mtimeMs } };
+  const found = { id, name: names[0], path, text: readFileSync(path, "utf8"), mtime: statSync(path).mtimeMs };
+  if (ref.kind === "one" && ref.was !== void 0) found.was = ref.was;
+  return { ok: true, message: "", found };
 }
 function writeChecked(path, text, mtime) {
   if (mtime === void 0) {
@@ -37382,38 +37562,74 @@ function cleanWho(who2) {
   if (/[:\r\n]/.test(w)) return refuse('"who" cannot contain a colon or a line break. Nothing was changed.');
   return w;
 }
-function addCard(dir2, input2, now = /* @__PURE__ */ new Date()) {
-  const who2 = cleanWho(input2.who);
-  if (typeof who2 !== "string") return who2;
+function reserveId(dir2, typeWord, check2) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const loaded = loadBoard(dir2);
     if (!loaded.ok) return loaded;
     const { state } = loaded;
-    const lane = intakeLane(state.board);
-    if (lane === void 0) return refuse("This board has no lane with role intake. Nothing was changed.");
+    const type = findType(state.board, typeWord);
+    if (type === void 0) return refuse(unknownTypeMessage(state.board, typeWord));
     const cards = loadCards(state);
-    const { id, n } = nextId(state.board.prefix, state.board.nextId, cards.names);
-    const text = newCardText({
-      id,
-      title: input2.title,
-      status: lane.label,
-      order: nextOrder(ordersIn(cards.cards, state.board, lane)),
-      stamp: stampOf(now),
-      who: who2,
-      body: input2.body,
-      labels: input2.labels
-    });
-    if (!text.ok) return refuse(`${text.message} Nothing was changed.`);
-    const file2 = cardFileName(id, input2.title);
-    const bumped = setBoardSetting(state.boardText, "next_id", n + 1);
+    const refused = check2?.(state, cards);
+    if (refused) return refused;
+    const { id, n } = allocateId(type.prefix, state.board.counters[type.prefix] ?? 1, cards.names, cards.cards.flatMap((c) => c.formerIds));
+    const bumped = setCounter(state.boardText, type.prefix, n + 1);
     if (!bumped.ok) return refuse(`${bumped.message} Nothing was changed.`);
     if (writeChecked(join(dir2, "board.md"), bumped.value, state.boardMtime)) continue;
     if (readdirSync(dir2).some((name) => name.startsWith(id + "-"))) continue;
-    const written = writeChecked(join(dir2, file2), text.value, void 0);
-    if (written) return written;
-    return { ok: true, message: `${id} added to ${lane.label}: ${input2.title.trim()}`, id, lane: lane.label, file: file2 };
+    return { ok: true, message: "", reserved: { state, cards, id } };
   }
   return refuse("Could not reserve a free card ID after 5 tries; another writer is busy or the kanban/ folder has stray files. Try again.");
+}
+function addCard(dir2, input2, now = /* @__PURE__ */ new Date()) {
+  const who2 = cleanWho(input2.who);
+  if (typeof who2 !== "string") return who2;
+  let source;
+  if (input2.from !== void 0 && input2.from.trim() !== "") {
+    const loaded = loadBoard(dir2);
+    if (!loaded.ok) return loaded;
+    const f = findCardFile(loaded.state, input2.from);
+    if (!f.ok) return f;
+    source = f.found;
+  }
+  const stamp = stampOf(now);
+  const dry = newCardText({ id: "BUG-0001", title: input2.title, status: "x", order: 0, stamp, who: who2, body: input2.body, labels: input2.labels });
+  if (!dry.ok) return refuse(`${dry.message} Nothing was changed.`);
+  let lane;
+  const r = reserveId(dir2, String(input2.type ?? ""), (state2) => {
+    lane = intakeLane(state2.board);
+    return lane === void 0 ? refuse("This board has no lane with role intake. Nothing was changed.") : void 0;
+  });
+  if (!r.ok) return r;
+  const { state, cards, id } = r.reserved;
+  if (lane === void 0) return refuse("This board has no lane with role intake. Nothing was changed.");
+  const made = newCardText({
+    id,
+    title: input2.title,
+    status: lane.label,
+    order: nextOrder(ordersIn(cards.cards, state.board, lane)),
+    stamp,
+    who: who2,
+    body: input2.body,
+    labels: input2.labels
+  });
+  if (!made.ok) return refuse(`${made.message} Nothing was changed.`);
+  let text = made.value;
+  if (source !== void 0) {
+    const spawned = appendLog(text, { date: stamp.date, time: stamp.time, who: who2, text: `spawned from ${source.id}` });
+    if (!spawned.ok) return refuse(`${spawned.message} Nothing was changed.`);
+    text = spawned.value;
+  }
+  const file2 = cardFileName(id, input2.title);
+  const written = writeChecked(join(dir2, file2), text, void 0);
+  if (written) return written;
+  let message = `${id} added to ${lane.label}: ${input2.title.trim()}`;
+  if (source !== void 0) {
+    const logged = appendLog(source.text, { date: stamp.date, time: stamp.time, who: who2, text: `spawned ${id}: ${input2.title.trim()}` });
+    const back = logged.ok ? writeChecked(source.path, logged.value, source.mtime) : refuse(logged.message);
+    if (back) message += ` ${source.id} could not be told (${back.message.replace(/ Nothing was changed.*$/, "")}).`;
+  }
+  return { ok: true, message, id, lane: lane.label, file: file2 };
 }
 function moveCardTo(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const who2 = cleanWho(input2.who);
@@ -37437,7 +37653,7 @@ function moveCardTo(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const written = writeChecked(f.found.path, out.value, f.found.mtime);
   if (written) return written;
   const from = before === void 0 ? "" : findLane(state.board, before.status)?.label ?? before.status;
-  return { ok: true, message: `${f.found.id} moved ${from} -> ${target.label}.`, id: f.found.id, from, to: target.label };
+  return { ok: true, message: `${nameOf(f.found)} moved ${from} -> ${target.label}.`, id: f.found.id, from, to: target.label };
 }
 function commentOn(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const who2 = cleanWho(input2.who);
@@ -37453,7 +37669,48 @@ function commentOn(dir2, input2, now = /* @__PURE__ */ new Date()) {
   if (!out.ok) return refuse(`${out.message} Nothing was changed.`);
   const written = writeChecked(f.found.path, out.value, f.found.mtime);
   if (written) return written;
-  return { ok: true, message: `Comment added to ${f.found.id}.`, id: f.found.id };
+  return { ok: true, message: `Comment added to ${nameOf(f.found)}.`, id: f.found.id };
+}
+function retypeCard(dir2, input2, now = /* @__PURE__ */ new Date()) {
+  const who2 = cleanWho(input2.who);
+  if (typeof who2 !== "string") return who2;
+  const loaded = loadBoard(dir2);
+  if (!loaded.ok) return loaded;
+  const f = findCardFile(loaded.state, input2.id);
+  if (!f.ok) return f;
+  const { found } = f;
+  const board = loaded.state.board;
+  const wanted = findType(board, String(input2.type ?? ""));
+  if (wanted === void 0) return refuse(unknownTypeMessage(board, String(input2.type ?? "")));
+  if (typeOfId(board, found.id)?.prefix === wanted.prefix) return refuse(`${found.id} is already a ${wanted.name}.`);
+  const card = loadCards(loaded.state).cards.find((c) => c.id === found.id);
+  if (card !== void 0 && findLane(board, card.status)?.role === "auto") {
+    return refuse(`${found.id} is being worked. Move it out of Auto or wait, then retype. Nothing was changed.`);
+  }
+  const r = reserveId(dir2, wanted.name);
+  if (!r.ok) return r;
+  const { cards, id: newId } = r.reserved;
+  const stamp = stampOf(now);
+  const text = retypeCardText(found.text, newId, stamp, who2);
+  if (!text.ok) return refuse(`${text.message} The number ${newId} stays reserved; nothing else was changed.`);
+  const newPath = join(dir2, retypedFileName(newId, found.name));
+  if (existsSync(newPath) || !existsSync(found.path) || statSync(found.path).mtimeMs !== found.mtime) {
+    return refuse(`${found.name} changed while this was being made. ${newId} stays reserved; nothing else was changed. Try again.`);
+  }
+  renameSync(found.path, newPath);
+  const written = writeChecked(newPath, text.value, statSync(newPath).mtimeMs);
+  if (written) return refuse(`${found.name} was renamed to ${parse3(newPath).base} but it changed before its content could be written. Board list shows it as id-name-mismatch; retype it again by hand.`);
+  const unmoved = [];
+  for (const child of cards.cards) {
+    if (child.parent !== found.id || child.fileName === void 0) continue;
+    const path = join(dir2, child.fileName);
+    const edited = setParent(readFileSync(path, "utf8"), newId);
+    if (!edited.ok || writeChecked(path, edited.value, statSync(path).mtimeMs)) unmoved.push(child.id);
+  }
+  let message = `${nameOf(found)} is now ${newId}.`;
+  if (card !== void 0 && card.branch !== "") message += ` Branch ${card.branch} is kept.`;
+  if (unmoved.length > 0) message += ` The parent line of ${unmoved.join(", ")} could not be changed; set it to ${newId} by hand.`;
+  return { ok: true, message, id: newId, was: found.id };
 }
 function decide(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const loaded = loadBoard(dir2);
@@ -37659,6 +37916,11 @@ function lanes(dir2) {
   });
   return { ok: true, message: "", text: out.join("\n") };
 }
+function types(dir2) {
+  const loaded = loadBoard(dir2);
+  if (!loaded.ok) return loaded;
+  return { ok: true, message: "", text: loaded.state.board.types.map((t) => `${t.name} (${t.prefix})`).join("\n") };
+}
 function reply(r) {
   return r.ok ? { content: [{ type: "text", text: r.text }] } : { content: [{ type: "text", text: r.message }], isError: true };
 }
@@ -37679,7 +37941,10 @@ function registerReadTools(server2, kanbanDir, noBoard) {
   );
   server2.registerTool(
     "card_get",
-    { description: "The whole file of one card (frontmatter, body, Plan and Log).", inputSchema: { id: external_exports.string().describe("Card ID: KB-0012, KB-12 or 12") } },
+    {
+      description: "The whole file of one card (frontmatter, body, Plan and Log).",
+      inputSchema: { id: external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID is followed to the card that holds it now.") }
+    },
     ({ id }) => {
       const dir2 = kanbanDir();
       return reply(dir2 === void 0 ? refuse(noBoard) : cardGet(dir2, id));
@@ -37690,11 +37955,17 @@ function registerReadTools(server2, kanbanDir, noBoard) {
     { description: "Each lane of the board: its role, who may fill it, and what a card moved there does." },
     withDir(lanes)
   );
+  server2.registerTool(
+    "types",
+    { description: 'Each ticket type of the board in order, with its letters: "bug (BUG)". card_add and card_retype take either.' },
+    withDir(types)
+  );
 }
 
 // src/tools-write.ts
 var who = external_exports.string().describe(`Your name, as it should appear in the card's Log (for example "Gemini").`);
-var cardId = external_exports.string().describe("Card ID: KB-0012, KB-12 or 12");
+var cardId = external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype) is followed to the card that holds it now.");
+var typeName = external_exports.string().describe('A type name or its letters, as in the types tool (for example "bug" or "ENH")');
 function registerWriteTools(server2, kanbanDir, noBoard) {
   const run = (go) => {
     const dir2 = kanbanDir();
@@ -37704,8 +37975,15 @@ function registerWriteTools(server2, kanbanDir, noBoard) {
   server2.registerTool(
     "card_add",
     {
-      description: "Add a card to the first intake lane. The body is the requirement in the person's words; leave design choices out.",
-      inputSchema: { title: external_exports.string(), body: external_exports.string().optional(), labels: external_exports.array(external_exports.string()).optional(), who }
+      description: `Add a card of a type to the first intake lane; its ID takes the type's letters and next number (BUG-0013). The body is the requirement in the person's words; leave design choices out. "from" names a card this one is made from.`,
+      inputSchema: {
+        title: external_exports.string(),
+        type: typeName,
+        body: external_exports.string().optional(),
+        labels: external_exports.array(external_exports.string()).optional(),
+        from: external_exports.string().optional().describe("Card ID of the card this one is made from (both get a Log line)"),
+        who
+      }
     },
     (a) => run((dir2) => addCard(dir2, a))
   );
@@ -37724,6 +38002,14 @@ function registerWriteTools(server2, kanbanDir, noBoard) {
       inputSchema: { id: cardId, text: external_exports.string(), who }
     },
     (a) => run((dir2) => commentOn(dir2, a))
+  );
+  server2.registerTool(
+    "card_retype",
+    {
+      description: "Change a card's type. The card gets the new type's next ID (BUG-0012 becomes ENH-0007), its file is renamed, a Log line records the old ID and its child cards' parent lines follow. The old ID keeps working. Refused for a card in an auto lane.",
+      inputSchema: { id: cardId, type: typeName, who }
+    },
+    (a) => run((dir2) => retypeCard(dir2, a))
   );
   server2.registerTool(
     "decision_add",

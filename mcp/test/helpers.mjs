@@ -14,7 +14,9 @@ export function makeBoard(cards = []) {
   mkdirSync(dir, { recursive: true })
   const board = defaultBoardText('John')
   if (!board.ok) throw new Error(board.message)
-  writeFileSync(join(dir, 'board.md'), board.value.replace('next_id: 1', `next_id: ${cards.length + 1}`))
+  // A board holding KB- cards declares `kb` (last, so a new card still gets the first default type); one without keeps the default types.
+  const types = cards.some(([id]) => id.startsWith('KB-')) ? '\ntypes: [bug, enhancement, chore, kb]\nlanes:\n' : '\nlanes:\n'
+  writeFileSync(join(dir, 'board.md'), board.value.replace('\nlanes:\n', types))
   for (const [id, title, status, order, flag = ''] of cards) {
     const text = newCardText({ id, title, status, order, flag, stamp: { date: '2026-10-08', time: '09:10' }, who: 'John' })
     if (!text.ok) throw new Error(text.message)
