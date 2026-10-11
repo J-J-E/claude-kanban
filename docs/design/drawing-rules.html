@@ -1,0 +1,194 @@
+<title>Kanban Pane Drawing Rules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column of numbered rule sections, with scale diagrams drawn in the pane's own cell units. */
+:root {
+  --bg: #f6f6f3; --surface: #ffffff; --fg: #1d1d1b; --muted: #5f5f59; --line: #dcdcd5;
+  --accent: #b5522d; --can: #2f6b3e; --cannot: #a3352b; --warn: #8a6410;
+  --pane: #1f1f1e; --card: #262624; --cardText: #e8e8e3; --cardDim: #9a9a95;
+  --display: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161615; --surface: #1e1e1c; --fg: #ecece6; --muted: #a3a39b; --line: #34342f;
+  --accent: #e07a52; --can: #6fbf83; --cannot: #ec7b70; --warn: #e2b04a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161615; --surface: #1e1e1c; --fg: #ecece6; --muted: #a3a39b; --line: #34342f;
+  --accent: #e07a52; --can: #6fbf83; --cannot: #ec7b70; --warn: #e2b04a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 16px/1.55 var(--body); padding-inline: 16px; padding-block: 32px 64px; }
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+h1 { font: 700 2rem/1.15 var(--display); margin: 0; text-wrap: balance; }
+h2 { font: 700 1.3rem/1.25 var(--display); margin: 0 0 10px; text-wrap: balance; display: flex; gap: 10px; align-items: baseline; }
+h2 .n { font: 600 0.8rem var(--mono); color: var(--accent); }
+h3 { font: 700 1rem var(--display); margin: 18px 0 6px; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 10px; }
+ul { margin: 0 0 10px; padding-left: 20px; }
+li { margin-bottom: 4px; }
+code { font: 0.86em var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+.lede { color: var(--muted); font-size: 1.05rem; margin-top: 8px; }
+.meta { font: 0.78rem var(--mono); color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.split > div { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.split h3 { margin-top: 0; }
+.can h3 { color: var(--can); } .cannot h3 { color: var(--cannot); }
+.rule { border-left: 3px solid var(--line); padding-left: 14px; margin: 14px 0; }
+.rule strong { display: block; }
+.warn { color: var(--warn); }
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 0.72rem var(--mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+td:first-child { white-space: nowrap; font-weight: 700; }
+.figure { background: var(--pane); color: var(--cardText); border-radius: 10px; padding: 18px; overflow-x: auto; }
+.figure .cap { color: var(--cardDim); font-size: 0.8rem; margin-top: 10px; font-family: var(--mono); }
+.grid { position: relative; width: 495px; height: 120px;
+  background-image: linear-gradient(to right, #ffffff14 1px, transparent 1px), linear-gradient(to bottom, #ffffff14 1px, transparent 1px);
+  background-size: 8.25px 20px; }
+.gcard { position: absolute; left: 16.5px; width: 445px; background: var(--card); border-radius: 10px; font-size: 13px; overflow: hidden; }
+.gcard .row { display: flex; align-items: center; height: 20px; }
+.gcard .id { color: var(--cardDim); width: 66px; padding-left: 16.5px; flex-shrink: 0; }
+.gcard .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gcard .dots { width: 24.75px; color: var(--cardDim); text-align: center; flex-shrink: 0; }
+.gcard .age { color: var(--cardDim); padding-right: 24.75px; }
+.gcard.one { top: 20px; height: 20px; }
+.gcard.two { top: 60px; height: 40px; }
+.spine { position: absolute; left: 0; top: 0; bottom: 0; width: 8.25px; background: #c9952e; }
+.bar { color: var(--cardDim); padding-left: 82.5px; flex: 1; }
+.stack { display: flex; flex-direction: column; gap: 6px; font-size: 0.86rem; }
+.stack div { border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.l-app { background: #3b2422; } .l-abs { background: #3a2e12; } .l-client { background: #26332a; } .l-native { background: #34342f; }
+.stack small { color: var(--cardDim); font-family: var(--mono); }
+footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 14px; }
+@media (max-width: 620px) { .split { grid-template-columns: 1fr; } h1 { font-size: 1.6rem; } }
+</style>
+<main>
+<header>
+  <div class="meta">Kanban plugin · Claude desktop app, Code tab, Windows · measured 2026-10-09</div>
+  <h1>Kanban Pane Drawing Rules</h1>
+  <p class="lede">What a Claude Code mod can and cannot draw in the desktop app: how it is laid out, painted, ordered and layered, and how clicks, keys and drags reach it. These rules were measured on the real pane. Where the engine's type file and the real pane disagree, the real pane wins.</p>
+</header>
+<section>
+  <h2><span class="n">1</span>Where a mod can draw</h2>
+  <div class="split">
+    <div class="can"><h3>Can draw</h3>
+      <ul>
+        <li><strong>The docked pane</strong> beside the chat. Opened with <code>ui.open</code>; it asks for a width in cells, and a width the person drags wins. This is where the board lives.</li>
+        <li><strong>The band above the chat box</strong> (<code>AbovePrompt</code>). Up to half the window's rows; a taller tree scrolls. The "▦ Board" chip lives here and only shows while the pane is closed.</li>
+        <li><strong>Toasts</strong>: short text messages, no buttons.</li>
+        <li><strong>The status line</strong>: text only.</li>
+      </ul>
+    </div>
+    <div class="cannot"><h3>Cannot draw</h3>
+      <ul>
+        <li>The app's top-right menu (Files, Background tasks, Plan), its toolbars or the window frame.</li>
+        <li>The right-click menu. A right press over the pane always opens the app's own menu (Copy, Select All), and nothing can stop it.</li>
+        <li>Anything that floats over the lanes (see section 5).</li>
+        <li>Icons or images. Only text glyphs.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">2</span>Two drawing systems</h2>
+  <p>Every pixel of the pane comes from one of two systems. They look different and take clicks differently, so every control has to pick one.</p>
+  <div class="tbl"><table>
+    <tr><th></th><th>Native tree</th><th>Client region</th></tr>
+    <tr><td>Elements</td><td>Box, Text, Button, Select (dropdown), Input (text field), Markdown</td><td>Box and Text only. A Button, Select or Input placed here draws as plain text.</td></tr>
+    <tr><td>Look</td><td>Real desktop controls in the app's own style</td><td>Terminal-style cells: 8.25 px wide, 20 px tall</td></tr>
+    <tr><td>Clicks</td><td>First click may only take the keyboard (section 6)</td><td>Acts on the first click</td></tr>
+    <tr><td>Pointer</td><td>Press only</td><td>Down, move, up, enter, leave, with cell x and y; drag and drop</td></tr>
+    <tr><td>Used for</td><td>Header, toolbar, open card, Settings</td><td>The lanes and cards (one region), the Board chip</td></tr>
+  </table></div>
+  <p>A native control can only be styled through its own few props: a Button is plain or filled, primary or secondary, dim or not. It cannot be given a custom colour (no red Delete button) or a custom width. The app draws an Input at its own fixed width with its own submit button beside it.</p>
+  <p>A Client region has a fixed width and height, cannot hold another Client, and is unmounted by any error thrown in its code. A tree may hold at most 20,000 nodes, 32 levels deep, 100,000 characters.</p>
+</section>
+
+<section>
+  <h2><span class="n">3</span>Layout</h2>
+  <ul>
+    <li><strong>Flexbox only.</strong> Box takes flexDirection, flexGrow, flexShrink, flexWrap, alignItems, alignSelf, justifyContent (including space-between), gap, width, height, minWidth, minHeight, margin, padding, overflow (visible or hidden), display (flex or none), and position (relative or absolute) with top, left, right, bottom.</li>
+    <li><strong>Whole cells only.</strong> Every size and offset is a whole number of cells (8.25 px) or rows (20 px), or a percent. There is no half row: a card is 20 or 40 px tall, and the gap between two cards is a full 20 px row.</li>
+    <li><strong>No measuring text.</strong> A width must come from the region's columns or a percent, never from counting characters, because the desktop font is proportional.</li>
+    <li><strong>Dropdowns size to their value.</strong> A Box holding a Select is as wide as the chosen value unless it has a percent width, so dropdown columns only line up when each gets a percent share.</li>
+    <li><strong>Truncation needs two props.</strong> A flex item does not shrink below its text. Give the Box <code>minWidth={0}</code> and <code>overflow="hidden"</code>; then a Text with <code>wrap="truncate-end"</code> ends in "…". Text wrap modes: wrap, truncate-start, truncate-middle, truncate-end.</li>
+    <li><strong>One text size.</strong> Hierarchy comes from bold, dim, colour and space, never from size.</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="n">4</span>Painting</h2>
+  <div class="figure">
+    <div class="grid" aria-label="Two cards drawn on the 8.25 by 20 pixel cell grid">
+      <div class="gcard one"><div class="row"><span class="id">KB-0028</span><span class="t">A board icon to open the pane</span><span class="dots">⋯</span></div></div>
+      <div class="gcard two"><span class="spine"></span><div class="row"><span class="id">KB-0007</span><span class="t">Later: MCP wrapper so any agent can use the board</span><span class="dots">⋯</span></div><div class="row"><span class="bar">▰▰▰▱▱▱▱ 3/7</span><span class="age">5 h ago</span></div></div>
+    </div>
+    <div class="cap">Drawn to scale on the cell grid: a 1-row card (20 px) and a 2-row card (40 px) with a 1-cell warning spine and the ▰▱ progress blocks.</div>
+  </div>
+  <div class="rule"><strong>A bordered Box pushes its content in.</strong> The desktop insets in-flow content by at least half a row down and one cell right, whatever the padding says. So a bordered Box is only an outline and a fill; its content is one absolute child at top 0, left 0, the Box's full size, carrying the padding.</div>
+  <div class="rule"><strong>Borders are thin and round.</strong> A 1 px line with about a 10 px corner radius. A 1-row bordered Box is a pill and a 2-row Box a rounded tile. A border the same colour as the fill gives a rounded fill with no visible line, which is how cards are drawn now.</div>
+  <div class="rule"><strong>Fills poke out of round corners</strong> unless the bordered parent has <code>overflow="hidden"</code>.</div>
+  <div class="rule"><strong>A borderless filled Box is exact</strong>, with its text centred on the row.</div>
+  <div class="rule"><strong>Colour:</strong> theme keys that follow the person's theme (text, inactive, subtle, suggestion, success, error, warning, claude, permission and more), or any hex. In use now: card <code>#262624</code>, hover <code>#2e2e2c</code>, open <code>#34342f</code>, drag source <code>#1f1f1e</code>, Needs You header <code>#3a2e12</code>, refused-drop text <code>#b89a5a</code>. The light theme has not been checked.</div>
+  <div class="rule"><strong>Text styles:</strong> bold, dim, italic, underline, strikethrough, inverse, background colour.</div>
+  <div class="rule"><strong>Glyphs that render cleanly:</strong> <code>● ○ ▶ ◆ ✕ ▾ ▸ ◂ ⋯ ▰ ▱ ▦ ✓</code>. <code>▰▱</code> was chosen for progress: one block per plan step. <code>■□</code> drew the empty block too small.</div>
+  <div class="rule"><strong>Native controls are taller than a row</strong> (about 24 px against 20), and buttons sit about 4 px in from text above them.</div>
+</section>
+<section>
+  <h2><span class="n">5</span>Order and layering</h2>
+  <p>There is no z-index. What paints over what is decided by tree order, absolute positioning, and one hard rule about Client regions.</p>
+  <div class="figure">
+    <div class="stack" aria-label="Paint order, top layer first">
+      <div class="l-app"><span>The app's own menus and right-click menu</span><small>always on top; a mod cannot reach it</small></div>
+      <div class="l-client"><span>A Client region (the lanes)</span><small>paints over any native Box placed over it</small></div>
+      <div class="l-abs"><span>An absolute Box</span><small>over its earlier siblings, clipped to its pane or band</small></div>
+      <div class="l-native"><span>Native tree, in order</span><small>later siblings below earlier ones on the page</small></div>
+    </div>
+    <div class="cap">Top layer first. A native popup placed over the lanes is hidden under them, which is why a card's actions are in the open card and not in a menu.</div>
+  </div>
+  <ul>
+    <li><strong>Tree order is page order</strong>, top to bottom: header, toolbar (Board tab only), error lines, then either the lanes, the open card or Settings.</li>
+    <li><strong>An absolute Box</strong> leaves the flow and paints over earlier siblings; moving it moves nothing else. It is clipped to its pane or band.</li>
+    <li><strong>Nothing can pop up over the lanes.</strong> A menu for a card would have to be drawn inside the lanes region itself, as rows under the card.</li>
+    <li><strong>Scrolling belongs to the app.</strong> The pane body scrolls by wheel or keys. A mod cannot scroll it from code, cannot scroll during a drag, cannot pin a header, and has no horizontal scroll. Lanes below the visible part cannot be reached by dragging.</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="n">6</span>Clicks, keys and drag</h2>
+  <div class="rule"><strong>First click on a native control.</strong> When the pane does not hold the keyboard, the first click on a Button, Select or Input only gives it the keyboard; the press arrives with the second click. A click in the lanes acts at once. The board now asks for the keyboard on every click in the lanes, so the next button works first time (confirmed 2026-10-09). <span class="warn">A header, toolbar or Settings control clicked straight from the chat box still needs two clicks.</span></div>
+  <div class="rule"><strong>Asking for the keyboard can be refused</strong> while the chat box has text, a dialog or survey is up, or the person is typing.</div>
+  <div class="rule"><strong>Right button:</strong> belongs to the app. The board ignores it.</div>
+  <div class="rule"><strong>Hover:</strong> a Box can change its border colour, background colour, display or position under the pointer. Cards use a background change. Showing hidden content on hover is unproven and not used. No tooltips, no cursor changes.</div>
+  <div class="rule"><strong>Keys:</strong> a Button can take a one-letter hotkey, which works only while the pane holds the keyboard. A Client can receive keys after a click, but Escape never arrives (it hands the keyboard back to the chat box). Keys in the lanes are unproven and unused.</div>
+  <div class="rule"><strong>Drag and drop</strong> works only in a Client. A press on a card starts a hold; moving 2 cells makes it a drag and a ghost of the card follows the pointer. The lane under the pointer gets an outline and a one-line verdict ("Drop and Claude runs it end to end."); a thin line marks the slot between two cards. A release without movement opens the card. A drop on Needs You is refused, because only Claude moves cards there. A lost release cancels the drag after 30 s.</div>
+</section>
+
+<section>
+  <h2><span class="n">7</span>Timing and refresh</h2>
+  <ul>
+    <li>Card files are re-read once a second. Times on screen change once a minute. Nothing animates faster than a quarter second, and a moved card shows dim for up to 2 s.</li>
+    <li>Plugin edits reload into the running app within a few seconds to half a minute. Folds and the open card survive a reload.</li>
+    <li>The app stops painting the pane while another window covers it or another session is in front.</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="n">8</span>What is drawn today</h2>
+  <div class="tbl"><table>
+    <tr><th>Part</th><th>System</th><th>Contents</th></tr>
+    <tr><td>Header</td><td>Native</td><td>"N need you", Board and Settings tabs, "Claude is on KB-…" with its note, time since the board changed</td></tr>
+    <tr><td>Toolbar</td><td>Native</td><td>New card (title field, Lane dropdown, Add, Cancel), Find a card with Clear, Sort at the right edge; second row: card count and one Collapse all / Expand all button</td></tr>
+    <tr><td>Lanes</td><td>Client</td><td>Needs You, Pending, Plan, Auto, Backlog, Done, Discarded, top to bottom. Each a flat header row (▾/▸, bold name, dim count). An empty lane is one dim line. Needs You's header is filled amber when cards wait.</td></tr>
+    <tr><td>Cards</td><td>Client</td><td>Row 1: dim ID, title, label, "● Working", ⋯. Row 2 when present: ▰▱ blocks and n/m, or a status line, with the age at the right. Waiting cards have a 1-cell spine. ⋯ opens a small menu under the card (Open card, Copy ID, Delete card…); a click on the card opens it.</td></tr>
+    <tr><td>Open card</td><td>Native</td><td>◂ Board, ID and lane, ◂ Prev / n of N / Next ▸; title; Rename, Copy ID; a status box with one action button when waiting; Lane, Model, Thinking dropdowns; plan steps (✓ ▶ ○) with Show details; description; Log with a comment field; Delete card… with a confirm</td></tr>
+    <tr><td>Settings</td><td>Native</td><td>Workers at once; Model and Thinking dropdowns per role with their defaults and Reset; Restore all defaults with a confirm</td></tr>
+    <tr><td>Board chip</td><td>Client, in the band</td><td>"▦ Board" above the chat box while the pane is closed; one click opens the pane</td></tr>
+  </table></div>
+</section>
+
+<footer>Sources in the repo: docs/design/desktop-paint-notes.md, hooks/register.tsx, hooks/board.tsx, hooks/ui/*.tsx, and the engine types in .claude-plugin/types/claude-code/index.d.ts. Real screenshots: docs/design/real-*.png.</footer>
+</main>

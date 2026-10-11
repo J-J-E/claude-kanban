@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanban pane mock, third pass</title>
+<style>
+:root{--pg:#101010;--pgtext:#ebeae6;--pgdim:#a09f97;--rule:#2f2f2d;--card:#181817;--accent:#c6613f}
+@media (prefers-color-scheme: light){:root{--pg:#efeeea;--pgtext:#1f1f1d;--pgdim:#5f5e58;--rule:#cfcdc6;--card:#faf9f6}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--pgtext);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;min-width:1500px}
+header.top{padding:26px 32px 6px;max-width:1280px}
+header.top h1{font-size:22px;margin:0 0 6px;font-weight:600}
+header.top p{margin:0 0 8px;color:var(--pgdim);max-width:920px}
+nav.toc{padding:0 32px 6px;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px}
+nav.toc a{color:var(--pgtext)}
+.opts{padding:6px 32px 14px;font-size:13px;color:var(--pgdim)}
+section.part{padding:18px 32px 30px;border-top:1px solid var(--rule)}
+section.part>h2{font-size:19px;margin:0 0 4px;font-weight:600}
+section.part>p.lead{margin:0 0 16px;color:var(--pgdim);max-width:980px}
+.row{display:flex;gap:30px;align-items:flex-start}
+.grid{display:grid;gap:34px 30px;align-items:start}
+.grid.g3{grid-template-columns:repeat(3,max-content)}
+.grid.g2{grid-template-columns:repeat(2,max-content)}
+figure{margin:0}
+figcaption{font-size:12.5px;color:var(--pgdim);margin:0 0 7px;max-width:640px}
+figcaption b{color:var(--pgtext);font-weight:600;font-size:13.5px}
+.shell{display:inline-block;border:1px solid var(--rule);background:#000;vertical-align:top}
+.fold{position:absolute;left:0;right:0;border-top:1px dashed #888;z-index:60;pointer-events:none}
+.fold span{position:absolute;right:4px;top:2px;font-size:11px;padding:0 4px}
+.note{max-width:1000px;margin:12px 0 0;padding:12px 16px;background:var(--card);border:1px solid var(--rule);border-radius:6px;font-size:14px}
+.note.reco{border-left:4px solid var(--accent)}
+.legend{display:grid;grid-template-columns:repeat(2,minmax(380px,560px));gap:8px 40px;font-size:13.5px;max-width:1200px}
+.legend div{display:flex;gap:10px;align-items:baseline}
+.sw{display:inline-block;min-width:44px;text-align:center;font-weight:600;border-radius:3px;padding:0 4px}
+.zoomed{zoom:.74}
+
+/* ---------- the pane frame: a cell grid, 8.25 x 20 px, one 13 px proportional sans ---------- */
+.f{position:relative;isolation:isolate;overflow:hidden;font:13px/20px "Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.f *{box-sizing:border-box}
+.f.grid{background-image:linear-gradient(to right,rgba(128,128,128,.22) 1px,transparent 1px),linear-gradient(to bottom,rgba(128,128,128,.22) 1px,transparent 1px);background-size:8.25px 20px}
+.bx{position:absolute}
+.t{position:absolute;height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t.w{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
+.fx{position:absolute;display:flex;align-items:center;height:20px;line-height:20px;white-space:nowrap;overflow:hidden}
+.fx>.g{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx>.n{flex:0 0 auto;white-space:nowrap}
+.nat{position:absolute;height:24px;display:flex;align-items:center;border-radius:6px;border:1px solid;padding:0 10px;white-space:nowrap;overflow:hidden;font:inherit}
+.nat.btn{justify-content:center}
+.nat .lab{opacity:.65;margin-right:8px}
+.nat .val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nat .car{margin-left:6px;opacity:.7}
+.caret{display:inline-block;width:1px;height:14px;vertical-align:-3px;margin-left:1px}
+.pane{position:relative;background:#1a1a19;color:#bfbeb3;font:13px/20px "Segoe UI",system-ui,sans-serif;overflow:hidden}
+.pane .bar{position:absolute;left:0;right:0;top:0;height:36px}
+.pane .bar b{position:absolute;left:14px;top:9px;font-weight:400}
+.pane .bar i{position:absolute;top:8px;font-style:normal;color:#bfbeb3}
+.pane.light{background:#faf9f5;color:#4a4944}
+</style>
+</head>
+<body>
+<script>
+(function(){
+'use strict';
+const CW=8.25, CH=20, NB=' ';
+
+/* ---- Colours. dark: sampled from the real pane (ground, tile fill, dim outline, orange, accent).
+   U is the verified fill (userMessageBackground). bmid is a raw neutral that holds on both grounds. ---- */
+const TH={
+ dark:{G:'#1a1a19',U:'#151515',text:'#f0efec',dim:'#a3a29a',bdim:'#2b2b29',bmid:'#74746f',orange:'#db9300',accent:'#c6613f',error:'#ff6b80',ink:'#1a1a19'},
+ light:{G:'#faf9f5',U:'#f0eee7',text:'#1f1e1d',dim:'#6b6a64',bdim:'#dedcd4',bmid:'#74746f',orange:'#b87a00',accent:'#c6613f',error:'#c4283c',ink:'#ffffff'}
+};
+
+/* ---- What each lane role means, in the design's words ---- */
+const ROLE={
+ intake:{rule:'New cards. A drop here only files it.',empty:'Nothing waiting. Click + to write a card.',drop:'Drop to file it. Nothing runs.',chip:'File it',acts:false,create:true},
+ plan:{rule:'Claude writes a plan, then asks you.',empty:'Drop a card here. Claude writes a plan, then asks you to approve it.',drop:'Drop and Claude writes a plan.',chip:'Write a plan',acts:true,create:true},
+ 'needs-you':{rule:'Claude puts what needs you here.',empty:'Nothing needs you. Plans to approve, questions and failures show up here.',acts:false,create:false},
+ auto:{rule:'Claude runs it end to end and merges.',empty:'Drop a card here. Claude runs it end to end, then moves it to Done.',drop:'Drop and Claude runs it end to end.',chip:'Run it',acts:true,create:true},
+ manual:{rule:'Claude plans, then does one step at a time.',empty:'Drop a card here. Claude plans, then does one step at a time as you say.',drop:'Drop and Claude plans, then waits for you.',chip:'Step by step',acts:true,create:true},
+ gated:{rule:'A risky step is held. Drag to Auto to approve.',empty:'Nothing is held. A risky step waits here until you drag its card to Auto.',acts:false,create:false},
+ done:{rule:'Finished cards.',empty:'Finished cards land here.',drop:'Drop to mark it finished.',chip:'Finish it',acts:false,create:false},
+ parked:{rule:'Paused. Nothing runs.',empty:'Drop a card here to pause it.',drop:'Drop to pause it.',chip:'Pause it',acts:false,create:false},
+ scrapped:{rule:'Abandoned.',empty:'Drop a card here to abandon it.',drop:'Drop to abandon it.',chip:'Abandon it',acts:false,create:false}
+};
+const LANES=[
+ {n:'Inbox',r:'intake'},{n:'Plan',r:'plan'},{n:'Needs You',r:'needs-you',co:true},{n:'Auto',r:'auto'},
+ {n:'Manual',r:'manual'},{n:'Gated',r:'gated',co:true},{n:'Done',r:'done'},
+ {n:'Parked',r:'parked',side:true},{n:'Scrapped',r:'scrapped',side:true}
+];
+const FINISHED=['done','parked','scrapped'];
+const SORTS=[['order','Your order','drag to place cards'],['newest','Newest first',''],['oldest','Oldest first',''],['changed','Recently changed',''],['title','Title A to Z',''],['waiting','Needs you first',''],['label','Label','']];
+
+function C(id,t,lane,x){return Object.assign({id:'KB-'+id,t:t,lane:lane,flag:'',working:false,queued:false,turn:false,labels:[],model:'',thinking:'',added:'today',changed:'today',plan:null,last:null,agent:'',retry:0,parkedAt:'',merged:'',children:null},x||{});}
+function base(){return [
+ C('0006','Phase 4: marketplace README and first real install','Inbox',{labels:['docs']}),
+ C('0007','Later: MCP wrapper so any agent can use the board','Inbox',{labels:['later']}),
+ C('0008','Later: Obsidian as a viewer','Inbox',{labels:['later']}),
+ C('0009','Later: adopt the board in another-project','Inbox',{labels:['later']}),
+ C('0012','Skill triggers on board and backlog words in projects without a board','Inbox',{labels:['skill'],added:'yesterday'}),
+ C('0013','Verify the pane on the desktop surface: drag, model switch, hot reload','Inbox',{labels:['verify']}),
+ C('0015','Refresh WALKTHROUGH.md and TESTING.md for the Jira-style pane','Inbox',{labels:['docs']}),
+ C('0014','Board must look like a board in the docked pane','Auto',{working:true,turn:true,plan:{total:5,done:2},agent:'lane panels and spacing',last:{t:'step 2 done: header',when:'4 min ago'}}),
+ C('0011','Walkthrough with examples, from new folder to understanding the lanes','Done',{merged:'kb-0011',changed:'Oct 6'}),
+ C('0004','Pane tests on the desktop surface','Done',{merged:'kb-0004',changed:'Oct 6'}),
+ C('0003','Hooks module: pane, settings, refresh, moves','Done',{merged:'kb-0003',changed:'Oct 5'}),
+ C('0005','Phase 3: lane actions wired end to end','Done',{merged:'kb-0005',changed:'Oct 6'}),
+ C('0002','Board layout and drag-and-drop region','Done',{merged:'kb-0002',changed:'Oct 5'}),
+ C('0010','Fix lanes.md: the retry rule is chosen, not proposed','Done',{merged:'kb-0010',changed:'Oct 6'}),
+ C('0001','Phase 1: skill, card format, parsing library, tests','Done',{merged:'kb-0001',changed:'Oct 4'})
+];}
+function ds(name){
+ const cs=base(); const g=id=>cs.find(c=>c.id==='KB-'+id);
+ const S={running:1,limit:3,waiting:0,turn:'KB-0014',at:'11:33',working:'KB-0014'};
+ if(name==='real'){ /* a sample board as the pane showed it */
+  g('0014').working=false;g('0014').turn=false;g('0014').plan={total:5,done:3};g('0014').agent='';g('0014').last={t:'step 3 done: tiles',when:'38 min ago'};
+  cs.push(C('0016','test card','Needs You',{flag:'PLAN READY',turn:true,plan:{total:3,done:0},last:{t:'plan written',when:'2 min ago'}}));
+  Object.assign(S,{running:0,turn:'KB-0016',working:''});
+ }else if(name==='busy'||name==='override'){
+  Object.assign(g('0015'),{lane:'Needs You',flag:'PLAN READY',plan:{total:3,done:0},last:{t:'plan written',when:'6 min ago'}});
+  Object.assign(g('0006'),{lane:'Needs You',flag:'QUESTION: which GitHub account hosts the repo?',plan:{total:4,done:1},last:{t:'question asked',when:'12 min ago'}});
+  Object.assign(g('0007'),{lane:'Gated',flag:'GATE: merge touches package.json',plan:{total:6,done:3},last:{t:'step 3 done: wrapper skeleton',when:'20 min ago'}});
+ }else if(name==='approved'){ /* he pressed Approve and run on KB-0015 while Claude was busy */
+  Object.assign(g('0015'),{lane:'Auto',queued:true,plan:{total:3,done:0},last:{t:'approved',when:'just now'}});
+  Object.assign(g('0006'),{lane:'Needs You',flag:'QUESTION: which GitHub account hosts the repo?',plan:{total:4,done:1},last:{t:'question asked',when:'12 min ago'}});
+  Object.assign(g('0007'),{lane:'Gated',flag:'GATE: merge touches package.json',plan:{total:6,done:3},last:{t:'step 3 done: wrapper skeleton',when:'20 min ago'}});
+  S.waiting=1;
+ }else if(name==='rest'){
+  Object.assign(g('0014'),{working:false,turn:false});
+  Object.assign(S,{running:0,turn:null,working:''});
+ }else if(name==='empty'){ return {cards:[],status:{running:0,limit:3,waiting:0,turn:null,at:'11:33',working:''}}; }
+ if(name==='busy'||name==='quiet'){ g('0014').retry=0; }
+ if(name==='override'){Object.assign(g('0015'),{model:'opus',thinking:'medium'});Object.assign(g('0012'),{thinking:'high'});Object.assign(g('0014'),{model:'fable'});}
+ return {cards:cs,status:S};
+}
+const DETAIL={
+ 'KB-0015':{desc:'The walkthrough and the test guide still describe the old text-row pane. Bring both up to date with the board as it looks now: lanes, tiles, drag and drop, the card menu.',
+  plan:['Rewrite the walkthrough screens for the new board. Files: WALKTHROUGH.md. Check: read it next to the pane.','Update the test steps for drag, menu and create. Files: TESTING.md. Check: run each step once.','Re-run the walkthrough from a new folder. Check: every step matches the screen.'],
+  log:['08:17 John: created in Inbox','08:31 John: moved Inbox -> Plan','08:36 Claude: plan written, 3 steps','08:36 Claude: moved Plan -> Needs You','11:20 John: which model will the worker use for step 2?','11:21 Claude: The workers use sonnet, which is the Worker model in Settings. The manager (this session) is opus and the advisor is fable. Step 2 will run on a sonnet worker. A change in Settings applies from the next turn, so it will not affect a step that is already running.']},
+ 'KB-0014':{desc:'Rebuild the board so it looks like a board in the docked pane, and show it while the plugin is being developed.',
+  plan:['Header band with the needs-you label and the status line.','Lane panels with margins and spacing.','Tiles with progress and status.','Add, menu, drag and drop on the new tiles.','Light theme check.'],
+  log:['08:17 John: created in Inbox','08:17 Claude: moved Inbox -> Auto','08:20 Claude: started: kb-0014-board','10:58 Claude: step 1 done: header band','11:29 Claude: step 2 done: lane panels']}
+};
+/* The defaults the plugin ships with (taken from the original mockup; one table). SETTINGS is what this board has now: two rows differ, to show Reset. */
+const DEFAULTS={workers:'2',manager:{m:'opus',t:'high'},planner:{m:'opus',t:'medium'},worker:{m:'sonnet',t:'low'},advisor:{m:'fable',t:'Not set'}};
+const SETTINGS={workers:'3',manager:{m:'opus',t:'high'},planner:{m:'opus',t:'high'},worker:{m:'sonnet',t:'low'},advisor:{m:'fable',t:'Not set'}};
+
+/* ---- helpers on the data ---- */
+function laneOf(name){return LANES.find(l=>l.n===name);}
+function cardsIn(st,L){return st.cards.filter(c=>c.lane===L.n);}
+/* a card waits on him only while it sits in a lane only Claude moves cards into */
+function isWaiting(st,c){const L=laneOf(c.lane);return !!c.flag&&!!L&&!!L.co;}
+function flagView(f,c){
+ if(!f) return null;
+ const n=c&&c.plan?c.plan.total:0;
+ if(f.indexOf('PLAN READY')===0) return {k:'plan',g:'◆',text:'Plan ready'+(n?': '+n+' steps. ':': ')+'Open it to approve or change it',box:'Plan ready: '+(n||'the')+' steps. Claude is waiting for you to approve it.',short:'Plan ready',col:'orange'};
+ if(f.indexOf('QUESTION')===0){let q=f.replace(/^QUESTION:\s*/,'');q=q.charAt(0).toUpperCase()+q.slice(1);return {k:'question',g:'?',text:q,short:q,col:'orange'};}
+ if(f.indexOf('FAILED')===0) return {k:'failed',g:'✕',text:'A step failed 4 times. Open it to see why',short:'Failed',col:'error'};
+ if(f.indexOf('GATE')===0){const r=f.replace(/^GATE:\s*/,'');return {k:'gate',g:'▲',text:'Held: '+r,box:'Held: '+r+'. Claude will not go on until you approve.',short:'Held: '+r,col:'orange'};}
+ return {k:'other',g:'▲',text:f,short:f,col:'orange'};
+}
+function attention(st){
+ const w=st.cards.filter(c=>isWaiting(st,c)); const kinds={};
+ w.forEach(c=>{const k=flagView(c.flag,c).k;kinds[k]=(kinds[k]||0)+1;});
+ const names={plan:'plan ready',question:'question',failed:'failed',gate:'held'};
+ const parts=['plan','question','failed','gate','other'].filter(k=>kinds[k]).map(k=>(names[k]?kinds[k]+' '+names[k]+(k==='question'&&kinds[k]>1?'s':''):kinds[k]+' flagged'));
+ return {n:w.length,text:parts.join(', ')};
+}
+function isOpen(st,L,n){
+ if(st.open && Object.prototype.hasOwnProperty.call(st.open,L.n)) return st.open[L.n];
+ if(n===0) return false;
+ return FINISHED.indexOf(L.r)<0;
+}
+function sortOf(st,L){return (st.sort&&st.sort[L.n])||'order';}
+function sorted(st,L){
+ const cs=cardsIn(st,L).slice(); const s=sortOf(st,L);
+ if(s==='title')cs.sort((a,b)=>a.t.localeCompare(b.t));
+ else if(s==='newest')cs.sort((a,b)=>b.id.localeCompare(a.id));
+ else if(s==='oldest')cs.sort((a,b)=>a.id.localeCompare(b.id));
+ else if(s==='changed')cs.sort((a,b)=>(a.changed==='today'?0:1)-(b.changed==='today'?0:1)||b.id.localeCompare(a.id));
+ else if(s==='waiting')cs.sort((a,b)=>(isWaiting(st,b)?1:0)-(isWaiting(st,a)?1:0));
+ else if(s==='label')cs.sort((a,b)=>(a.labels[0]||'~').localeCompare(b.labels[0]||'~'));
+ return cs;
+}
+function verdictFor(st,L){
+ const d=st.drag; const card=st.cards.find(c=>c.id===d.id); const from=laneOf(card.lane); const R=ROLE[L.r];
+ if(L.n===from.n){
+  if(L.co) return {kind:'same',long:'It is already here.',chip:'Already here',g:'·'};
+  if(sortOf(st,L)==='order') return {kind:'place',long:'Drop to place it here.',chip:'Place here',g:'↓'};
+  return {kind:'same',long:'Sorted by '+SORTS.find(s=>s[0]===sortOf(st,L))[1].toLowerCase()+'. Change to Your order to place cards.',chip:'Already here',g:'·'};
+ }
+ if(L.co) return {kind:'refuse',long:"Claude's lane. You can't drop here.",chip:'Claude only',g:'✕'};
+ if(L.r==='auto' && from.r==='gated') return {kind:'acts',long:'Drop to approve it. Claude carries on.',chip:'Approve it',g:'→'};
+ return {kind:R.acts?'acts':'plain',long:R.drop,chip:R.chip,g:'→'};
+}
+
+/* what a card says about where it stands (row 2 of its tile) */
+function stepBar(p){let s='';for(let i=0;i<p.total;i++)s+=(i<p.done?'▰':'▱');return s;}
+function status(st,c){
+ const L=laneOf(c.lane); const f=flagView(c.flag,c); const waiting=isWaiting(st,c);
+ if(c.queued) return {kind:'queued',text:'Waiting for Claude to start. It is busy with another turn.',col:'accent',when:c.last?c.last.when:'',bar:c.plan&&c.plan.done?c.plan:null};
+ if(c.working){let t='Step '+(c.plan.done+1)+' of '+c.plan.total+': '+(c.agent||'working');if(c.retry)t='Step '+(c.plan.done+1)+' of '+c.plan.total+', retry '+c.retry+' of 3: '+c.agent;return {kind:'working',bar:c.plan,text:t,col:null,when:c.last?c.last.when:''};}
+ if(waiting&&f) return {kind:'waiting',text:f.g+' '+f.text,col:f.col,when:c.last?c.last.when:'',bar:f.k==='gate'&&c.plan?c.plan:null};
+ if(c.merged&&L.r==='done') return {kind:'done',text:'Merged '+c.merged,col:null,dim:true,when:c.changed};
+ if(c.plan&&(L.r==='auto'||L.r==='manual')) return {kind:'idle',bar:c.plan,text:c.plan.done+' of '+c.plan.total+' steps done. '+(L.r==='manual'?'Say which step is next.':'No worker running.'),dim:true,when:c.last?c.last.when:''};
+ if(c.plan) return {kind:'plan',text:'Plan: '+c.plan.total+' steps',dim:true,when:c.last?c.last.when:''};
+ return {kind:'new',text:c.labels.join('  '),dim:true,when:c.added==='today'?'':'added '+c.added};
+}
+
+/* ---- a Scene puts cell-placed things on a frame ---- */
+class Scene{
+ constructor(el,C,o){this.el=el;this.C=C;this.fills=!(o&&o.fills===false);this.maxY=0;this.baseZ=0;}
+ put(node,x,y,w,h,z){
+  node.style.left=(x*CW)+'px';node.style.top=(y*CH)+'px';
+  if(w!=null)node.style.width=(w*CW)+'px';
+  if(h!=null)node.style.height=(h*CH)+'px';
+  const zz=z||this.baseZ; if(zz)node.style.zIndex=zz;
+  this.el.appendChild(node);
+  this.maxY=Math.max(this.maxY,y+(h||1));
+  return node;
+ }
+ col(k){return this.C[k]||k;}
+ box(x,y,w,h,o){
+  o=o||{};const d=document.createElement('div');d.className='bx';
+  if(o.b)d.style.border='1px '+(o.dash?'dashed':'solid')+' '+this.col(o.b);
+  d.style.borderRadius='6px'; /* the engine has one round corner */
+  if(o.fill&&(this.fills||o.fill==='solid'||o.force)){d.style.background=this.col(o.fill==='solid'?'G':o.fill);}
+  if(o.op!=null)d.style.opacity=o.op;
+  return this.put(d,x,y,w,h,o.z);
+ }
+ style(d,o){
+  let c=this.col(o.c||'text'); if(o.dim)c=this.C.dim;
+  d.style.color=c; if(o.b)d.style.fontWeight='600'; if(o.i)d.style.fontStyle='italic'; if(o.u)d.style.textDecoration='underline';
+  if(o.op!=null)d.style.opacity=o.op;
+  if(o.inv){d.style.background=this.col(o.c||'text');d.style.color=this.C.ink;}
+ }
+ text(x,y,w,str,o){
+  o=o||{};const d=document.createElement('div');d.className='t'+((o.rows||1)>1?' w':'');
+  d.textContent=str;this.style(d,o);
+  if((o.rows||1)>1){d.style.height=(o.rows*CH)+'px';d.style.webkitLineClamp=String(o.rows);}
+  if(o.align)d.style.textAlign=o.align;
+  return this.put(d,x,y,w,o.rows||1,o.z);
+ }
+ span(parent,s,o){
+  o=o||{};const e=document.createElement('span');
+  e.textContent=(o.inv||o.pre)?s.replace(/ /g,NB):s;
+  this.style(e,o);if(o.inv){e.style.whiteSpace='pre';e.style.padding='1px 0';}
+  parent.appendChild(e);return e;
+ }
+ /* a flex row: fixed bits and one flexible bit that is cut with an ellipsis (a Box row with truncate-end) */
+ flex(x,y,w,items,o){
+  o=o||{};const d=document.createElement('div');d.className='fx';
+  items.forEach(it=>{
+   const e=document.createElement('div');e.className=it.flex?'g':'n';
+   if(it.w){e.style.width=(it.w*CW)+'px';e.style.flex='0 0 auto';e.style.overflow='hidden';}
+   if(o.hov){e.style.background=this.col(o.hov);}
+   (it.parts||[]).forEach(p=>{
+    if(p.sp){const s=document.createElement('span');s.style.display='inline-block';s.style.width=(p.sp*CW)+'px';e.appendChild(s);}
+    else{const sp=this.span(e,p.s,p);if(o.hov&&!p.inv){sp.style.color=this.C.ink;}}
+   });
+   if(it.align)e.style.textAlign=it.align;
+   d.appendChild(e);
+  });
+  if(o.op!=null)d.style.opacity=o.op;
+  return this.put(d,x,y,w,1,o.z);
+ }
+ nat(kind,x,y,w,o){
+  o=o||{};const d=document.createElement('div');d.className='nat '+kind;const C=this.C;
+  const prim=kind==='btn'&&o.primary;
+  d.style.borderColor=prim?C.text:C.bmid;
+  d.style.background=prim?C.text:'transparent';
+  d.style.color=prim?C.ink:C.text;
+  if(kind==='btn'){d.textContent=o.label;}
+  else if(kind==='inp'){
+   const v=document.createElement('span');v.className='val';
+   if(o.value){v.textContent=o.value;const c=document.createElement('i');c.className='caret';c.style.background=C.text;v.appendChild(c);}
+   else{v.textContent=o.ph||'';v.style.color=C.dim;}
+   d.appendChild(v);
+   if(o.submit){const b=document.createElement('span');b.textContent=o.submit;b.style.cssText='margin-left:8px;padding:0 10px;border-radius:5px;border:1px solid '+C.bmid+';font-size:12px;line-height:18px;flex:none';d.appendChild(b);}
+  }else if(kind==='sel'){
+   if(o.label){const l=document.createElement('span');l.className='lab';l.textContent=o.label;d.appendChild(l);}
+   const v=document.createElement('span');v.className='val';v.textContent=o.value;d.appendChild(v);
+   const c=document.createElement('span');c.className='car';c.textContent='▾';d.appendChild(c);
+  }
+  d.style.left=(x*CW)+'px';d.style.top=(y*CH+(o.one?-2:(o.t0?0:8)))+'px';d.style.width=(w*CW)+'px';
+  const zz=o.z||this.baseZ; if(zz)d.style.zIndex=zz;
+  this.el.appendChild(d);this.maxY=Math.max(this.maxY,y+2);return d;
+ }
+}
+window.__K={DEFAULTS,CW,CH,TH,ROLE,LANES,FINISHED,SORTS,ds,DETAIL,SETTINGS,laneOf,cardsIn,isWaiting,flagView,attention,isOpen,sortOf,sorted,verdictFor,stepBar,status,Scene,NB};
+})();
+</script>
+<script>
+(function(){
+'use strict';
+const K=window.__K; const {CW,CH,TH,ROLE,LANES,FINISHED,SORTS,flagView,attention,laneOf,cardsIn,isWaiting,isOpen,sortOf,sorted,verdictFor,stepBar,status,Scene}=K;
+const sp=n=>({sp:n});
+const M=2, PAD=2;                 /* outer margin and panel padding, in cells */
+
+/* ============================== the header band ============================== */
+/* Row 1 is what waits on him, and the two tabs. Row 2 is what Claude is doing, and when the board last changed.
+   The header stays on both tabs, so "needs you" is never hidden behind Settings. */
+function claudeRow(S,W,x,y,w,st){
+ const s=st.status, c=s.working?st.cards.find(k=>k.id===s.working):null; const items=[];
+ if(s.running>0){
+  items.push({parts:[{s:'●',c:'accent'},sp(1),{s:'Claude is on '+(c?c.id:s.running+' cards'),b:true}]});
+  if(c&&c.plan){
+   const p=c.plan;
+   items.push({flex:true,parts:[sp(2),{s:'▰'.repeat(p.done),c:'accent'},{s:'▱'.repeat(p.total-p.done),dim:true},sp(1),{s:'step '+(p.done+1)+' of '+p.total+(c.agent?': '+c.agent:''),dim:true}]});
+  }else items.push({flex:true,parts:[]});
+  if(s.limit>1)items.push({parts:[sp(2),{s:s.running+' of '+s.limit+' workers',dim:true}]});
+ }else{
+  items.push({parts:[{s:'●',dim:true},sp(1),{s:'Claude is idle',dim:true}]});
+  items.push({flex:true,parts:[]});
+ }
+ if(s.waiting)items.push({parts:[sp(2),{s:'○ '+s.waiting+' waiting to start',c:'accent',b:true}]});
+ if(s.turn&&W>=100)items.push({parts:[sp(2),{s:'▶ this turn: '+s.turn,c:'accent'}]});
+ S.flex(x,y,w,items);
+}
+function drawHeader(S,W,st){
+ const B=W-2*M, x=M+PAD, w=B-2*PAD;
+ S.box(M,0,B,4,{fill:'U',b:'bmid'});
+ const att=attention(st);
+ /* tabs: two drawn pills at the right of row 1 (7 and 10 cells, 1 apart). The chosen one has a bright outline and bold text. */
+ const tx=x+w-18; const onS=!!st.settings;
+ [['Board',7,tx,!onS],['Settings',10,tx+8,onS]].forEach(t=>{
+  S.box(t[2],1,t[1],1,{fill:'U',b:t[3]?'text':'bmid',r:10});
+  S.text(t[2],1,t[1],t[0],{align:'center',b:t[3],dim:!t[3]});
+ });
+ if(att.n>0) S.flex(x,1,w-20,[{flex:true,parts:[{s:' ▲ '+att.n+' '+(att.n===1?'needs':'need')+' you ',inv:true,c:'orange',b:true},sp(1),{s:att.text,c:'orange'}]}]);
+ else S.flex(x,1,w-20,[{flex:true,parts:[{s:'Nothing needs you',dim:true}]}]);
+ claudeRow(S,W,x,2,w-15,st);
+ S.text(x+w-14,2,14,'changed '+st.status.at,{dim:true,align:'right'});
+}
+
+/* ============================== the Settings tab ============================== */
+/* Models in one column, the thinking effort for each beside it, then what the shipped default is and a Reset when it was changed.
+   Every control is a native Select (2 rows reserved, top edge on the row). */
+function sameSet(a,b){return a.m===b.m&&a.t===b.t;}
+function drawSettingsView(S,x0,B,y,st){
+ const ix=x0+PAD,iw=B-2*PAD,startY=y; let yy=y; const SET=K.SETTINGS,DEF=K.DEFAULTS;
+ const wide=iw>=64, lw=16, sw=wide?13:12, tw=wide?17:14, c2=ix+lw, c3=c2+sw+2, c4=c3+tw+2;
+ const roles=[['Manager','manager'],['Planner','planner'],['Worker','worker'],['Advisor','advisor']];
+ const diff=(SET.workers!==DEF.workers)||roles.some(r=>!sameSet(SET[r[1]],DEF[r[1]]));
+ S.flex(ix,yy,iw,[{flex:true,parts:[{s:'Settings',b:true}]},{parts:[diff?{s:'Restore all defaults',u:true,b:true}:{s:'Everything is at its default',dim:true}]}]);
+ yy+=2;
+ const row=(label,node,defTxt,isDiff,step)=>{
+  S.text(ix,yy,lw,label,{});
+  node();
+  if(wide){S.text(c4,yy,iw-(c4-ix),defTxt,{dim:true});if(isDiff)S.text(c4,yy+1,iw-(c4-ix),'Reset',{u:true,b:true});}
+  else{S.flex(c2,yy+1,iw-lw,[{flex:true,parts:[{s:'Default '+defTxt,dim:true}]},{parts:isDiff?[{s:'Reset',u:true,b:true}]:[]}]);}
+  yy+=step;
+ };
+ const nsel=(x,w,val)=>{const d=S.nat('sel',x,yy,w,{value:val,t0:true});return d;};
+ row('Workers at once',()=>nsel(c2,sw,SET.workers),DEF.workers,SET.workers!==DEF.workers,3);
+ S.text(c2,yy,sw,'Model',{dim:true});S.text(c3,yy,tw,'Thinking effort',{dim:true});if(wide)S.text(c4,yy,8,'Default',{dim:true});
+ yy+=1;
+ roles.forEach(r=>{
+  const v=SET[r[1]],d=DEF[r[1]];
+  row(r[0],()=>{nsel(c2,sw,v.m);nsel(c3,tw,v.t+(st.figures&&LEVELS[v.t]?'  +x.x%':''));},d.m+', '+d.t,!sameSet(v,d),wide?2:3);
+ });
+ yy+=1;
+ S.flex(ix,yy,iw,[{flex:true,parts:[{s:'What each thinking effort costs',b:true}]},{parts:[{s:'compared with low',dim:true}]}]);yy++;
+ const LV=[['Not set','No level is sent. The model uses its own default.'],['low','Light thinking.'],['medium','Balanced.'],['high','Slower and more careful.'],['xhigh','Slower again.'],['max','The most thinking, and the most usage.']];
+ LV.forEach(l=>{
+  const fig=l[0]==='low'?'baseline':(l[0]==='Not set'?'':(st.figures?'+x.x%':'no figure yet'));
+  S.flex(ix,yy,iw,[{w:10,parts:[{s:l[0]}]},{w:14,parts:[{s:fig,dim:fig!=='+x.x%',b:fig==='+x.x%'}]},{flex:true,parts:[{s:l[1],dim:true}]}]);yy++;
+ });
+ yy+=1;
+ const notes=['Manager runs this conversation. Planner writes each card’s plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.',
+  'One card can use its own model and thinking: right-click it, then Model and thinking. That replaces Planner and Worker for that card, and nothing else.',
+  'Changes apply from the next turn. A running agent keeps what it started with.'];
+ notes.forEach(n=>{const r=Math.max(1,Math.ceil(n.length/Math.floor(iw*1.2)));S.text(ix,yy,iw,n,{dim:true,rows:r});yy+=r+1;});
+ yy-=1;
+ const ph=yy-startY+1;
+ const panel=S.box(x0,startY,B,ph,{b:'bmid',r:8,z:-2});
+ const band=S.box(x0,startY,B,1,{fill:'U',r:8,z:-1});band.style.borderBottomLeftRadius='0';band.style.borderBottomRightRadius='0';
+ S.el.insertBefore(band,S.el.firstChild);S.el.insertBefore(panel,S.el.firstChild);
+ return startY+ph;
+}
+const LEVELS={low:1,medium:1,high:1,xhigh:1,max:1};
+
+/* ============================== tiles ============================== */
+function marks(c){
+ const p=[];
+ if(c.working)p.push({s:'● Working',c:'accent',b:true});
+ if(c.queued)p.push({s:'○ Waiting to start',c:'accent',b:true});
+ if(c.turn){if(p.length)p.push(sp(1));p.push({s:'▶',c:'accent',b:true});}
+ return p;
+}
+function tileLook(c,st,L){
+ let col='bdim',op=null,dash=false;
+ const f=isWaiting(st,c)?flagView(c.flag,c):null;
+ if(f)col=f.col;else if(c.working)col='accent';
+ if(st.hoverCard===c.id&&col==='bdim')col='bmid';
+ if(st.selected===c.id||(st.menu&&st.menu.id===c.id)){if(col==='bdim'||col==='bmid')col='text';}
+ if(st.drag){
+  if(c.id===st.drag.id)op=0.4;
+  else{const V=verdictFor(st,L);
+   if(V.kind==='refuse'){col='error';}
+   else if(V.kind==='acts')col='accent';
+   else if(V.kind==='plain'||V.kind==='place')col='bmid';
+   else col='bdim';}
+ }
+ return {col,op,dash};
+}
+function statusRow(S,x,y,w,c,st,op){
+ const s=status(st,c); const parts=[];
+ if(s.bar){parts.push({s:'▰'.repeat(s.bar.done),c:'accent'});parts.push({s:'▱'.repeat(s.bar.total-s.bar.done),dim:true});parts.push(sp(1));}
+ parts.push({s:s.text,c:s.col,dim:s.dim});
+ const items=[{flex:true,parts:parts}];
+ if(s.when&&st.showWhen!==false)items.push({parts:[sp(1),{s:s.when,dim:true}]});
+ S.flex(x,y,w,items,{op:op});
+}
+function hasStatus(st,c){return status(st,c).kind!=='new';}
+function tileH(st,c){return hasStatus(st,c)?2:1;}
+function drawTile(S,x,y,w,c,st,L){
+ const look=tileLook(c,st,L); const hov=st.hoverCard===c.id||(st.menu&&st.menu.id===c.id);
+ const t1=st.look==='T1'; const h=tileH(st,c);
+ S.box(x,y,w,h,{fill:t1?null:'U',b:look.col,dash:look.dash,op:look.op,r:h===1?10:7});
+ const ix=x+2,iw=w-4;
+ const items=[{w:8,parts:[{s:c.id,dim:true}]},{flex:true,parts:[{s:c.t,dim:FINISHED.indexOf(L.r)>=0}]}];
+ const m=marks(c); if(m.length)items.push({parts:[sp(1)].concat(m)});
+ const pin=pinText(c); if(pin)items.push({parts:[sp(1),{s:' '+pin+' ',inv:true,c:'dim'}]});
+ if(h===1&&c.labels.length&&!st.cols&&!pin)items.push({parts:[sp(2),{s:c.labels.join('  '),dim:true}]});
+ if(st.cols){items.push({w:20,parts:[sp(1),{s:c.labels.join('  '),dim:true}]});items.push({w:14,align:'right',parts:[{s:c.changed,dim:true}]});}
+ items.push({w:3,align:'right',parts:[{s:hov?'⋯':'',c:'text'}]});
+ S.flex(ix,y,iw,items,{op:look.op});
+ if(h===2){const ind=8; statusRow(S,ix+ind,y+1,iw-ind,c,st,look.op);}
+ if(st.peek&&st.hoverCard===c.id){
+  S.box(x-1,y,w+2,4,{b:'bmid',fill:'solid',r:7,z:40});
+  S.text(x+2,y+1,w-8,c.id+'   '+c.t,{rows:2,z:41});
+  S.text(x+w-5,y+1,3,'⋯',{align:'center',z:41});
+ }
+ return h;
+}
+
+/* ============================== a lane tray ============================== */
+function trayRows(st,L,cs,across){
+ const creating=st.creating&&st.creating.lane===L.n; across=across||1;
+ if(cs.length===0)return 1+(creating?4:0)+(st.emptyBoard&&L.r==='intake'?6:4);
+ let r=2+(creating?4:0);
+ for(let i=0;i<cs.length;i+=across){r+=1+Math.max.apply(null,cs.slice(i,i+across).map(c=>tileH(st,c)));}
+ return r;
+}
+function headerItems(S,st,L,cs,V,open){
+ const R=ROLE[L.r]; const n=cs.length; const att=cs.some(c=>isWaiting(st,c));
+ const wk=cs.filter(c=>c.working).length, q=cs.filter(c=>c.queued).length;
+ const items=[{w:2,parts:[{s:n>0?(open?'▾':'▸'):' ',dim:true}]}];
+ items.push({parts:[{s:L.n,b:true,c:att?'orange':null}]});
+ items.push({parts:[sp(1),att?{s:' '+n+' ',inv:true,c:'orange',b:true}:{s:' '+n+' ',inv:true,c:'dim'}]});
+ if(V){
+  const col=V.kind==='acts'?'accent':V.kind==='refuse'?'error':(V.kind==='same'?null:'text');
+  items.push({flex:true,parts:[sp(2),{s:V.g+' '+V.long,c:col,b:V.kind!=='same',dim:V.kind==='same'}]});
+ }else{
+  const pp=[sp(2)];
+  if(wk)pp.push({s:'● '+wk+' working',c:'accent',b:true},sp(2));
+  if(q)pp.push({s:'○ '+q+' waiting to start',c:'accent'},sp(2));
+  items.push({flex:true,parts:pp});
+  const so=sortOf(st,L);
+  if(so!=='order')items.push({parts:[{s:SORTS.find(s=>s[0]===so)[1],dim:true},sp(1)]});
+  const sm=st.sortMenu&&st.sortMenu.lane===L.n;
+  if(st.cols){items.push({w:20,parts:[sp(1),{s:'Label ↕',dim:true}]});items.push({w:14,align:'right',parts:[{s:'Changed ↕',dim:true}]});}
+  else items.push({w:3,align:'center',parts:[{s:'↕',c:sm?'text':null,dim:!sm}]});
+  items.push({w:3,align:'center',parts:[R.create?{s:'+',b:true,c:st.hoverAdd===L.n?'text':null,dim:st.hoverAdd!==L.n}:{s:''}]});
+  if(st.cols)items.push({w:2,parts:[]});
+ }
+ return items;
+}
+/* y: top row, B: outer width, x0: left edge, across: cards side by side */
+function drawTray(S,y,B,L,st,x0,across){
+ x0=(x0==null?M:x0); across=across||st.across||1;
+ const cs=sorted(st,L); const n=cs.length; const x=x0,ix=x0+PAD,iw=B-2*PAD; const t1=st.look==='T1';
+ const creating=st.creating&&st.creating.lane===L.n;
+ const V=st.drag?verdictFor(st,L):null; const isT=!!(st.drag&&st.drag.target===L.n);
+ const att=cs.some(c=>isWaiting(st,c)); const h=trayRows(st,L,cs,across);
+ let col=att?'orange':(t1?'bdim':'bmid'),dash=false;
+ if(V){ if(V.kind==='refuse'){col='error';} else if(V.kind==='acts')col='accent'; else if(V.kind==='plain'||V.kind==='place')col='text'; else col='bmid'; }
+ S.box(x,y,B,h,{fill:t1?'U':null,b:col,dash:dash,r:8});
+ const hov=isT&&V&&V.kind!=='same'?(V.kind==='acts'?'accent':V.kind==='refuse'?'error':'text'):null;
+ if(!hov&&!t1){const hb=S.box(x,y,B,1,{fill:'U',r:8});hb.style.borderBottomLeftRadius='0';hb.style.borderBottomRightRadius='0';}
+ S.flex(ix,y,iw,headerItems(S,st,L,cs,V,true),{hov:hov});
+ let yy=y+1;
+ if(creating){
+  S.nat('inp',ix,yy+1,iw,{ph:'What needs to be done?',value:st.creating.text||''});
+  S.text(ix,yy+3,iw,(ROLE[L.r].acts?'Enter adds the card and Claude starts on it. Esc closes.':'Enter adds the card and keeps this open. Esc closes.'),{dim:true});
+  yy+=4;
+ }
+ if(n===0){
+  if(st.emptyBoard&&L.r==='intake'){
+   S.text(ix,yy+1,iw,'The board is empty.',{b:true});
+   S.text(ix,yy+2,iw,'Click + to add a card, or tell Claude what to build.',{});
+   S.text(ix,yy+3,iw,'Then drag a card to Plan, Auto or Manual to hand it to Claude.',{dim:true});
+  }else S.text(ix,yy+1,iw,ROLE[L.r].empty,{rows:2,i:true,dim:true});
+  return h;
+ }
+ const tw=Math.floor((iw-2*(across-1))/across); const gaps=[]; let ty=yy;
+ for(let i=0;i<n;i+=across){
+  const row=cs.slice(i,i+across); const rh=Math.max.apply(null,row.map(c=>tileH(st,c)));
+  gaps.push(ty); row.forEach((c,k)=>{const tx=ix+k*(tw+2); const w=(k===across-1)?(iw-k*(tw+2)):tw; drawTile(S,tx,ty+1,w,c,st,L);});
+  ty+=1+rh;
+ }
+ gaps.push(ty);
+ /* the marker for placing a card between two others */
+ if(st.drag&&st.drag.at&&st.drag.at.lane===L.n){
+  const gi=st.drag.at.index; const gy=gaps[Math.min(gi,gaps.length-1)];
+  S.box(ix,gy,iw,1,{b:'accent',fill:'solid',r:10,z:30});
+  S.text(ix,gy,iw,st.drag.at.label||'Place here',{align:'center',c:'accent',b:true,z:31});
+ }
+ return h;
+}
+
+/* ============================== the strip of lanes that are empty or folded ============================== */
+function chipRows(B,n){const k0=Math.max(1,Math.floor((B+1)/14));const rows=Math.ceil(n/k0);const k=Math.ceil(n/rows);return {k,rows,w:Math.floor((B-(k-1))/k)};}
+function drawStrip(S,y,B,lanes,st,x0){
+ x0=(x0==null?M:x0);
+ const g=chipRows(B,lanes.length);
+ lanes.forEach((L,i)=>{
+  const row=Math.floor(i/g.k),col=i%g.k; const x=x0+col*(g.w+1); const cy=y+row*2;
+  const n=cardsIn(st,L).length; const V=st.drag?verdictFor(st,L):null; const isT=!!(st.drag&&st.drag.target===L.n);
+  let bc='bdim',tc=null,txt=L.n;
+  if(V&&V.kind!=='same'){bc=V.kind==='refuse'?'error':V.kind==='acts'?'accent':'bmid';txt=V.chip;tc=V.kind==='refuse'?'error':V.kind==='acts'?'accent':'text';}
+  const hov=isT&&V&&V.kind!=='same';
+  const hc=hov?(V.kind==='acts'?'accent':V.kind==='refuse'?'error':'text'):null;
+  S.box(x,cy,g.w,1,{fill:hov?hc:'U',b:hov?null:bc,r:10});
+  const parts=V&&V.kind!=='same'?[{s:txt,b:true,c:hov?null:tc}]:[{s:L.n,dim:n===0,b:n>0},...(n>0?[sp(1),{s:String(n),dim:true}]:[])];
+  S.flex(x+2,cy,g.w-4,[{flex:true,parts:parts}],{hov:hc});
+ });
+ return g.rows*2-1;
+}
+
+/* ============================== the stack (docked and in between) ============================== */
+function splitLanes(st){
+ const trays=[],strip=[];
+ st.lanes.forEach(L=>{
+  const n=cardsIn(st,L).length;const creating=st.creating&&st.creating.lane===L.n;
+  const open=isOpen(st,L,n)||creating||(st.emptyBoard&&L.r==='intake')||(st.openEmpty&&st.openEmpty.indexOf(L.n)>=0);
+  (open?trays:strip).push(L);
+ });
+ return {trays,strip};
+}
+function drawStack(S,W,y0,st,x0,B,across){
+ x0=(x0==null?M:x0); B=B||(W-2*M); let y=y0; const sl=splitLanes(st);
+ sl.trays.forEach(L=>{ y+=drawTray(S,y,B,L,st,x0,across)+1; });
+ if(sl.strip.length)y+=drawStrip(S,y,B,sl.strip,st,x0)+1;
+ return y;
+}
+
+/* ============================== card view ============================== */
+function progressLines(S,x,y,w,c,D){
+ /* the plan as steps with where it stands: done, the one in hand, still to do */
+ const p=c.plan; let yy=y;
+ if(!p||!D.plan.length)return yy;
+ D.plan.forEach((s,i)=>{
+  const done=i<p.done,cur=(i===p.done&&(c.working||c.queued||c.lane==='Auto'||c.lane==='Manual'));
+  const g=done?'✓':(cur?'▶':'○');
+  const r=Math.max(1,Math.ceil((s.length+3)/Math.floor((w-3)*1.05)));
+  S.text(x,yy,3,g,{c:(done||cur)?'accent':null,dim:!done&&!cur,b:cur});
+  S.text(x+3,yy,w-3,(i+1)+'. '+s,{dim:done,b:cur,rows:r});
+  yy+=r;
+ });
+ return yy;
+}
+function drawCardView(S,x0,B,y,st){
+ const c=st.cards.find(k=>k.id===st.view); const L=laneOf(c.lane); const D=K.DETAIL[c.id]||{desc:'',plan:[],log:[]};
+ const ix=x0+PAD,iw=B-2*PAD; const f=isWaiting(st,c)?flagView(c.flag,c):null;
+ const startY=y; let yy=y;
+ /* title bar of the panel, like a lane's */
+ S.flex(ix,yy,iw,[{w:11,parts:[{s:'◂ Board',u:true,b:true}]},{flex:true,parts:[{s:c.id,dim:true},{s:'  in '+c.lane,dim:true}]},{w:3,align:'center',parts:[{s:'⋯',dim:true}]}]);
+ yy+=2;
+ S.text(ix,yy,iw,c.t,{rows:2,b:true});yy+=3;
+ /* the one box that says where the card stands */
+ let boxH=0;
+ if(f){
+  const btn=f.k==='plan'?[['Approve and run',true,18],['Do it step by step',false,21]]:f.k==='gate'?[['Approve and continue',true,23],['Park it',false,11]]:f.k==='failed'?[['Retry in Auto',true,16],['Park it',false,11]]:[];
+  boxH=5;
+  S.box(ix,yy,iw,boxH,{b:f.col,fill:'U',r:7});
+  S.text(ix+2,yy,iw-4,f.g+' '+(f.box||f.text),{c:f.col,b:true,rows:2});
+  if(btn.length){let bx=ix+2;btn.forEach(b=>{S.nat('btn',bx,yy+2,b[2],{label:b[0],primary:b[1]});bx+=b[2]+1;});}
+  else S.text(ix+2,yy+2,iw-4,'Type your answer in the comment box below.',{dim:true});
+ }else if(c.queued){
+  boxH=5;S.box(ix,yy,iw,boxH,{b:'accent',fill:'U',r:7});
+  S.text(ix+2,yy,iw-4,'○ Waiting for Claude to start',{c:'accent',b:true});
+  S.text(ix+2,yy+1,iw-4,'You approved this '+(c.last?c.last.when:'')+'. Claude is busy with another turn and starts this one next. There is nothing more for you to do.',{rows:2,dim:true});
+  S.text(ix+2,yy+3,iw-4,'You can still change your mind with Move to.',{dim:true});
+ }else if(c.working){
+  boxH=5;S.box(ix,yy,iw,boxH,{b:'accent',fill:'U',r:7});
+  S.flex(ix+2,yy,iw-4,[{parts:[{s:'● Working',c:'accent',b:true},sp(1),{s:'Step '+(c.plan.done+1)+' of '+c.plan.total+': '+c.agent,b:true}]}]);
+  S.flex(ix+2,yy+1,iw-4,[{parts:[{s:stepBar(c.plan),c:'accent'},sp(1),{s:c.plan.done+' of '+c.plan.total+' steps done',dim:true}]}]);
+  S.text(ix+2,yy+2,iw-4,'Last: '+(c.last?c.last.t+', '+c.last.when:'started'),{dim:true});
+  S.text(ix+2,yy+3,iw-4,'Branch kb-0014-board. No pull request yet.',{dim:true});
+ }
+ yy+=boxH+(boxH?1:0);
+ {const cw=Math.floor((iw-4)/3),SET=K.SETTINGS,pin=pinText(c);
+  S.nat('sel',ix,yy,cw,{label:'Move to',value:c.lane});
+  S.nat('sel',ix+cw+2,yy,cw,{label:'Model',value:c.model||'Auto'});
+  S.nat('sel',ix+2*(cw+2),yy,iw-2*(cw+2),{label:'Thinking',value:c.thinking||'Auto'});
+  yy+=2;
+  if(pin)S.flex(ix,yy,iw,[{flex:true,parts:[{s:'Set on this card: '+pin+'.',b:true},{s:'  It stays with the card until you choose Auto.',dim:true}]}]);
+  else S.flex(ix,yy,iw,[{flex:true,parts:[{s:'Auto: Settings decide. Planner '+SET.planner.m+', '+SET.planner.t+'. Worker '+SET.worker.m+', '+SET.worker.t+'.',dim:true}]}]);
+  yy+=2;}
+ if(D.plan.length){
+  S.flex(ix,yy,iw,[{flex:true,parts:[{s:'Plan',b:true}]},{parts:[{s:(c.plan?c.plan.done+' of '+c.plan.total+' done':''),dim:true}]}]);yy++;
+  yy=progressLines(S,ix,yy,iw,c,D)+1;
+ }
+ S.text(ix,yy,iw,'Description',{b:true});yy++;
+ S.text(ix,yy,iw,D.desc,{rows:2});yy+=3;
+ S.text(ix,yy,iw,'Log',{b:true});yy++;
+ D.log.slice(-6).forEach(l=>{const r=Math.max(1,Math.ceil(l.length/Math.floor(iw*1.05)));S.text(ix,yy,iw,l,{dim:!/Claude:/.test(l)||l.length<80,rows:r});yy+=r;});
+ yy++;
+ S.nat('inp',ix,yy,iw,{ph:f&&f.k==='question'?'Type your answer':'Write a comment for Claude',submit:'Comment'});yy+=2;
+ S.nat('btn',ix,yy,11,{label:'Copy ID'});S.nat('btn',ix+12,yy,16,{label:'Delete card…'});yy+=2;
+ const ph=yy-startY+1;
+ const panel=S.box(x0,startY,B,ph,{b:'bmid',r:8,z:-2});
+ const band=S.box(x0,startY,B,1,{fill:'U',r:8,z:-1});band.style.borderBottomLeftRadius='0';band.style.borderBottomRightRadius='0';
+ S.el.insertBefore(band,S.el.firstChild);S.el.insertBefore(panel,S.el.firstChild);
+ return startY+ph;
+}
+
+
+/* ============================== menus and the ghost ============================== */
+/* one look for every menu: opaque ground, neutral outline, rows inset 3 cells; the row under the pointer is a rounded bright outline on the surface fill (no solid white block) */
+function mbox(S,x,y,w,h){S.box(x,y,w,h,{b:'bmid',fill:'solid',r:8,z:80});}
+function mrow(S,x,y,w,left,right,o){
+ o=o||{};
+ if(o.hv)S.box(x+1,y,w-2,1,{fill:'U',b:'text',r:10,z:81});
+ const items=[{flex:true,parts:[{s:left,b:o.b,dim:o.dim,c:o.c}]}];
+ if(right)items.push({parts:[{s:right,dim:o.rdim!==false,c:o.rc}]});
+ S.flex(x+3,y,w-6,items,{z:82});
+}
+function pinText(c){if(c.model&&c.thinking)return c.model+', '+c.thinking;if(c.model)return c.model;if(c.thinking)return 'thinking '+c.thinking;return '';}
+function chip(S,x,y,label,sel){
+ const w=label.length+2;
+ S.box(x,y,w,1,{fill:sel?'text':'U',force:sel,b:sel?'text':'bmid',r:10,z:81});
+ S.text(x,y,w,label,{align:'center',b:sel,c:sel?'ink':null,z:82});
+ return w+1;
+}
+function drawMenu(S,m,st,W){
+ const c=st.cards.find(k=>k.id===m.id); const lvl=m.confirm?'delete':(m.level||'main');
+ const SET=K.SETTINGS;
+ if(lvl==='delete'){
+  const w=36,x=Math.min(m.x,W-w-1),y=m.y; mbox(S,x,y,w,7);
+  S.text(x+3,y+1,w-6,'Delete '+c.id+'?',{b:true,c:'error',z:82});
+  S.text(x+3,y+2,w-6,'This removes the card and its log.',{dim:true,z:82});
+  mrow(S,x,y+4,w,'Delete it',null,{c:'error',hv:m.row===0});
+  mrow(S,x,y+5,w,'Keep it',null,{hv:m.row===1});
+  return;
+ }
+ if(lvl==='model'){
+  const w=57,x=Math.min(m.x,W-w-1),y=m.y; mbox(S,x,y,w,11);
+  const pin=pinText(c);
+  mrow(S,x,y+1,w,'◂  Model and thinking',pin?'Reset to Auto':'',{b:true,hv:m.row===0,rdim:false});
+  const MODELS=['Auto','haiku','sonnet','opus','fable'],THINK=['Auto','low','medium','high','xhigh','max'];
+  S.text(x+3,y+3,9,'Model',{dim:true,z:82}); let cx=x+12;
+  MODELS.forEach(n=>{cx+=chip(S,cx,y+3,n,(c.model||'Auto')===n);});
+  S.text(x+3,y+5,9,'Thinking',{dim:true,z:82}); cx=x+12;
+  THINK.forEach(n=>{cx+=chip(S,cx,y+5,n,(c.thinking||'Auto')===n);});
+  const msg=pin?'Set on this card. It stays with the card, in every lane, until you choose Auto.':'Auto uses Settings: planner '+SET.planner.m+', '+SET.planner.t+'; worker '+SET.worker.m+', '+SET.worker.t+'.';
+  S.text(x+3,y+7,w-6,msg,{rows:2,dim:!pin,z:82});
+  if(c.working)S.text(x+3,y+9,w-6,'A worker is running now. The change starts with its next step.',{c:'accent',z:82});
+  return;
+ }
+ if(lvl==='move'){
+  const w=40,x=Math.min(m.x,W-w-1),y=m.y;
+  const ls=st.lanes.filter(L=>!L.co||L.n===c.lane);
+  mbox(S,x,y,w,ls.length+6);
+  mrow(S,x,y+1,w,'◂  Move '+c.id,null,{b:true,hv:m.row===0});
+  ls.forEach((L,i)=>{
+   const here=L.n===c.lane;
+   mrow(S,x,y+3+i,w,here?'✓  '+L.n:'    '+L.n,here?'here':((L.r==='auto'&&laneOf(c.lane).r==='gated')?'Approve it':ROLE[L.r].chip),{dim:here,hv:m.row===i+1&&!here});
+  });
+  S.text(x+3,y+4+ls.length,w-6,'Needs You and Gated are Claude’s lanes.',{dim:true,z:82});
+  return;
+ }
+ const w=36,x=Math.min(m.x,W-w-1),y=m.y; mbox(S,x,y,w,11);
+ S.text(x+3,y+1,w-6,c.id+'  '+c.t,{dim:true,z:82});
+ const pin=pinText(c);
+ mrow(S,x,y+3,w,'Open card',null,{hv:m.row===0});
+ mrow(S,x,y+4,w,'Copy ID',c.id,{hv:m.row===1});
+ mrow(S,x,y+6,w,'Model and thinking',(pin||'Auto')+'  ▸',{hv:m.row===2,rdim:!pin});
+ mrow(S,x,y+7,w,'Move to',c.lane+'  ▸',{hv:m.row===3});
+ mrow(S,x,y+9,w,'Delete card…',null,{c:'error',hv:m.row===4});
+}
+function drawSortMenu(S,m,st,W){
+ const L=laneOf(m.lane); const cur=sortOf(st,L); const w=34; const x=Math.min(m.x,W-w-1),y=m.y;
+ mbox(S,x,y,w,SORTS.length+6);
+ S.text(x+3,y+1,w-6,'Sort '+L.n+' by',{dim:true,z:82});
+ SORTS.forEach((s,i)=>mrow(S,x,y+3+i,w,(s[0]===cur?'✓  ':'    ')+s[1],s[2],{hv:m.row===i}));
+ mrow(S,x,y+4+SORTS.length,w,'    Use this for every lane',null,{dim:true});
+}
+function drawGhost(S,st,g){
+ const c=st.cards.find(k=>k.id===st.drag.id); const L=st.drag.target?laneOf(st.drag.target):null;
+ const V=L?verdictFor(st,L):null; const w=Math.min(g.w,44);
+ const col=V?(V.kind==='refuse'?'error':V.kind==='acts'?'accent':V.kind==='same'?'bmid':'text'):'bmid';
+ S.box(g.x,g.y,w,2,{b:col,fill:'solid',r:7,z:90});
+ S.flex(g.x+2,g.y,w-4,[{w:8,parts:[{s:c.id,dim:true}]},{flex:true,parts:[{s:c.t,b:true}]}],{z:91});
+ const msg=V?(V.g+' '+V.long):'Drop on a lane. Let go anywhere else to cancel.';
+ S.text(g.x+2,g.y+1,w-4,msg,{c:V?(V.kind==='refuse'?'error':V.kind==='acts'?'accent':V.kind==='same'?null:'text'):null,dim:!V||V.kind==='same',b:!!V&&V.kind!=='same',z:91});
+}
+
+/* ============================== frame assembly ============================== */
+function makeFrame(spec){
+ const W=spec.W,H=spec.H,C=TH[spec.theme||'dark']; const d=K.ds(spec.data||'quiet');
+ const st=Object.assign({C,cards:d.cards,status:d.status,lanes:LANES,open:{},sort:{},look:'T2'},spec.st||{});
+ const el=document.createElement('div');el.className='f'+(spec.grid?' grid':'');
+ el.style.width=(W*CW)+'px';el.style.background=C.G;el.style.color=C.text;
+ const S=new Scene(el,C,{fills:spec.fills});
+ drawHeader(S,W,st);
+ let y=5;
+ if(spec.mode==='stack'||!spec.mode){
+  if(st.settings)y=drawSettingsView(S,M,W-2*M,y,st);else if(st.view)y=drawCardView(S,M,W-2*M,y,st);else y=drawStack(S,W,y,st);
+ }else if(spec.layout){y=spec.layout(S,W,H,st,y);}
+ if(st.menu)drawMenu(S,st.menu,st,W);
+ if(st.sortMenu)drawSortMenu(S,st.sortMenu,st,W);
+ if(st.drag&&spec.ghost)drawGhost(S,st,spec.ghost);
+ const rows=Math.max(H,Math.ceil(S.maxY)+1);
+ el.style.height=(rows*CH)+'px';
+ if(rows>H&&!spec.noFold){const f=document.createElement('div');f.className='fold';f.style.top=(H*CH)+'px';f.innerHTML='<span>bottom of the pane: it scrolls from here</span>';f.firstChild.style.background=C.G;f.firstChild.style.color=C.dim;el.appendChild(f);}
+ el.dataset.rows=rows;
+ return el;
+}
+K.makeFrame=makeFrame;K.drawCardView=drawCardView;K.splitLanes=splitLanes;K.drawMenu=drawMenu;K.drawSortMenu=drawSortMenu;K.drawGhost=drawGhost;K.drawSettingsView=drawSettingsView;K.chipRows=chipRows;K.drawHeader=drawHeader;K.drawTray=drawTray;K.drawStrip=drawStrip;K.drawTile=drawTile;K.drawStack=drawStack;K.trayRows=trayRows;K.M=M;K.PAD=PAD;K.sp=sp;K.TH=TH;
+})();
+</script>
+<header class="top">
+<h1>Kanban pane: third pass</h1>
+<p>Same cell grid as before: 8.25 px wide, 20 px tall, one 13 px sans, dark colours sampled from the real pane. New in this pass: the header, a Settings tab with thinking effort, the card menu, and a model and thinking choice for a single card. Option B is the only widening left. Controls drawn by the app (selects, buttons, fields) are stand-ins; the menus, tabs, chips and pills are drawn from Box and Text.</p>
+<p>The numbers marked <b>+x.x%</b> are placeholders, not measurements: there is no published figure for how much more usage each thinking level costs, so none is shown as fact.</p>
+</header>
+<nav class="toc">
+<a href="#header">1. The header</a>
+<a href="#settings">2. The Settings tab</a>
+<a href="#menu">3. The card menu</a>
+<a href="#override">4. A card with its own model</a>
+<a href="#wide">5. Option B at 146 cells</a>
+<a href="#docked">6. The docked pane, state by state (earlier frames)</a>
+<a href="#marks">8. What the marks mean</a>
+</nav>
+<div class="opts"><label><input type="checkbox" id="gridtoggle"> Show the cell grid (one square = one cell)</label></div>
+<main id="app"></main>
+<script>
+(function(){
+'use strict';
+const K=window.__K; const mk=K.makeFrame; const M=K.M,PAD=K.PAD,sp=K.sp;
+const app=document.getElementById('app');
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+function fig(spec,title,note,cls){
+ const f=el('figure');
+ f.appendChild(el('figcaption',null,'<b>'+title+'</b>'+(note?'<br>'+note:'')));
+ const shell=el('div','shell'+(cls?' '+cls:''));shell.appendChild(mk(spec));f.appendChild(shell);return f;
+}
+function section(id,title,lead){const s=el('section','part');s.id=id;s.appendChild(el('h2',null,title));if(lead)s.appendChild(el('p','lead',lead));app.appendChild(s);return s;}
+function grid(s,n){const g=el('div','grid g'+n);s.appendChild(g);return g;}
+const only=(S,W,H,st,y)=>y;                              /* header-only frames */
+const colsB=(S,W,H,st,y)=>{st.cols=true;return K.drawStack(S,W,y,st);};
+
+/* ---------- 1. the header ---------- */
+const s1=section('header','1. The header (80 cells by 40 rows)',
+ 'Row 1 is what waits on you, with the two tabs at the right. Row 2 is what Claude is doing and when the board last changed. The band has the panel outline now, so it shows on the ground. The header stays on both tabs.');
+let g=grid(s1,3);
+const D=(spec,t,n)=>g.appendChild(fig(Object.assign({W:80,H:40,theme:'dark'},spec),t,n));
+D({data:'rest'},'At rest','Nothing needs you and Claude has nothing running. Both lines are quiet; no worker count, no timestamp with seconds.');
+D({data:'busy'},'On a busy day','Three cards wait on you; Claude is on KB-0014 with the step bar and what it is doing. The step bar is the same bar the card shows.');
+D({data:'approved'},'You approved a plan and Claude is busy','The orange count drops, the accent group gains “1 waiting to start”.');
+g=grid(s1,2);
+const Hd=(spec,t,n)=>g.appendChild(fig(Object.assign({H:6,theme:'dark',mode:'x',layout:only,noFold:true},spec),t,n));
+Hd({W:60,data:'busy'},'Busy day at 60 cells','The reasons after “3 need you” are cut first, then the step text. The tabs and the count never move.');
+Hd({W:146,data:'busy'},'Busy day at 146 cells','Nothing stretches: the extra width is empty, apart from “▶ this turn”, which only shows from 100 cells.');
+Hd({W:80,data:'busy',st:{settings:true}},'On the Settings tab','The header stays; the Settings tab is the chosen one.');
+Hd({W:80,data:'rest',theme:'light'},'Light theme, at rest','');
+
+/* ---------- 2. settings ---------- */
+const s2=section('settings','2. The Settings tab (80 cells by 40 rows)',
+ 'A tab of its own, not a box under the header. Models in one column, the thinking effort for each beside it, then what the shipped default is, with a Reset where it was changed. Here the board has Workers at once 3 and Planner thinking high, so those two rows show Reset.');
+g=grid(s2,3);
+D({data:'busy',st:{settings:true}},'Settings, no usage figures known','Under each effort the key says what is known. Only “low” is the baseline; the rest say “no figure yet”. Nothing is invented.');
+D({data:'busy',st:{settings:true,figures:true}},'Settings, once figures are known','Where a figure goes: in the thinking list (“high  +x.x%”) and in the key. x.x is a placeholder.');
+D({W:60,data:'busy',st:{settings:true}},'Settings at 60 cells','One column; the default goes on the line under each pair. The tab scrolls.');
+
+/* ---------- 3. card menu ---------- */
+const s3=section('menu','3. The card menu (80 cells by 40 rows)',
+ 'Right-click a card. The first level is five rows in three groups. Lists open in place, in the same box, with a back row: the box never has to find room beside itself, so it works at every width. The row under the pointer is a bright outline, not a white block.');
+g=grid(s3,3);
+D({data:'override',st:{hoverCard:'KB-0015',menu:{id:'KB-0015',x:40,y:22,row:2}}},'Right-click on KB-0015','Model and thinking shows what the card has (opus, medium); “Auto” when it has nothing.');
+D({data:'busy',st:{hoverCard:'KB-0015',menu:{id:'KB-0015',x:22,y:22,level:'model',row:-1}}},'Model and thinking, card on Auto','Two rows of choices. The chosen one is solid. The line under them says what Auto means right now.');
+D({data:'override',st:{hoverCard:'KB-0015',menu:{id:'KB-0015',x:22,y:22,level:'model',row:-1}}},'After choosing opus, then medium','Reset to Auto appears at the right of the back row. Every click applies at once; Esc or a click outside closes.');
+D({data:'busy',st:{hoverCard:'KB-0012',menu:{id:'KB-0012',x:40,y:15,level:'move',row:2}}},'Move to','Only the lanes that accept a drop. The two Claude lanes are left out and one line says why.');
+D({data:'busy',st:{hoverCard:'KB-0012',menu:{id:'KB-0012',x:40,y:15,level:'delete',row:1}}},'Delete','');
+D({data:'quiet',st:{sort:{Inbox:'title'},sortMenu:{lane:'Inbox',x:44,y:6,row:4}}},'The sort menu, same look','The ↕ on a lane’s title bar.');
+
+/* ---------- 4. override on the board ---------- */
+const s4=section('override','4. A card with its own model',
+ 'KB-0015 has opus with medium thinking, KB-0012 has only thinking high, KB-0014 (working) has only fable. The grey chip after the title is the mark: it appears only when something is set on the card, and it is never orange or accent.');
+g=grid(s4,3);
+D({data:'override'},'On the board','Three cards carry a chip. The other cards show nothing: they use the board’s settings.');
+D({data:'override',st:{view:'KB-0015',selected:'KB-0015'}},'The card opened','Move to, Model and Thinking are three selects. The line under them says it is set on this card and how to undo it.');
+D({data:'busy',st:{view:'KB-0015',selected:'KB-0015'}},'The same card on Auto','Both selects say Auto, and the line says what Auto means: what Settings decide.');
+
+/* ---------- 5. option B ---------- */
+const s5=section('wide','5. Option B at 146 cells by 33 rows (shown at 74 percent)',
+ 'Decided: one column always. The extra width shows two quiet columns on each card, a label and when it last changed; their headings sort. The pin chip stays on the card’s first row, before the columns.');
+g=grid(s5,2);
+g.appendChild(fig({W:146,H:33,theme:'dark',mode:'x',data:'override',layout:colsB},'One column, wider rows','','zoomed'));
+g.appendChild(fig({W:146,H:33,theme:'dark',mode:'x',data:'busy',layout:(S,W,H,st,y)=>{st.settings=true;return K.drawSettingsView(S,M,W-2*M,y,st);}},'Settings at 146 cells','The selects keep their size; the extra width is empty.','zoomed'));
+
+/* ---------- 6. earlier frames ---------- */
+const s6=section('docked','6. The docked pane, state by state (earlier frames, redrawn with the new header)',
+ 'The fold line, where there is one, marks the bottom of the pane. The pane scrolls from there.');
+g=grid(s6,3);
+D({data:'quiet'},'A quiet day','Claude has a worker on KB-0014: accent outline, a Working label, step 3 of 5 in the header and on the card.');
+D({data:'busy',theme:'light'},'Light theme, busy day','Same layout; page, fill and outlines come from the light theme.');
+D({data:'busy',st:{view:'KB-0015',selected:'KB-0015'}},'A card open: plan ready','The orange box has the two buttons. “Board” goes back to the same place.');
+D({data:'approved',st:{view:'KB-0015',selected:'KB-0015'}},'The same card after Approve and run','The orange box and its buttons are gone. The accent box says there is nothing for you to do.');
+D({data:'busy',st:{drag:{id:'KB-0007',target:'Auto',at:{lane:'Auto',index:1,label:'Place here'}}},ghost:{x:30,y:31,w:50}},'Dragging over a lane that accepts','Every panel says what a drop does. Gated to Auto is your approval. The Place here slot shows where the card will sit.');
+D({data:'busy',st:{drag:{id:'KB-0012',target:'Needs You'}},ghost:{x:30,y:22,w:50}},'Dragging over a lane that refuses','Needs You and Gated are Claude’s lanes. They go red as soon as you pick a card up.');
+D({data:'quiet',st:{creating:{lane:'Inbox',text:'Add a search box to the pane'}}},'Typing a new card','Click + on a lane. The field opens under its title bar and stays open after Enter.');
+D({data:'quiet',st:{drag:{id:'KB-0013',target:'Inbox',at:{lane:'Inbox',index:3,label:'Place between KB-0008 and KB-0009'}}},ghost:{x:26,y:13,w:50}},'Placing a card between two others','In a lane kept in Your order, the slot shows where it will land.');
+D({data:'empty',st:{emptyBoard:true}},'An empty board','Inbox stays open and says what to do. The other lanes are pills you can drop on.');
+
+/* ---------- 8. marks ---------- */
+const s8=section('marks','8. What the marks mean','One orange and one accent. Orange only ever means this waits on you. The accent only ever means Claude is on it, or will act when you drop here. A grey chip means you set something on the card.');
+const T=K.TH.dark;const lg=el('div','legend');
+const L=(sw,txt)=>lg.appendChild(el('div',null,sw+'<span>'+txt+'</span>'));
+L('<span class="sw" style="background:'+T.orange+';color:'+T.ink+'">▲ 1</span>','Waits on you: only while the card sits in Needs You or Gated. The header label, the panel, the card outline and the reason line.');
+L('<span class="sw" style="color:'+T.accent+'">● Working</span>','A worker is on this card now. The outline is accent and the card shows the step it is on.');
+L('<span class="sw" style="color:'+T.accent+'">○ Waiting to start</span>','You handed it to Claude and Claude has not started yet. Nothing for you to do.');
+L('<span class="sw" style="color:'+T.accent+'">▰▰▰<span style="color:'+T.dim+'">▱▱</span></span>','Steps of the plan: done, then still to do.');
+L('<span class="sw" style="color:'+T.accent+'">▶</span>','The conversation’s current turn is about this card.');
+L('<span class="sw" style="background:'+T.dim+';color:'+T.ink+'"> opus, medium </span>','You set a model or thinking effort on this card. It stays until you choose Auto.');
+L('<span class="sw" style="border:1px solid '+T.error+';color:'+T.error+'">✕</span>','Refused or failed.');
+s8.appendChild(lg);
+{const q=new URLSearchParams(location.search).get('fig');if(q!==null){const all=[...document.querySelectorAll('.shell')];document.body.innerHTML='';document.body.style.minWidth='0';document.body.appendChild(all[+q]);}}
+document.getElementById('gridtoggle').addEventListener('change',function(){document.querySelectorAll('.f').forEach(f=>f.classList.toggle('grid',this.checked));});
+})();
+</script>
+</body>
+</html>

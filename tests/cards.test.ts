@@ -1,0 +1,617 @@
+import { test, expect, describe } from 'claude-code/testing'
+import {
+  appendLog,
+  cardFileName,
+  compareIds,
+  formatLogLine,
+  isCardFileName,
+  newCardText,
+  nextId,
+  nextOrder,
+  orderBetween,
+  parseCard,
+  parseLogLine,
+  renumber,
+  cardPinText,
+  clearCardField,
+  setCardField,
+  setOrder,
+  setStatus,
+  setTitle,
+  slugify,
+} from '../hooks/lib/cards.ts'
+import { BOM, CARD_EXAMPLE, NOW, codeOf, crlf, lines, must } from './examples.ts'
+
+const FIRST_LOG = { date: '2026-10-08', time: '09:10', who: 'John', text: 'moved Inbox -> Auto' }
+const SECOND_LOG = { date: '2026-10-08', time: '09:11', who: 'Claude', text: 'started: kb-12-fix-the-morning-summary-date' }
+
+describe('slugify', () => {
+  test('lowercases and joins words with hyphens', () => {
+    expect(slugify('Fix the morning summary date')).toBe('fix-the-morning-summary-date')
+  })
+
+  test('strips diacritics and punctuation', () => {
+    expect(slugify('Café: état 3!')).toBe('cafe-etat-3')
+    expect(slugify('  --A  --  B--  ')).toBe('a-b')
+  })
+
+  test('empty or symbol-only titles become "card"', () => {
+    expect(slugify('')).toBe('card')
+    expect(slugify('!!! ???')).toBe('card')
+    expect(slugify('日本語')).toBe('card')
+  })
+
+  test('keeps 40 characters when the 41st is a hyphen', () => {
+    const s = slugify('aaaaaaaaa bbbbbbbbb ccccccccc dddddddddd eeee')
+    expect(s).toBe('aaaaaaaaa-bbbbbbbbb-ccccccccc-dddddddddd')
+    expect(s).toHaveLength(40)
+  })
+
+  test('drops the cut word back to the last hyphen otherwise', () => {
+    expect(slugify('aaaaaaaaa bbbbbbbbb ccccccccc ddddddddddd eeee')).toBe('aaaaaaaaa-bbbbbbbbb-ccccccccc')
+    expect(slugify('aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd eeeeeeeee')).toBe('aaaaaaaaa-bbbbbbbbb-ccccccccc-ddddddddd')
+  })
+
+  test('hard-cuts a lone word over 40 characters', () => {
+    expect(slugify('a'.repeat(50))).toBe('a'.repeat(40))
+  })
+
+  test('a title of exactly 40 characters is untouched', () => {
+    expect(slugify('b'.repeat(40))).toBe('b'.repeat(40))
+  })
+})
+
+describe('nextId', () => {
+  test('starts at 1 in an empty folder', () => {
+    expect(nextId('KB', 1, [])).toEqual({ id: 'KB-0001', n: 1 })
+  })
+
+  test('uses the board counter when it is ahead of the files', () => {
+    expect(nextId('KB', 13, ['KB-0007-x.md', 'KB-0003-y.md'])).toEqual({ id: 'KB-0013', n: 13 })
+  })
+
+  test('uses highest existing + 1 when the files are ahead of the counter', () => {
+    expect(nextId('KB', 3, ['KB-0007-x.md', 'KB-0002-y.md'])).toEqual({ id: 'KB-0008', n: 8 })
+  })
+
+  test('never fills a gap', () => {
+    expect(nextId('KB', 1, ['KB-0001-a.md', 'KB-0003-c.md']).id).toBe('KB-0004')
+  })
+
+  test('grows past 9999', () => {
+    expect(nextId('KB', 10000, []).id).toBe('KB-10000')
+    expect(nextId('KB', 1, ['KB-9999-last.md']).id).toBe('KB-10000')
+    expect(nextId('KB', 1, ['KB-10000-big.md']).id).toBe('KB-10001')
+  })
+
+  test('ignores other prefixes, other files and wrong case', () => {
+    const names = ['board.md', 'DECISIONS.md', 'OTHER-0099-x.md', 'KBX-0050-y.md', 'kb-0099-z.md', 'notes.md', 'KB-0099-x.txt']
+    expect(nextId('KB', 1, names).id).toBe('KB-0001')
+  })
+
+  test('counts a hand-made file with no slug, so a name is never reused', () => {
+    expect(nextId('KB', 1, ['KB-0005.md']).id).toBe('KB-0006')
+  })
+
+  test('works for another prefix', () => {
+    expect(nextId('ABC', 1, ['ABC-0002-a.md', 'KB-0009-b.md']).id).toBe('ABC-0003')
+  })
+
+  test('a nonsense board counter falls back to the files', () => {
+    expect(nextId('KB', 0, ['KB-0004-a.md']).id).toBe('KB-0005')
+    expect(nextId('KB', NaN, []).id).toBe('KB-0001')
+  })
+})
+
+describe('file names and order', () => {
+  test('cardFileName is the ID and the slug', () => {
+    expect(cardFileName('KB-0012', 'Fix the morning summary date')).toBe('KB-0012-fix-the-morning-summary-date.md')
+    expect(cardFileName('KB-0013', '???')).toBe('KB-0013-card.md')
+  })
+
+  test('the Obsidian Board.base file is not a card file', () => {
+    expect(isCardFileName('Board.base')).toBe(false)
+  })
+
+  test('compareIds sorts numerically, so KB-9999 comes before KB-10000', () => {
+    expect(['KB-10000', 'KB-0002', 'KB-9999', 'KB-0001'].sort(compareIds)).toEqual(['KB-0001', 'KB-0002', 'KB-9999', 'KB-10000'])
+  })
+
+  test('nextOrder is the lane maximum + 1000, or 1000 for an empty lane', () => {
+    expect(nextOrder([])).toBe(1000)
+    expect(nextOrder([1000, 3000, 2000])).toBe(4000)
+    expect(nextOrder([0])).toBe(1000)
+  })
+
+  test('orderBetween is the midpoint, or undefined when no integer fits', () => {
+    expect(orderBetween(1000, 2000)).toBe(1500)
+    expect(orderBetween(1000, 1002)).toBe(1001)
+    expect(orderBetween(1000, 1001)).toBeUndefined()
+    expect(orderBetween(5, 5)).toBeUndefined()
+    expect(orderBetween(0, 1000)).toBe(500)
+  })
+
+  test('renumber gives 1000, 2000, ... in order-then-ID sequence', () => {
+    const out = renumber([
+      { id: 'KB-0003', order: 5 },
+      { id: 'KB-0001', order: 5 },
+      { id: 'KB-0002', order: 1 },
+    ])
+    expect(out).toEqual([
+      { id: 'KB-0002', order: 1000 },
+      { id: 'KB-0001', order: 2000 },
+      { id: 'KB-0003', order: 3000 },
+    ])
+  })
+
+  test('setOrder edits only the order line, not updated', () => {
+    const out = must(setOrder(CARD_EXAMPLE, 3000))
+    expect(out).toBe(CARD_EXAMPLE.replace('order: 2000', 'order: 3000'))
+    expect(codeOf(setOrder(CARD_EXAMPLE, -1))).toBe('bad-value')
+    expect(codeOf(setOrder(CARD_EXAMPLE, 1.5))).toBe('bad-value')
+    expect(must(setOrder(CARD_EXAMPLE, 2000))).toBe(CARD_EXAMPLE)
+  })
+
+  test('setStatus edits status and updated only', () => {
+    const out = must(setStatus(CARD_EXAMPLE, 'Done', NOW))
+    expect(out).toBe(CARD_EXAMPLE.replace('status: Auto', 'status: Done').replace('updated: 2026-10-08', 'updated: 2026-10-09'))
+  })
+})
+
+describe('parseCard', () => {
+  test('reads the format.md example', () => {
+    const card = must(parseCard(CARD_EXAMPLE, 'KB-0012-fix-the-morning-summary-date.md'))
+    expect(card).toEqual({
+      id: 'KB-0012',
+      status: 'Auto',
+      order: 2000,
+      created: '2026-10-08',
+      updated: '2026-10-08',
+      flag: '',
+      branch: 'kb-12-fix-the-morning-summary-date',
+      pr: '',
+      parent: '',
+      labels: ['claude'],
+      model: '',
+      thinking: '',
+      title: 'Fix the morning summary date',
+      log: [FIRST_LOG, SECOND_LOG],
+      fileName: 'KB-0012-fix-the-morning-summary-date.md',
+    })
+  })
+
+  test('reads the same card from CRLF and from a BOM', () => {
+    const plain = must(parseCard(CARD_EXAMPLE))
+    expect(must(parseCard(crlf(CARD_EXAMPLE)))).toEqual(plain)
+    expect(must(parseCard(BOM + crlf(CARD_EXAMPLE)))).toEqual(plain)
+  })
+
+  test('a missing Log reads as no events', () => {
+    const text = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('## Log'))
+    expect(must(parseCard(text)).log).toEqual([])
+  })
+
+  test('absent optional fields take their defaults', () => {
+    const card = must(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', 'created: 2026-10-01', '---', '# T')))
+    expect(card.order).toBe(0)
+    expect(card.updated).toBe('2026-10-01')
+    expect(card.flag).toBe('')
+    expect(card.labels).toEqual([])
+  })
+
+  test('an empty order reads as 0 and a block-list labels is accepted', () => {
+    const card = must(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', 'order:', 'labels:', '  - claude', '  - ui', '---', '# T')))
+    expect(card.order).toBe(0)
+    expect(card.labels).toEqual(['claude', 'ui'])
+  })
+
+  test('the status is kept as written; the title may hold a colon', () => {
+    const card = must(parseCard(lines('---', 'id: KB-0001', 'status: needs you ', '---', '', '# Fix: the thing')))
+    expect(card.status).toBe('needs you')
+    expect(card.title).toBe('Fix: the thing')
+  })
+
+  test('Log lines that do not fit the grammar are ignored', () => {
+    const text = lines('---', 'id: KB-0001', 'status: Inbox', '---', '# T', '', '## Log', 'stray text', '- 2026-10-08 09:10 John: ok', '- not a log line')
+    expect(must(parseCard(text)).log).toEqual([{ date: '2026-10-08', time: '09:10', who: 'John', text: 'ok' }])
+  })
+
+  test('id-name-mismatch when the file name does not start with the ID', () => {
+    expect(codeOf(parseCard(CARD_EXAMPLE, 'KB-0013-fix-the-morning-summary-date.md'))).toBe('id-name-mismatch')
+    expect(codeOf(parseCard(CARD_EXAMPLE, 'KB-00120-x.md'))).toBe('id-name-mismatch')
+    expect(codeOf(parseCard(CARD_EXAMPLE, 'kanban/KB-0012-x.md'))).toBe('ok')
+    expect(codeOf(parseCard(CARD_EXAMPLE, 'kanban\\KB-0012-x.md'))).toBe('ok')
+  })
+
+  test('missing-field for an absent id, status or title', () => {
+    expect(codeOf(parseCard(lines('---', 'status: Inbox', '---', '# T')))).toBe('missing-field')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', '---', '# T')))).toBe('missing-field')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status:', '---', '# T')))).toBe('missing-field')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', '---', '', 'no heading')))).toBe('missing-field')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', '---')))).toBe('missing-field')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', '---', '## Plan')))).toBe('missing-field')
+  })
+
+  test('bad-id for an ID that does not fit', () => {
+    for (const id of ['kb-0001', 'KB-12', 'KB0012', 'KBKBKBKBKBK-0001', '0001']) {
+      expect(codeOf(parseCard(lines('---', 'id: ' + id, 'status: Inbox', '---', '# T')))).toBe('bad-id')
+    }
+  })
+
+  test('bad-value for an order or date that does not fit its type', () => {
+    const base = (extra: string) => lines('---', 'id: KB-0001', 'status: Inbox', extra, '---', '# T')
+    expect(codeOf(parseCard(base('order: abc')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('order: -5')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('order: 1.5')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('created: yesterday')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('updated: 2026-13-40')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('parent: not-an-id')))).toBe('bad-value')
+    expect(codeOf(parseCard(base('parent: KB-0007')))).toBe('ok')
+  })
+
+  test('type-mismatch for labels holding a plain value, or a scalar field holding a list', () => {
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status: Inbox', 'labels: claude', '---', '# T')))).toBe('type-mismatch')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'status: [Inbox]', '---', '# T')))).toBe('type-mismatch')
+  })
+
+  test('frontmatter errors pass through', () => {
+    expect(codeOf(parseCard(''))).toBe('no-frontmatter')
+    expect(codeOf(parseCard('---\nid: KB-0001\n'))).toBe('unterminated')
+    expect(codeOf(parseCard(lines('---', 'id: KB-0001', 'id: KB-0002', '---', '# T')))).toBe('duplicate-key')
+  })
+})
+
+describe('Log lines', () => {
+  test('format and parse round-trip, text may hold colons', () => {
+    const entry = { date: '2026-10-08', time: '09:11', who: 'Claude', text: 'retry 2 of 3: tests failed: 4 red' }
+    const line = must(formatLogLine(entry))
+    expect(line).toBe('- 2026-10-08 09:11 Claude: retry 2 of 3: tests failed: 4 red')
+    expect(parseLogLine(line)).toEqual(entry)
+  })
+
+  test('parseLogLine returns undefined for anything that is not a Log line', () => {
+    expect(parseLogLine('')).toBeUndefined()
+    expect(parseLogLine('- 2026-10-08 09:10 John:')).toBeUndefined()
+    expect(parseLogLine('- 2026-10-08 09:10 John: ')).toBeUndefined()
+    expect(parseLogLine('2026-10-08 09:10 John: x')).toBeUndefined()
+    expect(parseLogLine('- 2026-10-8 09:10 John: x')).toBeUndefined()
+    expect(parseLogLine('- just a note')).toBeUndefined()
+  })
+
+  test('formatLogLine refuses what the grammar cannot hold', () => {
+    const ok = { date: '2026-10-08', time: '09:10', who: 'John', text: 'x' }
+    expect(codeOf(formatLogLine(ok))).toBe('ok')
+    expect(codeOf(formatLogLine({ ...ok, who: 'Jo:hn' }))).toBe('bad-value')
+    expect(codeOf(formatLogLine({ ...ok, who: '' }))).toBe('bad-value')
+    expect(codeOf(formatLogLine({ ...ok, text: '' }))).toBe('bad-value')
+    expect(codeOf(formatLogLine({ ...ok, text: 'two\nlines' }))).toBe('bad-value')
+    expect(codeOf(formatLogLine({ ...ok, date: '2026-10-8' }))).toBe('bad-value')
+    expect(codeOf(formatLogLine({ ...ok, time: '25:00' }))).toBe('bad-value')
+  })
+})
+
+describe('appendLog', () => {
+  const entry = { ...NOW, who: 'John', text: 'comment: waiting on Sam' }
+  const line = '- 2026-10-09 14:05 John: comment: waiting on Sam\n'
+  const bumped = CARD_EXAMPLE.replace('updated: 2026-10-08', 'updated: 2026-10-09')
+
+  test('appends after the last Log line and bumps updated, whole output compared', () => {
+    expect(must(appendLog(CARD_EXAMPLE, entry))).toBe(bumped + line)
+  })
+
+  test('the appended line reads back', () => {
+    const card = must(parseCard(must(appendLog(CARD_EXAMPLE, entry))))
+    expect(card.log).toHaveLength(3)
+    expect(card.log[2]).toEqual({ ...NOW, who: 'John', text: 'comment: waiting on Sam' })
+    expect(card.updated).toBe('2026-10-09')
+    expect(card.status).toBe('Auto')
+  })
+
+  test('trailing blank lines stay after the new line', () => {
+    const out = must(appendLog(CARD_EXAMPLE + '\n\n', entry))
+    expect(out).toBe(bumped + line + '\n\n')
+  })
+
+  test('an empty Log section gets the line right under its heading', () => {
+    const text = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('- 2026-10-08 09:10'))
+    expect(must(appendLog(text, entry))).toBe(bumped.slice(0, bumped.indexOf('- 2026-10-08 09:10')) + line)
+  })
+
+  test('a Log followed by another section gets the line at the end of the Log, before that section', () => {
+    const text = CARD_EXAMPLE + '\n## Notes\nsome notes\n'
+    expect(must(appendLog(text, entry))).toBe(bumped + line + '\n## Notes\nsome notes\n')
+  })
+
+  test('a missing Log is created at the end, after a blank line', () => {
+    const noLog = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('## Log')).replace(/\n+$/, '\n')
+    expect(must(appendLog(noLog, entry))).toBe(noLog.replace('updated: 2026-10-08', 'updated: 2026-10-09') + '\n## Log\n' + line)
+  })
+
+  test('a missing Log after a body that already ends in a blank line does not add a second blank', () => {
+    const noLog = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('## Log'))
+    expect(noLog.endsWith('\n\n')).toBe(true)
+    expect(must(appendLog(noLog, entry))).toBe(noLog.replace('updated: 2026-10-08', 'updated: 2026-10-09') + '## Log\n' + line)
+  })
+
+  test('a file with no final newline keeps having none', () => {
+    const text = CARD_EXAMPLE.replace(/\n$/, '')
+    expect(must(appendLog(text, entry))).toBe((bumped + line).replace(/\n$/, ''))
+  })
+
+  test('a file with no body at all gets a blank line and a new Log', () => {
+    const text = lines('---', 'id: KB-0001', 'status: Inbox', 'updated: 2026-10-01', '---')
+    expect(must(appendLog(text, entry))).toBe(lines('---', 'id: KB-0001', 'status: Inbox', 'updated: 2026-10-09', '---', '', '## Log', line.trim()))
+  })
+
+  test('adds updated before the closing --- when the card has none', () => {
+    const text = lines('---', 'id: KB-0001', 'status: Inbox', '---', '# T', '', '## Log')
+    expect(must(appendLog(text, entry))).toBe(
+      lines('---', 'id: KB-0001', 'status: Inbox', 'updated: 2026-10-09', '---', '# T', '', '## Log', line.trim()),
+    )
+  })
+
+  test('CRLF and BOM are kept on every touched and added line, whole output compared', () => {
+    const original = BOM + crlf(CARD_EXAMPLE)
+    const expected = BOM + crlf(bumped + line)
+    const out = must(appendLog(original, entry))
+    expect(out).toBe(expected)
+    expect(out.split('\n').length).toBe(out.split('\r\n').length)
+  })
+
+  test('a missing Log in a CRLF file is created with CRLF', () => {
+    const noLog = crlf(CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('## Log')).replace(/\n+$/, '\n'))
+    const out = must(appendLog(noLog, entry))
+    expect(out).toBe(crlf(noLog.replace(/\r\n/g, '\n').replace('updated: 2026-10-08', 'updated: 2026-10-09') + '\n## Log\n' + line))
+  })
+
+  test('bad-value for a line that cannot be written, and the text is not changed', () => {
+    expect(codeOf(appendLog(CARD_EXAMPLE, { ...entry, who: 'A:B' }))).toBe('bad-value')
+    expect(codeOf(appendLog(CARD_EXAMPLE, { ...entry, text: 'one\ntwo' }))).toBe('bad-value')
+  })
+
+  test('frontmatter errors pass through', () => {
+    expect(codeOf(appendLog('no frontmatter', entry))).toBe('no-frontmatter')
+  })
+})
+
+describe('newCardText', () => {
+  const input = {
+    id: 'KB-0013',
+    title: 'Fix: the footer',
+    status: 'Inbox',
+    order: 1000,
+    stamp: { date: '2026-10-08', time: '09:10' },
+    who: 'John',
+    body: 'Footer overlaps on mobile.\n\nOpen questions:\n- Which pages?',
+  }
+  const expected = lines(
+    '---',
+    'id: KB-0013',
+    'status: Inbox',
+    'order: 1000',
+    'created: 2026-10-08',
+    'updated: 2026-10-08',
+    'flag:',
+    'branch:',
+    'pr:',
+    'parent:',
+    'labels: []',
+    '---',
+    '# Fix: the footer',
+    '',
+    'Footer overlaps on mobile.',
+    '',
+    'Open questions:',
+    '- Which pages?',
+    '',
+    '## Log',
+    '- 2026-10-08 09:10 John: created in Inbox',
+  )
+
+  test('writes LF, the field order of format.md, and a trailing newline', () => {
+    expect(must(newCardText(input))).toBe(expected)
+  })
+
+  test('parses back to the same card', () => {
+    const card = must(parseCard(must(newCardText(input)), cardFileName('KB-0013', input.title)))
+    expect(card).toMatchObject({
+      id: 'KB-0013',
+      status: 'Inbox',
+      order: 1000,
+      created: '2026-10-08',
+      updated: '2026-10-08',
+      labels: [],
+      title: 'Fix: the footer',
+      log: [{ date: '2026-10-08', time: '09:10', who: 'John', text: 'created in Inbox' }],
+    })
+  })
+
+  test('without a body the title is followed by the Log', () => {
+    const text = must(newCardText({ ...input, body: undefined, labels: ['claude'] }))
+    expect(text).toContain('labels: [claude]\n---\n# Fix: the footer\n\n## Log\n- 2026-10-08 09:10 John: created in Inbox\n')
+  })
+
+  test('an optional field with a leading bracket is written quoted and reads back', () => {
+    const card = must(parseCard(must(newCardText({ ...input, flag: '[draft]', branch: 'kb-0013', pr: '42' }))))
+    expect(card.flag).toBe('[draft]')
+    expect(card.branch).toBe('kb-0013')
+    expect(card.pr).toBe('42')
+  })
+
+  test('a CRLF body is normalised to LF', () => {
+    const text = must(newCardText({ ...input, body: 'one\r\ntwo' }))
+    expect(text.indexOf('\r')).toBe(-1)
+    expect(text).toContain('\none\ntwo\n')
+  })
+
+  test('refuses what cannot be written', () => {
+    expect(codeOf(newCardText({ ...input, id: 'kb-1' }))).toBe('bad-id')
+    expect(codeOf(newCardText({ ...input, title: '   ' }))).toBe('missing-field')
+    expect(codeOf(newCardText({ ...input, title: 'two\nlines' }))).toBe('bad-value')
+    expect(codeOf(newCardText({ ...input, order: -1 }))).toBe('bad-value')
+    expect(codeOf(newCardText({ ...input, who: 'A:B' }))).toBe('bad-value')
+    expect(codeOf(newCardText({ ...input, labels: ['a,b'] }))).toBe('bad-value')
+    expect(codeOf(newCardText({ ...input, flag: 'has\nnewline' }))).toBe('bad-value')
+  })
+})
+
+describe('the card model and thinking fields', () => {
+  const withLines = CARD_EXAMPLE.replace('labels: [claude]\n', 'labels: [claude]\nmodel: opus\nthinking: medium\n')
+  const stamped = (text: string) => text.replace('updated: 2026-10-08', 'updated: 2026-10-09')
+
+  test('a card with neither line reads as Auto', () => {
+    const card = must(parseCard(CARD_EXAMPLE))
+    expect(card.model).toBe('')
+    expect(card.thinking).toBe('')
+  })
+
+  test('reads both lines', () => {
+    const card = must(parseCard(withLines))
+    expect(card.model).toBe('opus')
+    expect(card.thinking).toBe('medium')
+  })
+
+  test('an empty line or a word that is not allowed reads as Auto, never an error', () => {
+    const empty = CARD_EXAMPLE.replace('labels: [claude]\n', 'labels: [claude]\nmodel:\nthinking:\n')
+    expect(must(parseCard(empty)).model).toBe('')
+    const bad = CARD_EXAMPLE.replace('labels: [claude]\n', 'labels: [claude]\nmodel: gpt\nthinking: auto\n')
+    const card = must(parseCard(bad))
+    expect(card.model).toBe('')
+    expect(card.thinking).toBe('')
+    const odd = CARD_EXAMPLE.replace('labels: [claude]\n', 'labels: [claude]\nmodel: Opus\nthinking: none\n')
+    expect(must(parseCard(odd)).model).toBe('')
+    expect(must(parseCard(odd)).thinking).toBe('')
+  })
+
+  test('every allowed word reads back', () => {
+    for (const m of ['haiku', 'sonnet', 'opus', 'fable']) {
+      expect(must(parseCard(must(setCardField(CARD_EXAMPLE, 'model', m, NOW)))).model).toBe(m)
+    }
+    for (const t of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(must(parseCard(must(setCardField(CARD_EXAMPLE, 'thinking', t, NOW)))).thinking).toBe(t)
+    }
+  })
+
+  test('setCardField adds the line before the closing --- and bumps updated, whole output compared', () => {
+    const out = must(setCardField(CARD_EXAMPLE, 'model', 'opus', NOW))
+    expect(out).toBe(stamped(CARD_EXAMPLE).replace('labels: [claude]\n---', 'labels: [claude]\nmodel: opus\n---'))
+  })
+
+  test('setCardField replaces an existing line in place', () => {
+    const out = must(setCardField(withLines, 'thinking', 'high', NOW))
+    expect(out).toBe(stamped(withLines).replace('thinking: medium', 'thinking: high'))
+  })
+
+  test('setting the value the card already has changes nothing', () => {
+    expect(must(setCardField(withLines, 'model', 'opus', NOW))).toBe(withLines)
+  })
+
+  test('setCardField refuses a word that is not allowed, including auto, and the text is not changed', () => {
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'model', 'auto', NOW))).toBe('bad-value')
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'model', 'gpt', NOW))).toBe('bad-value')
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'model', '', NOW))).toBe('bad-value')
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'thinking', 'none', NOW))).toBe('bad-value')
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'thinking', 'opus', NOW))).toBe('bad-value')
+    expect(codeOf(setCardField(CARD_EXAMPLE, 'model', 'opus', { date: '2026-13-40', time: '10:00' }))).toBe('bad-value')
+  })
+
+  test('clearCardField removes its line only, and bumps updated', () => {
+    const out = must(clearCardField(withLines, 'model', NOW))
+    expect(out).toBe(stamped(withLines).replace('model: opus\n', ''))
+    expect(must(parseCard(out)).thinking).toBe('medium')
+    expect(must(parseCard(out)).model).toBe('')
+  })
+
+  test('clearing both lines gives back the original card with a new updated', () => {
+    const one = must(clearCardField(withLines, 'model', NOW))
+    expect(must(clearCardField(one, 'thinking', NOW))).toBe(stamped(CARD_EXAMPLE))
+  })
+
+  test('clearing a line the card does not have changes nothing', () => {
+    expect(must(clearCardField(CARD_EXAMPLE, 'model', NOW))).toBe(CARD_EXAMPLE)
+  })
+
+  test('CRLF and BOM are kept on the added line and the file', () => {
+    const text = BOM + crlf(CARD_EXAMPLE)
+    const out = must(setCardField(text, 'thinking', 'low', NOW))
+    expect(out).toBe(BOM + crlf(stamped(CARD_EXAMPLE).replace('labels: [claude]\n---', 'labels: [claude]\nthinking: low\n---')))
+    expect(must(clearCardField(out, 'thinking', NOW))).toBe(BOM + crlf(stamped(CARD_EXAMPLE)))
+  })
+
+  test('moving a card never touches the two fields', () => {
+    const moved = must(setStatus(withLines, 'Done', NOW))
+    expect(moved).toContain('model: opus\nthinking: medium\n')
+    const card = must(parseCard(moved))
+    expect(card.status).toBe('Done')
+    expect(card.model).toBe('opus')
+    expect(card.thinking).toBe('medium')
+    const placed = must(setOrder(withLines, 3000))
+    expect(placed).toContain('model: opus\nthinking: medium\n')
+  })
+
+  test('a log line and a new card do not disturb the fields', () => {
+    const out = must(appendLog(withLines, { ...NOW, who: 'John', text: 'comment: x' }))
+    expect(must(parseCard(out)).model).toBe('opus')
+    const fresh = must(parseCard(must(newCardText({ id: 'KB-0030', title: 'x', status: 'Inbox', order: 1000, stamp: NOW, who: 'John' }))))
+    expect(fresh.model).toBe('')
+    expect(fresh.thinking).toBe('')
+  })
+
+  test('the pin text for the board chip', () => {
+    expect(cardPinText({ model: 'opus', thinking: 'medium' })).toBe('opus, medium')
+    expect(cardPinText({ model: 'opus', thinking: '' })).toBe('opus')
+    expect(cardPinText({ model: '', thinking: 'high' })).toBe('thinking high')
+    expect(cardPinText({ model: '', thinking: '' })).toBe('')
+    expect(cardPinText({})).toBe('')
+    expect(cardPinText(must(parseCard(withLines)))).toBe('opus, medium')
+  })
+})
+
+describe('setTitle', () => {
+  const edited = CARD_EXAMPLE.replace('updated: 2026-10-08', 'updated: 2026-10-09')
+    .replace('# Fix the morning summary date', '# Fix the evening summary date')
+    .concat('- 2026-10-09 14:05 John: renamed from "Fix the morning summary date"\n')
+
+  test('replaces the heading, bumps updated and appends one Log line, whole output compared', () => {
+    expect(must(setTitle(CARD_EXAMPLE, 'Fix the evening summary date', NOW, 'John'))).toBe(edited)
+  })
+
+  test('CRLF files stay CRLF, with a BOM too', () => {
+    expect(must(setTitle(crlf(CARD_EXAMPLE), 'Fix the evening summary date', NOW, 'John'))).toBe(crlf(edited))
+    expect(must(setTitle(BOM + crlf(CARD_EXAMPLE), 'Fix the evening summary date', NOW, 'John'))).toBe(BOM + crlf(edited))
+  })
+
+  test('a card with no Log section gets one at the end', () => {
+    const noLog = CARD_EXAMPLE.slice(0, CARD_EXAMPLE.indexOf('\n## Log'))
+    const out = must(setTitle(noLog, 'New', NOW, 'John'))
+    expect(out).toBe(
+      noLog.replace('updated: 2026-10-08', 'updated: 2026-10-09').replace('# Fix the morning summary date', '# New') +
+        '\n## Log\n- 2026-10-09 14:05 John: renamed from "Fix the morning summary date"\n',
+    )
+  })
+
+  test('special characters in the title and the old title survive', () => {
+    const title = 'Café: "quoted" $1 & <b> # hash \ back'
+    const once = must(setTitle(CARD_EXAMPLE, title, NOW, 'John'))
+    expect(must(parseCard(once)).title).toBe(title)
+    const twice = must(setTitle(once, 'Plain', NOW, 'Claude'))
+    expect(lines(...twice.split('\n').slice(-3, -1))).toContain(`renamed from "${title}"`)
+    expect(must(parseCard(twice)).log.length).toBe(4)
+  })
+
+  test('only the heading, updated and the new Log line change', () => {
+    const out = must(setTitle(CARD_EXAMPLE, 'Other', NOW, 'John')).split('\n')
+    const before = CARD_EXAMPLE.split('\n')
+    expect(out.length).toBe(before.length + 1)
+    const changed = before.filter((l) => !out.includes(l))
+    expect(changed).toEqual(['updated: 2026-10-08', '# Fix the morning summary date'])
+  })
+
+  test('the same title changes nothing; a bad title is refused', () => {
+    expect(must(setTitle(CARD_EXAMPLE, ' Fix the morning summary date ', NOW, 'John'))).toBe(CARD_EXAMPLE)
+    expect(codeOf(setTitle(CARD_EXAMPLE, '', NOW, 'John'))).toBe('bad-value')
+    expect(codeOf(setTitle(CARD_EXAMPLE, 'a\nb', NOW, 'John'))).toBe('bad-value')
+    expect(codeOf(setTitle(CARD_EXAMPLE, 'x', NOW, 'Jo:hn'))).toBe('bad-value')
+    expect(codeOf(setTitle(lines('---', 'id: KB-0012', 'status: Auto', '---', 'no heading'), 'x', NOW, 'John'))).toBe('missing-field')
+  })
+})
