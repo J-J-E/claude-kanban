@@ -174,6 +174,37 @@ function cleanText(raw: string, max: number, isKeepingQuotes = false): string {
   return Array.from(one).slice(0, max).join('').trim()
 }
 
+const charCount = (text: string): number => Array.from(text).length
+
+/**
+ * A new card from what was typed, losing none of it. Text that fits a title (cleaned as above) is the title and the body is
+ * empty. Longer text is the body, word for word, and the title is its beginning: cut at a word boundary (a hard cut only
+ * when the first stretch has no space) and ended with `…` to show it goes on, at most TITLE_MAX characters in all.
+ */
+function titleAndBody(raw: string): { title: string; body: string; isCut: boolean } {
+  const whole = cleanText(raw, Infinity)
+  const chars = Array.from(whole)
+  if (chars.length <= TITLE_MAX) return { title: whole, body: '', isCut: false }
+  const room = TITLE_MAX - 1
+  const head = chars.slice(0, room)
+  const space = head.lastIndexOf(' ')
+  const kept = chars[room] === ' ' || space <= 0 ? head : head.slice(0, space)
+  return { title: kept.join('').trim() + '…', body: bodyText(raw), isCut: true }
+}
+
+/**
+ * The typed text as a card body (format.md section 4): the person's words with their quotes and line breaks. Control characters
+ * become spaces, and a line that would start a section (`## `, so `## Log` too) gets a backslash, which a reader draws as the `##` itself.
+ */
+function bodyText(raw: string): string {
+  let out = ''
+  for (const ch of String(raw).replace(/\r\n?|[\u2028\u2029]/g, '\n')) {
+    const code = ch.codePointAt(0) ?? 0
+    out += (code < 32 && code !== 10 && code !== 9) || code === 127 ? ' ' : ch
+  }
+  return out.replace(/^## /gm, '\\## ').trim()
+}
+
 function describe(err: unknown): string {
   const text = err instanceof Error ? err.message : String(err)
   return text.length > 120 ? text.slice(0, 117) + '...' : text
@@ -1439,7 +1470,7 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
   }
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was added.`)
-  const title = cleanText(rawTitle, TITLE_MAX)
+  const { title, body, isCut } = titleAndBody(rawTitle)
   if (title === '') return refuse('Type a card title first.')
   // board.md is rewritten with the next ID, so two adds (or an add and a setting) take turns.
   if (ctx.busy.has('board.md')) return refuse('board.md is being edited by Claude; try again in a moment.')
@@ -1465,7 +1496,7 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
     const made = nextId(board.prefix, board.nextId, entries.map((en) => en.name))
     const now = await $.clock.now()
     const orders = snap.cards.filter((c) => findLane(board, c.status)?.label === lane.label).map((c) => c.order)
-    const text = newCardText({ id: made.id, title, status: lane.label, order: nextOrder(orders), stamp: stampOf(now), who: board.owner, labels: [] })
+    const text = newCardText({ id: made.id, title, status: lane.label, order: nextOrder(orders), stamp: stampOf(now), who: board.owner, body, labels: [] })
     if (!text.ok) return await refuse(text.message)
     const nextBoard = setBoardSetting(boardText, 'next_id', made.n + 1)
     if (!nextBoard.ok) return await refuse(nextBoard.message)
@@ -1482,7 +1513,7 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
     await $.fs.write(BOARD_FILE, nextBoard.value)
     await refresh($, ctx)
 
-    $.ui.toast(addedToast(made.id, lane, await claudeIsBusy($), await sortOfLane($)))
+    $.ui.toast(addedToast(made.id, lane, await claudeIsBusy($), await sortOfLane($)) + (isCut ? ' The full text is in the card.' : ''))
     if (ACTING_ROLES.indexOf(lane.role) !== -1) {
       const prompt = createPrompt(board.owner, made.id, title, lane.label, lane.role)
       await update($, queuedA, (list) => [...list, { id: made.id, kind: 'create', text: prompt, at: now }])
@@ -1819,8 +1850,9 @@ async function performComment($: EngineInterface, ctx: Ctx, id: string, raw: str
   }
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was written.`)
-  const line = cleanText(raw, COMMENT_MAX, true)
+  const line = cleanText(raw, Infinity, true)
   if (line === '') return refuse('Type a comment first.')
+  if (charCount(line) > COMMENT_MAX) return refuse(`A comment can be at most ${COMMENT_MAX} characters; this one is ${charCount(line)}. Nothing was written.`)
   const matches = snap.cards.filter((c) => c.id === id)
   const found = matches[0]
   if (found === undefined) return refuse(`No card ${id} on the board.`)
@@ -1854,7 +1886,7 @@ async function performComment($: EngineInterface, ctx: Ctx, id: string, raw: str
 
 /**
  * The card view's Rename: writes the card's `# ` title line, `updated` and one Log line (setTitle), the way a comment writes
- * its own (same busy and mtime checks). The file name never changes. The title is cleaned as an add cleans it. Says why in a
+ * its own (same busy and mtime checks). The file name never changes. The title is cleaned as an add cleans it; one over TITLE_MAX is refused, not cut. Says why in a
  * toast and writes nothing when it refuses. Resolves to whether the Rename field may close (written, or nothing to change).
  */
 async function performRename($: EngineInterface, ctx: Ctx, id: string, raw: string): Promise<boolean> {
@@ -1864,8 +1896,9 @@ async function performRename($: EngineInterface, ctx: Ctx, id: string, raw: stri
   }
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was written.`)
-  const title = cleanText(raw, TITLE_MAX)
+  const title = cleanText(raw, Infinity)
   if (title === '') return refuse('Type a card title first.')
+  if (charCount(title) > TITLE_MAX) return refuse(`A title can be at most ${TITLE_MAX} characters; this one is ${charCount(title)}. Nothing was written.`)
   const matches = snap.cards.filter((c) => c.id === id)
   const found = matches[0]
   if (found === undefined) return refuse(`No card ${id} on the board.`)

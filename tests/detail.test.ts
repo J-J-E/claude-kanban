@@ -564,13 +564,26 @@ test('a comment is one Log line by the owner, bumps updated, asks nothing and em
   expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('')
   expect(w.writes).toEqual([FOOTER, FOOTER])
 
-  // Nothing typed, nothing written; a long comment is cut to 300 characters.
+  // Nothing typed, nothing written; a comment of exactly 300 characters is written whole.
   await ui.input({ key: 'card-comment', text: '   ' })
   expect(w.writes).toHaveLength(2)
   expect(w.toasts.slice(2)).toEqual(['Type a comment first.'])
-  await ui.input({ key: 'card-comment', text: 'x'.repeat(500) })
+  await ui.input({ key: 'card-comment', text: 'x'.repeat(300) })
   expect(w.text(FOOTER)).toMatch(/\n- 2026-10-08 14:05 John: x{300}\n$/)
   expect(w.sent).toEqual([])
+})
+
+test('a comment over 300 characters is refused with the limit, writes nothing and stays in the field', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  const before = w.text(FOOTER)
+  await ui.input({ key: 'card-comment', text: 'x'.repeat(301), kind: 'change' })
+  await ui.input({ key: 'card-comment', text: 'x'.repeat(301) })
+  expect(w.toasts).toEqual(['A comment can be at most 300 characters; this one is 301. Nothing was written.'])
+  expect(w.writes).toEqual([])
+  expect(w.text(FOOTER)).toBe(before)
+  expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('x'.repeat(301))
 })
 
 test('a comment on a card Claude is editing is refused and kept in the field', async ($, on) => {
@@ -1232,6 +1245,25 @@ test('Rename: an empty title, the same title and a card Claude is editing write 
   expect((await ui.find({ key: 'card-rename' }))?.props.value).toBe('Fix footer')
   release()
   await edit
+})
+
+test('Rename: a title over 120 characters is refused with the limit, writes nothing and keeps the field; 120 is written whole', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  const before = w.text(FOOTER)
+  await ui.press({ key: 'card-rename-open' })
+  await ui.input({ key: 'card-rename', text: 'y'.repeat(121), kind: 'change' })
+  await ui.input({ key: 'card-rename', text: 'y'.repeat(121) })
+  expect(w.toasts).toEqual(['A title can be at most 120 characters; this one is 121. Nothing was written.'])
+  expect(w.writes).toEqual([])
+  expect(w.text(FOOTER)).toBe(before)
+  expect((await ui.find({ key: 'card-rename' }))?.props.value).toBe('y'.repeat(121))
+
+  await ui.input({ key: 'card-rename', text: 'y'.repeat(120) })
+  expect(w.text(FOOTER)).toContain('\n# ' + 'y'.repeat(120) + '\n')
+  expect(w.toasts[1]).toBe('Renamed KB-0001 to "' + 'y'.repeat(120) + '".')
+  expect(await ui.find({ key: 'card-rename' })).toBeUndefined()
 })
 
 // ---------------------------------------------------------------- KB-0031: the design review of the flat open card

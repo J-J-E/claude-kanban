@@ -139,7 +139,7 @@ Each Thinking list marks the level the app recommends for the role's model; chan
 add a card: Hello world app. A tiny Python program, hello.py, that prints Hello, world and a test that checks it. Keep it to one file plus the test.
 ```
 
-Claude replies `<ID> added to Pending: Hello world app`. Or press `New card` in the pane, type `Hello world app` in `What needs doing?` and press `Add`: the card shows in Pending at once. The pane way leaves the body empty. The file is `kanban/<ID>-hello-world-app.md` with `status: Pending` and one Log line: `<date> <time> <you>: created in Pending`.
+Claude replies `<ID> added to Pending: Hello world app`. Or press `New card` in the pane, type `Hello world app` in `What needs doing?` and press `Add`: the card shows in Pending at once. The pane way leaves the body empty for a short title; text longer than 120 characters becomes the body, with the title cut at a word and ended with `…`, and the toast says the full text is in the card. The file is `kanban/<ID>-hello-world-app.md` with `status: Pending` and one Log line: `<date> <time> <you>: created in Pending`.
 
 **Plan it.** Press on the card in the pane, move to the Plan lane, let go (while you drag, the lane under the pointer says what the drop will do, such as `→ Drop and Claude writes a plan.`). Or type `move <ID> to Plan` (for example `move KB-1 to Plan`), or open the card and pick Plan in its `Lane` list. The card jumps to Plan. Your chat gets a message that looks like you typed it:
 ```

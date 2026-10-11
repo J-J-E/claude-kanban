@@ -3,6 +3,7 @@
 import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
+import { parseCard } from '../hooks/lib/cards.ts'
 import { BOARD_EXAMPLE } from './examples.ts'
 import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, startSession, stubs } from './fixtures.ts'
 
@@ -100,15 +101,14 @@ test('a card made in a lane with an action says what Claude does and asks for it
   expect(await queuedCount(ui)).toBe(3)
 })
 
-test('a title is one line without double quotes, capped, and an empty one makes nothing', async ($, on) => {
+test('a title is one line without double quotes, and an empty one makes nothing', async ($, on) => {
   const w = await boot($, on)
   const ui = await mountPane($, 'desktop')
-  await postAdd(ui, 'Inbox', 'Say "hi"\nthen   go”' + 'x'.repeat(200))
+  await postAdd(ui, 'Inbox', 'Say "hi"\nthen   go”')
   const made = [...w.files.keys()].filter((p) => p.startsWith('kanban/KB-0013-'))
   expect(made).toHaveLength(1)
-  const heading = /\n# (.*)\n/.exec(w.text(made[0] as string))?.[1] ?? ''
-  expect(heading).toMatch(/^Say hi then go/)
-  expect(heading).toHaveLength(120)
+  expect(w.text(made[0] as string)).toContain('\n---\n# Say hi then go\n\n## Log\n')
+  expect(w.toasts).toEqual(['Added KB-0013 to Inbox.'])
 
   const writes = w.writes.length
   w.toasts.length = 0
@@ -117,6 +117,90 @@ test('a title is one line without double quotes, capped, and an empty one makes 
   expect(w.toasts).toEqual(['Type a card title first.', 'Type a card title first.'])
   expect(w.writes.length).toBe(writes)
   expect(w.sent).toEqual([])
+})
+
+const WORDS = 'Please make the footer on every page stay at the bottom of the window even when the page is short and keep its links in one row'
+
+/** The `# ` title line and the body between it and `## Log` of the one card file made with this ID. */
+function madeCard(w: ReturnType<typeof stubs>, id: string): { text: string; title: string; body: string } {
+  const files = [...w.files.keys()].filter((p) => p.startsWith(`kanban/${id}-`))
+  expect(files).toHaveLength(1)
+  const text = w.text(files[0] as string)
+  const parsed = parseCard(text, (files[0] as string).slice('kanban/'.length))
+  expect(parsed.ok).toBe(true)
+  return { text, title: /\n# (.*)\n/.exec(text)?.[1] ?? '', body: /\n# .*\n\n([\s\S]*?)\n\n## Log\n/.exec(text)?.[1] ?? '' }
+}
+
+test('text that fits a title is the title and the body stays empty: the card is the one the pane always made', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  const exact = 'y '.repeat(59) + 'yy'
+  expect(exact).toHaveLength(120)
+  await postAdd(ui, 'Inbox', exact)
+  const card = madeCard(w, 'KB-0013')
+  expect(card.title).toBe(exact)
+  expect(card.text).toMatch(/\n---\n# y y [y ]*yy\n\n## Log\n- 2026-10-08 14:05 John: created in Inbox\n$/)
+  expect(w.toasts).toEqual(['Added KB-0013 to Inbox.'])
+})
+
+test('a 300-character text: the body is all of it, the title is its beginning cut at a word and ended with an ellipsis, and the toast says so', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  const typed = (WORDS + ' and ').repeat(3).trim().slice(0, 300).trim()
+  expect(typed.length).toBeGreaterThan(250)
+  expect(typed.length).toBeLessThanOrEqual(300)
+  const board = w.text(BOARD_PATH)
+  await postAdd(ui, 'Auto', typed)
+
+  const files = [...w.files.keys()].filter((p) => p.startsWith('kanban/KB-0013-'))
+  expect(files).toEqual(['kanban/KB-0013-please-make-the-footer-on-every-page.md'])
+  const card = madeCard(w, 'KB-0013')
+  expect(card.title.length).toBeLessThanOrEqual(120)
+  expect(card.title.endsWith('…')).toBe(true)
+  // Cut between words: the title is the typed text's first words, whole.
+  const words = card.title.slice(0, -1)
+  expect(typed.startsWith(words)).toBe(true)
+  expect(typed[words.length]).toBe(' ')
+  expect(card.body).toBe(typed)
+  expect(card.text).toMatch(/\nlabels: \[\]\n---\n# .*…\n\nPlease make[^\n]*\n\n## Log\n- 2026-10-08 14:05 John: created in Auto\n$/)
+  expect(card.text.endsWith('\n')).toBe(true)
+  expect(card.text).not.toContain('\r')
+  expect(w.writes).toEqual([files[0], BOARD_PATH])
+  expect(w.text(BOARD_PATH)).toBe(board.replace('next_id: 13', 'next_id: 14'))
+  expect(w.toasts).toEqual(['Added KB-0013 to Auto. Claude is starting. The full text is in the card.'])
+  // The prompt carries the short title only.
+  expect(w.sent.map((s) => s.text)).toEqual([`Kanban: John created KB-0013 "${card.title}" in Auto. Do the auto lane action from the kanban skill.`])
+})
+
+test('a long text with quotes, line breaks and a ## line keeps the person\'s words in a body that is safe', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  const typed = '## Log\r\nSay "hello" to the “user” and keep going: ' + 'word '.repeat(30) + '\n## Plan\u2028--- and more\u0007 here\n\n   ## indented stays\n' + 'end'
+  await postAdd(ui, 'Inbox', typed)
+  const card = madeCard(w, 'KB-0013')
+  expect(card.title.endsWith('…')).toBe(true)
+  expect(card.title).not.toMatch(/["“”]/)
+  expect(card.title.startsWith('## Log Say hello to the user and keep going: word')).toBe(true)
+  // Their words, quotes and line breaks kept; no line starts a section; the control character is a space.
+  expect(card.body).toBe(
+    '\\## Log\nSay "hello" to the “user” and keep going: ' + 'word '.repeat(30) + '\n\\## Plan\n--- and more  here\n\n   ## indented stays\nend',
+  )
+  expect(card.text).toMatch(/\n## Log\n- 2026-10-08 14:05 John: created in Inbox\n$/)
+  expect(card.text.split('\n').filter((l) => l.startsWith('## '))).toEqual(['## Log'])
+  // The frontmatter is the one a short card gets.
+  expect(card.text.slice(0, card.text.indexOf('# ## Log'))).toBe(
+    '---\nid: KB-0013\nstatus: Inbox\norder: 3000\ncreated: 2026-10-08\nupdated: 2026-10-08\nflag:\nbranch:\npr:\nparent:\nlabels: []\n---\n',
+  )
+})
+
+test('a long text with no space is cut hard at 119 characters and an ellipsis', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await postAdd(ui, 'Inbox', 'x'.repeat(200))
+  const card = madeCard(w, 'KB-0013')
+  expect(card.title).toBe('x'.repeat(119) + '…')
+  expect(card.body).toBe('x'.repeat(200))
+  expect(w.toasts).toEqual(['Added KB-0013 to Inbox. The full text is in the card.'])
 })
 
 test('the Client no longer sends add: a posted add, and messages that are not what the Client sends, make nothing', async ($, on) => {
