@@ -81,11 +81,11 @@ Trigger: "add a card: ...", "add to Pending".
 1. Read `prefix`, `next_id`, `owner` and the first `intake` lane from `board.md`.
 2. Take the stamp (rule 5).
 3. ID: `n = max(next_id, highest existing n + 1)`, padded to 4 digits (format.md section 7).
-4. Slug from the title (format.md section 8). The filename is `kanban/<ID>-<slug>.md`.
-5. `order`: read the `status:` and `order:` lines of the cards in that lane; use the highest `order` + 1000, or 1000 when the lane is empty (format.md section 9).
-6. Write the card with every key from format.md section 3, in that order: `status` is the intake lane's label, `created` and `updated` are today, `flag`, `branch`, `pr` and `parent` are empty, and `labels` is `[]`. Use `labels: [claude]` only for Claude's own suggestions, and log those as `Claude`.
-7. Body: `# <title>`, then the person's words verbatim. When the title is all they said, leave the body empty. Add `## Open questions` with a `- ` line for each question the request leaves open, phrased as a question where the person's words allow, never with a suggested answer; omit the section when there are none. Then `## Log` with `- <stamp> <who>: created in <lane>`. Leave one blank line after `# <title>` and one blank line before each `##` heading.
-8. Last, write `next_id: <n + 1>` into `board.md`.
+4. Reserve the number before anything else: Edit `board.md`, old text the exact line `next_id: <next_id as read in step 1>`, new text `next_id: <n + 1>`. If that exact line is no longer in the file, re-read `board.md` and redo step 3 with the new value. A reserved number is never given back (format.md section 7).
+5. Slug from the title (format.md section 8). The filename is `kanban/<ID>-<slug>.md`. Before writing it, check that no file in `kanban/` already starts with `<ID>-`; if one does, go back to step 3 and reserve a new number.
+6. `order`: read the `status:` and `order:` lines of the cards in that lane; use the highest `order` + 1000, or 1000 when the lane is empty (format.md section 9).
+7. Write the card with every key from format.md section 3, in that order: `status` is the intake lane's label, `created` and `updated` are today, `flag`, `branch`, `pr` and `parent` are empty, and `labels` is `[]`. Use `labels: [claude]` only for Claude's own suggestions, and log those as `Claude`.
+8. Body: `# <title>`, then the person's words verbatim. When the title is all they said, leave the body empty. Add `## Open questions` with a `- ` line for each question the request leaves open, phrased as a question where the person's words allow, never with a suggested answer; omit the section when there are none. Then `## Log` with `- <stamp> <who>: created in <lane>`. Leave one blank line after `# <title>` and one blank line before each `##` heading.
 9. Reply `KB-0013 added to Pending: <title>` with the real ID, lane label and title.
 
 ### move
@@ -177,7 +177,7 @@ The board pane sends these as the person's own words. Match on the start of the 
 | Prompt | The pane already did | You do |
 |---|---|---|
 | `Kanban: <owner> moved <ID> "<title>" from <lane> to <lane>. Do the <role> lane action from the kanban skill.` | Edited `status:`, `order:`, `updated:` and wrote the Log line. | Do not write the move's Log line again or redo its edits. Read the card; if its `status:` is not the second lane, say so in one line and stop. Otherwise run the lane action for `<role>` (Lane actions above). A first lane with role `needs-you` and a second with role `auto`, for a card whose `flag` starts with `GATE`, is the gate approval. |
-| `Kanban: <owner> created <ID> "<title>" in <lane>. Do the <role> lane action from the kanban skill.` | Created the card file with its `created in <lane>` Log line and bumped `next_id`. | Do not create the card or write the Log line again. Read the card; if its `status:` is not that lane, say so in one line and stop. Otherwise run the lane action for `<role>` exactly as for a person's move into that lane (Lane actions above). |
+| `Kanban: <owner> created <ID> "<title>" in <lane>. Do the <role> lane action from the kanban skill.` | Reserved the number in `next_id` and created the card file with its `created in <lane>` Log line. | Do not create the card or write the Log line again. Read the card; if its `status:` is not that lane, say so in one line and stop. Otherwise run the lane action for `<role>` exactly as for a person's move into that lane (Lane actions above). |
 | `Kanban: <owner> asked to delete <ID> "<title>". Delete the card with the kanban skill.` | Nothing; the person already confirmed in the pane. | Run the delete verb. |
 | `Kanban: set up a board here with the kanban skill.` | Nothing. | Run init. |
 

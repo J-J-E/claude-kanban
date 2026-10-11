@@ -1457,6 +1457,24 @@ async function performSet($: EngineInterface, ctx: Ctx, data: unknown): Promise<
   }
 }
 
+/** How many times an add reads board.md again when it moved under it, before it gives up. */
+const ADD_TRIES = 3
+
+/** The file names in kanban/ now ([] when the folder cannot be listed). */
+async function cardFileNames($: EngineInterface): Promise<string[]> {
+  try {
+    const entries: FsEntry[] = await $.fs.list('kanban')
+    return entries.map((en) => en.name)
+  } catch {
+    return []
+  }
+}
+
+/** The card file in kanban/ that already holds `id`, else null (also null when the folder cannot be listed). */
+async function fileHoldingId($: EngineInterface, id: string, except: string): Promise<string | null> {
+  return (await cardFileNames($)).find((n) => n !== except && n.startsWith(id + '-') && isCardFileName(n)) ?? null
+}
+
 /**
  * The one entry point for a new card, from the toolbar's Add: makes the file in `laneName` at once. In a
  * lane that has an action Claude is then asked to run it, with a `created` prompt; the intake lane sends nothing.
@@ -1476,49 +1494,54 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
 
   ctx.busy.add('board.md')
   try {
-    const before = await $.fs.stat(BOARD_FILE)
-    const boardText = await $.fs.read(BOARD_FILE)
-    const boardRead = parseBoard(boardText)
-    if (!boardRead.ok) return await refuse(`${NOT_READABLE} Nothing was added.`)
-    const board = boardRead.value
-    const lane = findLane(board, laneName)
-    if (lane === undefined) return await refuse(`Unknown lane "${cleanText(laneName, 40)}". Nothing was added.`)
-    if (lane.isClaudeOnly) return await refuse(`${lane.label} is Claude's lane. Nothing was added.`)
-    if (CREATABLE_ROLES.indexOf(lane.role) === -1) return await refuse(`New cards can't be added to ${lane.label}.`)
+    // Reserve first (KB-0059): board.md gets next_id past the number BEFORE the card file is written, so a second writer
+    // that reads the board afterwards takes the next number. If board.md moved between the read and the write, read it again
+    // and compute again rather than overwrite someone else's change.
+    for (let attempt = 1; ; attempt++) {
+      const before = await $.fs.stat(BOARD_FILE)
+      const boardText = await $.fs.read(BOARD_FILE)
+      const boardRead = parseBoard(boardText)
+      if (!boardRead.ok) return await refuse(`${NOT_READABLE} Nothing was added.`)
+      const board = boardRead.value
+      const lane = findLane(board, laneName)
+      if (lane === undefined) return await refuse(`Unknown lane "${cleanText(laneName, 40)}". Nothing was added.`)
+      if (lane.isClaudeOnly) return await refuse(`${lane.label} is Claude's lane. Nothing was added.`)
+      if (CREATABLE_ROLES.indexOf(lane.role) === -1) return await refuse(`New cards can't be added to ${lane.label}.`)
 
-    let entries: FsEntry[] = []
-    try {
-      entries = await $.fs.list('kanban')
-    } catch {
-      entries = []
+      const made = nextId(board.prefix, board.nextId, await cardFileNames($))
+      const now = await $.clock.now()
+      const orders = snap.cards.filter((c) => findLane(board, c.status)?.label === lane.label).map((c) => c.order)
+      const text = newCardText({ id: made.id, title, status: lane.label, order: nextOrder(orders), stamp: stampOf(now), who: board.owner, body, labels: [] })
+      if (!text.ok) return await refuse(text.message)
+      const nextBoard = setBoardSetting(boardText, 'next_id', made.n + 1)
+      if (!nextBoard.ok) return await refuse(nextBoard.message)
+
+      const file = cardFileName(made.id, title)
+      const path = 'kanban/' + file
+      if (!isCardFileName(file)) return await refuse(`${made.id} already exists; nothing was added.`)
+      const after = await $.fs.stat(BOARD_FILE)
+      if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
+        if (attempt < ADD_TRIES) continue
+        return await refuse('board.md changed while the card was made; nothing was added.')
+      }
+
+      await $.fs.write(BOARD_FILE, nextBoard.value)
+      // The number is ours now (a number reserved and not used is a gap, accepted). Any file with this ID, whatever its slug, means someone else took it first.
+      if ((await cardFileNames($)).some((n) => n.startsWith(made.id + '-'))) {
+        await refresh($, ctx)
+        return await refuse(`${made.id} was just taken. Press Add again.`)
+      }
+      await $.fs.write(path, text.value)
+      await refresh($, ctx)
+
+      $.ui.toast(addedToast(made.id, lane, await claudeIsBusy($), await sortOfLane($)) + (isCut ? ' The full text is in the card.' : ''))
+      if (ACTING_ROLES.indexOf(lane.role) !== -1) {
+        const prompt = createPrompt(board.owner, made.id, title, lane.label, lane.role)
+        await update($, queuedA, (list) => [...list, { id: made.id, kind: 'create', text: prompt, at: now }])
+        submitPrompt($, prompt)
+      }
+      return true
     }
-    const made = nextId(board.prefix, board.nextId, entries.map((en) => en.name))
-    const now = await $.clock.now()
-    const orders = snap.cards.filter((c) => findLane(board, c.status)?.label === lane.label).map((c) => c.order)
-    const text = newCardText({ id: made.id, title, status: lane.label, order: nextOrder(orders), stamp: stampOf(now), who: board.owner, body, labels: [] })
-    if (!text.ok) return await refuse(text.message)
-    const nextBoard = setBoardSetting(boardText, 'next_id', made.n + 1)
-    if (!nextBoard.ok) return await refuse(nextBoard.message)
-
-    const file = cardFileName(made.id, title)
-    const path = 'kanban/' + file
-    if (!isCardFileName(file) || (await $.fs.exists(path))) return await refuse(`${made.id} already exists; nothing was added.`)
-    const after = await $.fs.stat(BOARD_FILE)
-    if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
-      return await refuse('board.md changed while the card was made; nothing was added.')
-    }
-
-    await $.fs.write(path, text.value)
-    await $.fs.write(BOARD_FILE, nextBoard.value)
-    await refresh($, ctx)
-
-    $.ui.toast(addedToast(made.id, lane, await claudeIsBusy($), await sortOfLane($)) + (isCut ? ' The full text is in the card.' : ''))
-    if (ACTING_ROLES.indexOf(lane.role) !== -1) {
-      const prompt = createPrompt(board.owner, made.id, title, lane.label, lane.role)
-      await update($, queuedA, (list) => [...list, { id: made.id, kind: 'create', text: prompt, at: now }])
-      submitPrompt($, prompt)
-    }
-    return true
   } finally {
     ctx.busy.delete('board.md')
   }
@@ -2469,6 +2492,19 @@ export const register: Register = (on) => {
     const hit = KANBAN_FILE.exec(String(e.file_path).replace(/\\/g, '/'))
     if (hit === null || hit[2] === undefined) return next(e)
     const name = hit[2]
+    // A Write that would CREATE a card file under an ID another file already holds is refused (KB-0059): two files with
+    // one ID break the board. An Edit, a rewrite of the same path, a non-card file or an unreadable folder pass as before.
+    if (e.tool === 'Write' && isCardFileName(name)) {
+      try {
+        const id = /^([A-Z]{1,10}-\d{4,})-/.exec(name)?.[1]
+        if (id !== undefined && !(await $.fs.exists('kanban/' + name))) {
+          const other = await fileHoldingId($, id, name)
+          if (other !== null) return { deny: `${id} is taken by ${other}. Read next_id again, reserve a new number and write the card under it.` }
+        }
+      } catch {
+        // cannot tell: let the write through
+      }
+    }
     ctx.busy.add(name)
     try {
       return await next(e)

@@ -132,7 +132,7 @@ test('Add makes the card in Pending with no prompt, clears the field and leaves 
   expect(card).toContain('\nstatus: Pending\n')
   expect(card).toContain('\n# Call the bank\n')
   expect(w.text(BOARD_PATH)).toContain('\nnext_id: 6\n')
-  expect(w.writes).toEqual([NEW, BOARD_PATH])
+  expect(w.writes).toEqual([BOARD_PATH, NEW])
   expect(w.sent).toEqual([])
   expect(w.toasts).toEqual(['Added KB-0005 to Pending.'])
   expect(await laneOf(ui, 'KB-0005')).toBe('Pending')

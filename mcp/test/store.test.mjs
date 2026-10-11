@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -58,6 +58,42 @@ test('a write refuses when the file changed after it was read', () => {
   assert.equal(r?.ok, false)
   assert.match(r.message, /changed while this was being made/)
   assert.equal(read(dir, f.name), f.text)
+})
+
+test('addCard reserves the number in board.md before it writes the card', () => {
+  const dir = makeBoard()
+  const a = addCard(dir, { title: 'First', who: 'Gemini' }, NOW)
+  assert.equal(a.ok, true)
+  assert.match(read(dir, 'board.md'), /next_id: 2/)
+  assert.ok(cardFile(dir, 'KB-0001'))
+  // the store's fs is not injectable: order is shown by a run that fails after the reservation
+  const blocked = makeBoard()
+  for (let i = 1; i <= 5; i++) writeFileSync(join(blocked, `KB-000${i}-x.txt`), 'stray') // not .md, so the number count does not skip them
+  const r = addCard(blocked, { title: 'Nope', who: 'Gemini' }, NOW)
+  assert.equal(r.ok, false)
+  assert.match(r.message, /Could not reserve/)
+  assert.match(read(blocked, 'board.md'), /next_id: 6/)
+  assert.equal(readdirSync(blocked).filter((n) => n.endsWith('.md') && n !== 'board.md').length, 0)
+})
+
+test('addCard never writes under an ID that a file already has', () => {
+  const dir = makeBoard()
+  writeFileSync(join(dir, 'board.md'), read(dir, 'board.md').replace('next_id: 1', 'next_id: 5'))
+  writeFileSync(join(dir, 'KB-0005-x.md'), 'stray')
+  const a = addCard(dir, { title: 'New one', who: 'Gemini' }, NOW)
+  assert.equal(a.ok, true)
+  assert.equal(a.id, 'KB-0006')
+  assert.equal(read(dir, 'KB-0005-x.md'), 'stray')
+  assert.equal(readdirSync(dir).filter((n) => n.startsWith('KB-0005-')).length, 1)
+})
+
+test('two addCard calls in a row get consecutive numbers', () => {
+  const dir = makeBoard()
+  const a = addCard(dir, { title: 'One', who: 'Gemini' }, NOW)
+  const b = addCard(dir, { title: 'Two', who: 'Gemini' }, NOW)
+  assert.equal(a.id, 'KB-0001')
+  assert.equal(b.id, 'KB-0002')
+  assert.match(read(dir, 'board.md'), /next_id: 3/)
 })
 
 test('add, move, comment and decide write through the library', () => {

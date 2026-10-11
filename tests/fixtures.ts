@@ -80,6 +80,8 @@ export type World = {
   /** Parks every tool call until `hold()`'s release function is called; null when nothing is held. */
   gate: Promise<void> | null
   hold: () => () => void
+  /** Runs once right after the next fs.list answered (it changes files behind the pane's back between its list and its write); null when unset. */
+  afterList: (() => void) | null
   /** Changes a file behind the pane's back: new text, a new mtime. */
   put: (path: string, text: string) => void
   /** The text of a file; throws when it is missing. */
@@ -119,6 +121,7 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     model: 'opus',
     agents: [],
     gate: null,
+    afterList: null,
     hold: () => {
       let release = () => {}
       w.gate = new Promise<void>((resolve) => {
@@ -155,6 +158,10 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
       if (!path.startsWith(prefix) || path.indexOf('/', prefix.length) !== -1) continue
       entries.push({ name: path.slice(prefix.length), kind: 'file' as const, size: size(f.text), mtimeMs: f.mtimeMs, isLink: false })
     }
+    // A test's way to change the folder right after a list answered: runs once, after this list's answer was built.
+    const after = w.afterList
+    w.afterList = null
+    if (after !== null) after()
     return entries.length === 0 ? missing(e.path) : { value: entries }
   })
   on('fs.read', ($, e) => {

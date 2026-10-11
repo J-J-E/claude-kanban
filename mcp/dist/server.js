@@ -37385,32 +37385,35 @@ function cleanWho(who2) {
 function addCard(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const who2 = cleanWho(input2.who);
   if (typeof who2 !== "string") return who2;
-  const loaded = loadBoard(dir2);
-  if (!loaded.ok) return loaded;
-  const { state } = loaded;
-  const lane = intakeLane(state.board);
-  if (lane === void 0) return refuse("This board has no lane with role intake. Nothing was changed.");
-  const cards = loadCards(state);
-  const { id, n } = nextId(state.board.prefix, state.board.nextId, cards.names);
-  const text = newCardText({
-    id,
-    title: input2.title,
-    status: lane.label,
-    order: nextOrder(ordersIn(cards.cards, state.board, lane)),
-    stamp: stampOf(now),
-    who: who2,
-    body: input2.body,
-    labels: input2.labels
-  });
-  if (!text.ok) return refuse(`${text.message} Nothing was changed.`);
-  const file2 = cardFileName(id, input2.title);
-  const bumped = setBoardSetting(state.boardText, "next_id", n + 1);
-  if (!bumped.ok) return refuse(`${bumped.message} Nothing was changed.`);
-  const written = writeChecked(join(dir2, file2), text.value, void 0);
-  if (written) return written;
-  const bumpFailed = writeChecked(join(dir2, "board.md"), bumped.value, state.boardMtime);
-  if (bumpFailed) return refuse(`${id} was created but next_id in board.md could not be bumped (${bumpFailed.message}). Fix next_id by hand.`);
-  return { ok: true, message: `${id} added to ${lane.label}: ${input2.title.trim()}`, id, lane: lane.label, file: file2 };
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const loaded = loadBoard(dir2);
+    if (!loaded.ok) return loaded;
+    const { state } = loaded;
+    const lane = intakeLane(state.board);
+    if (lane === void 0) return refuse("This board has no lane with role intake. Nothing was changed.");
+    const cards = loadCards(state);
+    const { id, n } = nextId(state.board.prefix, state.board.nextId, cards.names);
+    const text = newCardText({
+      id,
+      title: input2.title,
+      status: lane.label,
+      order: nextOrder(ordersIn(cards.cards, state.board, lane)),
+      stamp: stampOf(now),
+      who: who2,
+      body: input2.body,
+      labels: input2.labels
+    });
+    if (!text.ok) return refuse(`${text.message} Nothing was changed.`);
+    const file2 = cardFileName(id, input2.title);
+    const bumped = setBoardSetting(state.boardText, "next_id", n + 1);
+    if (!bumped.ok) return refuse(`${bumped.message} Nothing was changed.`);
+    if (writeChecked(join(dir2, "board.md"), bumped.value, state.boardMtime)) continue;
+    if (readdirSync(dir2).some((name) => name.startsWith(id + "-"))) continue;
+    const written = writeChecked(join(dir2, file2), text.value, void 0);
+    if (written) return written;
+    return { ok: true, message: `${id} added to ${lane.label}: ${input2.title.trim()}`, id, lane: lane.label, file: file2 };
+  }
+  return refuse("Could not reserve a free card ID after 5 tries; another writer is busy or the kanban/ folder has stray files. Try again.");
 }
 function moveCardTo(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const who2 = cleanWho(input2.who);

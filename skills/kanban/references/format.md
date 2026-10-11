@@ -134,7 +134,8 @@ An absent key takes its `default_` key if the board has one, else its built-in d
 `<PREFIX>-<n>`, `n` zero-padded to 4 digits (more digits past 9999). Valid IDs match `^[A-Z]{1,10}-\d{4,}$`. The branch for a card is `kb-<n>-<slug>` with `n` unpadded (`kb-12-fix-the-morning-summary-date`); see lanes.md Auto step 3.
 
 - Allocate `n = max(next_id from board.md, highest existing n + 1)`. Highest existing n: scan top-level `kanban/*.md` names matching `^<PREFIX>-(\d+)(-.*)?\.md$` for this prefix, case-sensitive; other prefixes, `board.md` and `DECISIONS.md` are ignored. This scan is deliberately looser than section 1, so a hand-made file never causes reuse. With no cards, the highest existing n is 0.
-- After creating the card, write `next_id: <n + 1>` to `board.md`.
+- Reserve first, write after. With `n` from the line above and `k` the number of cards about to be made (1 for a single add; all the child cards of a plan split together), replace the exact line `next_id: <next_id as you read it>` with `next_id: <n + k>` in one edit of `board.md`. If that exact line is no longer in the file (someone else changed it meanwhile), re-read `board.md` and start again from the new value. Only after the reservation succeeded, write the card file(s), numbered `n` to `n + k - 1`.
+- Before writing a card file, check that no file in `kanban/` already starts with `<ID>-`; if one does, reserve a new number. A reserved number is never given back, so a card that fails half-way leaves a gap, which is fine.
 - IDs are never renumbered and never reused; gaps stay. A card's filename starts with `<id>-`.
 - A duplicate or junk card is deleted outright. Abandoned real work goes to the lane with role `scrapped`.
 

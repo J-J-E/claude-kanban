@@ -56,8 +56,8 @@ test('a title typed in the Inbox makes the card at once and starts no turn', asy
   expect(card).toContain('\nlabels: []\n')
   expect(card).toContain('\n# Fix footer\n')
   expect(card).toMatch(/\n## Log\n- 2026-10-08 14:05 John: created in Inbox\n$/)
-  // The card first, then board.md with next_id bumped and nothing else changed.
-  expect(w.writes).toEqual([NEW, BOARD_PATH])
+  // board.md first (the number is reserved, KB-0059), then the card; next_id bumped and nothing else changed.
+  expect(w.writes).toEqual([BOARD_PATH, NEW])
   expect(w.text(BOARD_PATH)).toBe(board.replace('next_id: 13', 'next_id: 14'))
   expect(w.sent).toEqual([])
   expect(w.toasts).toEqual(['Added KB-0013 to Inbox.'])
@@ -165,7 +165,7 @@ test('a 300-character text: the body is all of it, the title is its beginning cu
   expect(card.text).toMatch(/\nlabels: \[\]\n---\n# .*…\n\nPlease make[^\n]*\n\n## Log\n- 2026-10-08 14:05 John: created in Auto\n$/)
   expect(card.text.endsWith('\n')).toBe(true)
   expect(card.text).not.toContain('\r')
-  expect(w.writes).toEqual([files[0], BOARD_PATH])
+  expect(w.writes).toEqual([BOARD_PATH, files[0]])
   expect(w.text(BOARD_PATH)).toBe(board.replace('next_id: 13', 'next_id: 14'))
   expect(w.toasts).toEqual(['Added KB-0013 to Auto. Claude is starting. The full text is in the card.'])
   // The prompt carries the short title only.
@@ -322,4 +322,96 @@ test('while Claude has a turn running the toast says it starts when it is free; 
   // Inbox holds KB-0001, KB-0002 and KB-0017 (3000): the new card is last in the order; the title sort puts it first on the lane.
   expect(w.text(cardPath('KB-0018', 'aardvark'))).toContain('\norder: 4000\n')
   expect((await boardProps(ui)).lanes[0]?.cards.map((c) => c.id)).toEqual(['KB-0018', 'KB-0017', 'KB-0001', 'KB-0002'])
+})
+
+// ---------------------------------------------------------------- card IDs cannot collide (KB-0059)
+
+test('an add reserves the number in board.md before it writes the card, and the next add takes the next number', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await postAdd(ui, 'Inbox', 'Fix footer')
+  expect(w.writes).toEqual([BOARD_PATH, NEW])
+  expect(w.text(BOARD_PATH)).toContain('\nnext_id: 14\n')
+  await postAdd(ui, 'Inbox', 'Second one')
+  expect(w.writes).toEqual([BOARD_PATH, NEW, BOARD_PATH, cardPath('KB-0014', 'second-one')])
+  expect(w.text(BOARD_PATH)).toContain('\nnext_id: 15\n')
+  expect(w.toasts).toEqual(['Added KB-0013 to Inbox.', 'Added KB-0014 to Inbox.'])
+})
+
+test('a file with the same ID and another slug that appears before the card is written makes Add refuse, write no card and keep the text', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'toolbar-new' })
+  const other = cardPath('KB-0013', 'x')
+  w.afterList = () => w.put(other, cardText('KB-0013', 'X', 'Inbox', 5000))
+  await ui.input({ key: 'toolbar-title', text: 'Fix footer', kind: 'change' })
+  await ui.input({ key: 'toolbar-title', text: 'Fix footer', kind: 'submit' })
+  expect(w.toasts).toEqual(['KB-0013 was just taken. Press Add again.'])
+  expect([...w.files.keys()].filter((p) => p.startsWith('kanban/KB-0013-'))).toEqual([other])
+  expect(w.sent).toEqual([])
+  // The number is spent (a gap is accepted); the text is still in the field.
+  expect(w.text(BOARD_PATH)).toContain('\nnext_id: 14\n')
+  expect((await ui.find({ key: 'toolbar-title' }))?.props.value).toBe('Fix footer')
+
+  // Pressing Add again takes the next number.
+  w.toasts.length = 0
+  await ui.input({ key: 'toolbar-title', text: 'Fix footer', kind: 'submit' })
+  expect(w.files.has(cardPath('KB-0014', 'fix-footer'))).toBe(true)
+  expect(w.toasts).toEqual(['Added KB-0014 to Inbox.'])
+})
+
+test('board.md that changes between the read and the write is read again, not overwritten', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'toolbar-new' })
+  w.afterList = () => w.put(BOARD_PATH, w.text(BOARD_PATH).replace('workers: 1', 'workers: 2'))
+  await postAdd(ui, 'Inbox', 'Fix footer')
+  // The other change survived, the add used the fresh text, and the card was made once.
+  expect(w.text(BOARD_PATH)).toContain('workers: 2')
+  expect(w.text(BOARD_PATH)).toContain('\nnext_id: 14\n')
+  expect(w.writes).toEqual([BOARD_PATH, NEW])
+  expect(w.toasts).toEqual(['Added KB-0013 to Inbox.'])
+})
+
+const WRITE_CARD = (name: string) => ({ tool: 'Write' as const, file_path: '/project/kanban/' + name, content: 'new card' })
+
+test('a Write that would create a card under an ID another file holds is denied and creates nothing', async ($, on) => {
+  const w = await boot($, on)
+  await mountPane($, 'desktop')
+  const made = await $.tool.call(WRITE_CARD('KB-0001-other.md'))
+  expect(made).toEqual({ deny: 'KB-0001 is taken by KB-0001-fix-footer.md. Read next_id again, reserve a new number and write the card under it.' })
+  expect(w.files.has('kanban/KB-0001-other.md')).toBe(false)
+  expect(w.writes).toEqual([])
+  // Either slash direction.
+  const win = await $.tool.call({ tool: 'Write', file_path: String.raw`C:\project\kanban\KB-0002-again.md`, content: 'x' })
+  expect(win).toMatchObject({ deny: expect.stringContaining('KB-0002 is taken by KB-0002-write-docs.md') })
+  // A path relative to the project.
+  const rel = await $.tool.call({ tool: 'Write', file_path: 'kanban/KB-0003-again.md', content: 'x' })
+  expect(rel).toMatchObject({ deny: expect.stringContaining('KB-0003 is taken by') })
+})
+
+test('a Write to a free ID, over the same card path, outside kanban/ or to a non-card file passes; so does an Edit of a card', async ($, on) => {
+  const w = await boot($, on)
+  await mountPane($, 'desktop')
+  const denied = (r: unknown) => (r as { deny?: string }).deny !== undefined
+
+  expect(denied(await $.tool.call(WRITE_CARD('KB-0099-fresh.md')))).toBe(false)
+  expect(w.files.has('kanban/KB-0099-fresh.md')).toBe(true)
+
+  expect(denied(await $.tool.call(WRITE_CARD('KB-0001-fix-footer.md')))).toBe(false)
+  expect(w.text('kanban/KB-0001-fix-footer.md')).toBe('new card')
+
+  expect(denied(await $.tool.call({ tool: 'Edit', file_path: '/project/kanban/KB-0002-write-docs.md', old_string: 'Write docs', new_string: 'Write more docs' }))).toBe(false)
+  expect(w.text('kanban/KB-0002-write-docs.md')).toContain('Write more docs')
+
+  expect(denied(await $.tool.call({ tool: 'Write', file_path: '/project/src/KB-0001-other.md', content: 'x' }))).toBe(false)
+  expect(denied(await $.tool.call({ tool: 'Write', file_path: '/project/kanban/DECISIONS.md', content: 'x' }))).toBe(false)
+  expect(denied(await $.tool.call({ tool: 'Write', file_path: '/project/kanban/Board.base', content: 'x' }))).toBe(false)
+})
+
+test('a Write passes when the folder cannot be listed', async ($, on) => {
+  const w = await boot($, on, {})
+  const r = await $.tool.call(WRITE_CARD('KB-0001-first.md'))
+  expect((r as { deny?: string }).deny).toBeUndefined()
+  expect(w.files.has('kanban/KB-0001-first.md')).toBe(true)
 })

@@ -144,32 +144,39 @@ export type AddInput = { title: string; body?: string; labels?: string[]; who: s
 export function addCard(dir: string, input: AddInput, now: Date = new Date()): Outcome<{ id: string; lane: string; file: string }> {
   const who = cleanWho(input.who)
   if (typeof who !== 'string') return who
-  const loaded = loadBoard(dir)
-  if (!loaded.ok) return loaded
-  const { state } = loaded
-  const lane = intakeLane(state.board)
-  if (lane === undefined) return refuse('This board has no lane with role intake. Nothing was changed.')
-  const cards = loadCards(state)
-  const { id, n } = nextId(state.board.prefix, state.board.nextId, cards.names)
-  const text = newCardText({
-    id,
-    title: input.title,
-    status: lane.label,
-    order: nextOrder(ordersIn(cards.cards, state.board, lane)),
-    stamp: stampOf(now),
-    who,
-    body: input.body,
-    labels: input.labels,
-  })
-  if (!text.ok) return refuse(`${text.message} Nothing was changed.`)
-  const file = cardFileName(id, input.title)
-  const bumped = setBoardSetting(state.boardText, 'next_id', n + 1)
-  if (!bumped.ok) return refuse(`${bumped.message} Nothing was changed.`)
-  const written = writeChecked(join(dir, file), text.value, undefined)
-  if (written) return written
-  const bumpFailed = writeChecked(join(dir, 'board.md'), bumped.value, state.boardMtime)
-  if (bumpFailed) return refuse(`${id} was created but next_id in board.md could not be bumped (${bumpFailed.message}). Fix next_id by hand.`)
-  return { ok: true, message: `${id} added to ${lane.label}: ${input.title.trim()}`, id, lane: lane.label, file }
+  // Reserve first: next_id is bumped in board.md BEFORE the card file is written, so a second writer never sees
+  // the old number with no file. A reserved number that goes unused is a gap, which is accepted.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const loaded = loadBoard(dir)
+    if (!loaded.ok) return loaded
+    const { state } = loaded
+    const lane = intakeLane(state.board)
+    if (lane === undefined) return refuse('This board has no lane with role intake. Nothing was changed.')
+    const cards = loadCards(state)
+    const { id, n } = nextId(state.board.prefix, state.board.nextId, cards.names)
+    const text = newCardText({
+      id,
+      title: input.title,
+      status: lane.label,
+      order: nextOrder(ordersIn(cards.cards, state.board, lane)),
+      stamp: stampOf(now),
+      who,
+      body: input.body,
+      labels: input.labels,
+    })
+    if (!text.ok) return refuse(`${text.message} Nothing was changed.`)
+    const file = cardFileName(id, input.title)
+    const bumped = setBoardSetting(state.boardText, 'next_id', n + 1)
+    if (!bumped.ok) return refuse(`${bumped.message} Nothing was changed.`)
+    // board.md changed since it was read (another writer): start again from its new next_id
+    if (writeChecked(join(dir, 'board.md'), bumped.value, state.boardMtime)) continue
+    // any file already named for this ID: do not write under it; the number stays reserved, take the next one
+    if (readdirSync(dir).some((name) => name.startsWith(id + '-'))) continue
+    const written = writeChecked(join(dir, file), text.value, undefined)
+    if (written) return written
+    return { ok: true, message: `${id} added to ${lane.label}: ${input.title.trim()}`, id, lane: lane.label, file }
+  }
+  return refuse('Could not reserve a free card ID after 5 tries; another writer is busy or the kanban/ folder has stray files. Try again.')
 }
 
 export type MoveInput = { id: string; to: string; who: string }
