@@ -297,6 +297,20 @@ describe('what the header draws', () => {
     expect(await ui.find({ key: 'header-claude' })).toBeUndefined()
   })
 
+  test('a chat turn that names a card: Claude is on it, and idle again when the turn ends', async ($, on) => {
+    const { ui } = await setup($, on)
+    await $.turn.start({ text: 'yes merge kb-0002', turnId: 't1' })
+    expect(await rows(ui)).toEqual(['Board Settings', '● Claude is on KB-0002 just now'])
+    await $.turn.complete({ answer: 'done', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+    expect(await rows(ui)).toEqual(['Board Settings', '● Claude is idle just now'])
+  })
+
+  test('a chat turn that names no card shows no card', async ($, on) => {
+    const { ui } = await setup($, on)
+    await $.turn.start({ text: 'fix the date in the summary', turnId: 't1' })
+    expect(await rows(ui)).toEqual(['Board Settings', '● Claude is idle just now'])
+  })
+
   test('what waits on him: the count is the button, the kinds are under it at the docked width', async ($, on) => {
     const { ui } = await setup($, on, waitingFiles())
     expect(await rows(ui)).toEqual(['◆ 3 need you Board Settings', '1 plan ready, 1 question, 1 held', '● Claude is idle just now'])

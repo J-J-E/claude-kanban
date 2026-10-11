@@ -279,3 +279,47 @@ export function placeVerdict(after: string | null, before: string | null): strin
 
 /** The pill verdict of a lane only Claude fills while a card is in hand. */
 export const VERDICT_REFUSE = 'Claude only'
+
+// ---- The manager note (KB-0060): a hidden line that rides on every prompt the person types in a project with a board ----
+
+/** A card that waits on the owner, as the note names it: its ID and its flag. The title and the body never go in. */
+export type NoteCard = { id: string; flag: string }
+
+/** The most cards the note names; the rest are counted. */
+export const NOTE_MAX_CARDS = 5
+/** The most characters of one card's flag the note carries. */
+export const NOTE_FLAG_MAX = 60
+const NOTE_OWNER_MAX = 40
+const NOTE_QUOTES = new Set([0x22, 0x201c, 0x201d, 0x201e, 0x201f, 0xff02])
+
+/** Free text as one line for a system note: control and line-break characters become spaces, runs of white space one space, cut at `max` characters with a trailing `…`. */
+function oneLine(raw: string, max: number, isDroppingQuotes = false): string {
+  let one = ''
+  for (const ch of String(raw)) {
+    const code = ch.codePointAt(0) ?? 0
+    if (isDroppingQuotes && NOTE_QUOTES.has(code)) continue
+    one += code < 32 || code === 127 || code === 0x2028 || code === 0x2029 ? ' ' : ch
+  }
+  const chars = Array.from(one.replace(/\s+/g, ' ').trim())
+  return chars.length <= max ? chars.join('') : chars.slice(0, max - 1).join('').trimEnd() + '…'
+}
+
+/**
+ * The hidden note for a project with a board: who owns it, that the session is its manager, and which cards wait on the owner
+ * (at most NOTE_MAX_CARDS, in the order given, each as `ID flag`; the flag is cut; the ID alone when the flag is empty).
+ * Card titles and bodies are the person's free text and never ride in a system note.
+ */
+export function managerNote(owner: string, waiting: readonly NoteCard[]): string {
+  const who = oneLine(owner, NOTE_OWNER_MAX, true)
+  let note =
+    `Kanban board: this project has kanban/board.md (owner ${who}). You are its manager. ` +
+    'Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").'
+  if (waiting.length === 0) return note
+  const named = waiting.slice(0, NOTE_MAX_CARDS).map((c) => {
+    const flag = oneLine(c.flag, NOTE_FLAG_MAX)
+    return flag === '' ? oneLine(c.id, 20) : `${oneLine(c.id, 20)} ${flag}`
+  })
+  const more = waiting.length - named.length
+  note += `\nWaiting on ${who}: ${named.join('; ')}` + (more > 0 ? ` and ${more} more` : '')
+  return note
+}

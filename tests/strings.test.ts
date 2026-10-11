@@ -3,6 +3,7 @@
 import { test, expect, describe } from 'claude-code/testing'
 import {
   deleteAsk,
+  managerNote,
   cardMenuRows,
   MENU_OPEN,
   MENU_COPY,
@@ -326,5 +327,61 @@ describe('the card menu rows', () => {
       { id: 'delete', label: 'Delete it', tone: 'default', action: 'delete' },
       { id: 'keep', label: 'Keep it', tone: 'default', action: 'keep' },
     ])
+  })
+})
+
+describe('the manager note', () => {
+  const HEAD =
+    'Kanban board: this project has kanban/board.md (owner John). You are its manager. Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").'
+
+  test('with nothing waiting it is the one line', () => {
+    expect(managerNote('John', [])).toBe(HEAD)
+  })
+
+  test('one waiting card adds one line', () => {
+    expect(managerNote('John', [{ id: 'KB-0036', flag: 'PLAN READY' }])).toBe(HEAD + '\nWaiting on John: KB-0036 PLAN READY')
+  })
+
+  test('five waiting cards are all named, in the order given', () => {
+    const waiting = ['KB-0001', 'KB-0002', 'KB-0003', 'KB-0004', 'KB-0005'].map((id) => ({ id, flag: 'QUESTION: ' + id }))
+    expect(managerNote('John', waiting)).toBe(
+      HEAD + '\nWaiting on John: KB-0001 QUESTION: KB-0001; KB-0002 QUESTION: KB-0002; KB-0003 QUESTION: KB-0003; KB-0004 QUESTION: KB-0004; KB-0005 QUESTION: KB-0005',
+    )
+  })
+
+  test('seven waiting cards name five and count two more', () => {
+    const waiting = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: 'KB-000' + n, flag: 'PLAN READY' }))
+    const line = managerNote('John', waiting).split('\n')[1] as string
+    expect(line).toBe('Waiting on John: KB-0001 PLAN READY; KB-0002 PLAN READY; KB-0003 PLAN READY; KB-0004 PLAN READY; KB-0005 PLAN READY and 2 more')
+    expect(line).not.toContain('KB-0006')
+  })
+
+  test('a flag is cut to 60 characters with an ellipsis', () => {
+    const line = managerNote('John', [{ id: 'KB-0041', flag: 'QUESTION: ' + 'x'.repeat(190) }]).split('\n')[1] as string
+    const flag = line.slice('Waiting on John: KB-0041 '.length)
+    expect(Array.from(flag)).toHaveLength(60)
+    expect(flag.endsWith('…')).toBe(true)
+    expect(flag.startsWith('QUESTION: xxx')).toBe(true)
+  })
+
+  test('a card with an empty flag is named by its ID alone', () => {
+    expect(managerNote('John', [{ id: 'KB-0041', flag: '' }, { id: 'KB-0042', flag: '   ' }]).split('\n')[1]).toBe('Waiting on John: KB-0041; KB-0042')
+  })
+
+  test('a card title never appears: the note takes only an ID and a flag', () => {
+    const card = { id: 'KB-0041', flag: 'QUESTION: which colour?', title: 'Secret title', body: 'Secret body' }
+    const note = managerNote('John', [card])
+    expect(note).toContain('KB-0041 QUESTION: which colour?')
+    expect(note).not.toContain('Secret')
+  })
+
+  test('an owner and a flag with odd characters stay on one line', () => {
+    const note = managerNote('Jo"hn“\n\u0007Smith' + 'y'.repeat(60), [{ id: 'KB-0041', flag: 'a\r\nb\tc\u0000d e' }])
+    expect(note.split('\n')).toHaveLength(2)
+    expect(note).toContain('(owner John Smithyyy')
+    expect(note).toContain('KB-0041 a b c d e')
+    expect(Array.from(note).some((ch) => { const c = ch.codePointAt(0) ?? 0; return (c < 32 && c !== 10) || c === 127 || c === 0x2028 || c === 0x2029 })).toBe(false)
+    const owner = /\(owner (.*?)\)\./.exec(note)?.[1] as string
+    expect(Array.from(owner).length).toBeLessThanOrEqual(40)
   })
 })

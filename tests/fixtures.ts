@@ -61,6 +61,8 @@ export type World = {
   files: Map<string, { text: string; mtimeMs: number }>
   clock: MockClock
   sent: Sent[]
+  /** The context each prompt.submit carried to the bottom hook (what hooks attached beside the text), parallel to `sent`; undefined when it carried none. */
+  contexts: (readonly string[] | undefined)[]
   ran: { command: string; args: string }[]
   toasts: string[]
   opened: { id: string; title?: string; focus?: true }[]
@@ -109,6 +111,7 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     files,
     clock,
     sent: [],
+    contexts: [],
     ran: [],
     toasts: [],
     opened: [],
@@ -205,6 +208,7 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => {
     w.sent.push({ text: e.text })
+    w.contexts.push(e.context)
     return { text: e.text }
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))

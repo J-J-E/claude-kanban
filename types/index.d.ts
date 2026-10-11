@@ -122,6 +122,8 @@ declare module 'claude-code' {
       working: KanbanWorking[]
       /** The card the running turn is about, when it began with a move prompt from the pane. */
       turnCard: string | null
+      /** True from any main-session turn start to its turn.complete (a chat turn has no card): Claude is busy. */
+      inTurn: boolean
       queued: KanbanQueued[]
       /** The card ID whose view takes the place of the lanes; null: the lanes. Cleared when the card goes. */
       selected: string | null

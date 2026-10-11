@@ -37,7 +37,8 @@ import { cardView } from './lib/cardview.ts'
 import { findWords, matchesFind } from './lib/find.ts'
 import type { CardView as CardModel, StatusBox } from './lib/cardview.ts'
 import { flagKind } from './lib/flags.ts'
-import { isGateApproval } from './lib/strings.ts'
+import { isGateApproval, managerNote } from './lib/strings.ts'
+import type { NoteCard } from './lib/strings.ts'
 import { parseFrontmatter } from './lib/frontmatter.ts'
 import {
   DEFAULTS,
@@ -117,6 +118,8 @@ const ACTING_ROLES = ['plan', 'auto', 'manual']
 const snapshotA = atom({ plugin: 'kanban', key: 'snapshot' } as const, null)
 const workingA = atom({ plugin: 'kanban', key: 'working' } as const, [])
 const turnCardA = atom({ plugin: 'kanban', key: 'turnCard' } as const, null)
+/** True from any main-session turn.start to its turn.complete: Claude is in a turn even when no card is marked (a chat turn). */
+const inTurnA = atom({ plugin: 'kanban', key: 'inTurn' } as const, false)
 const queuedA = atom({ plugin: 'kanban', key: 'queued' } as const, [])
 const selectedA = atom({ plugin: 'kanban', key: 'selected' } as const, null)
 const commentA = atom({ plugin: 'kanban', key: 'comment' } as const, '')
@@ -626,6 +629,7 @@ function boardProps(
   view: KanbanLanesView,
   nowMs: number,
   find: string,
+  isInTurn = false,
 ): ClientProps {
   const words = findWords(find)
   const isFiltered = words.length > 0
@@ -639,7 +643,7 @@ function boardProps(
   const roleOf = new Map<string, string>()
   for (const g of groups) for (const c of g.cards) roleOf.set(c.id, g.lane.role)
   // Claude is in a turn when the running turn is about a card, or any worker is running (a worker lives inside a turn).
-  const isClaudeBusy = turnCard !== null || working.length > 0
+  const isClaudeBusy = turnCard !== null || isInTurn || working.length > 0
   const shared = boardSort(view)
   // The budget loop starts at the longest lane: never Infinity (Math.floor(Infinity / 2) is Infinity, so it would never shrink).
   let cap = Math.max(1, ...groups.map((g) => g.cards.length))
@@ -943,6 +947,7 @@ async function openCardOf(
   queued: readonly KanbanQueued[],
   turnCard: string | null,
   isLogOpen: boolean,
+  isInTurn: boolean,
 ): Promise<OpenCard | null> {
   const card = snap.cards.find((c) => c.id === selected)
   if (card === undefined) return null
@@ -965,7 +970,7 @@ async function openCardOf(
     isWorking,
     isQueued: queued.some((q) => q.id === card.id) && !isWorking && turnCard !== card.id,
     // Claude is in a turn when the running turn is about a card, or any worker is running (a worker lives inside a turn).
-    isClaudeBusy: turnCard !== null || working.length > 0,
+    isClaudeBusy: turnCard !== null || isInTurn || working.length > 0,
     agent: agentOf(working, card.id),
     now: stampOf(await $.clock.now()),
     isLogOpen,
@@ -1178,12 +1183,12 @@ async function replyProps($: EngineInterface): Promise<UiMessageResult> {
   const selected = await read($, selectedA)
   const view = withTabChanges(await read($, lanesViewA), await read($, tabChangesA))
   const find = await read($, findA)
-  return { props: boardProps(snap, working, queued, turnCard, selected, view, await $.clock.now(), find) }
+  return { props: boardProps(snap, working, queued, turnCard, selected, view, await $.clock.now(), find, await read($, inTurnA)) }
 }
 
 /** Whether Claude has a turn running (the running turn is about a card, or a worker is on one): the toasts then say Claude starts when it is free. */
 async function claudeIsBusy($: EngineInterface): Promise<boolean> {
-  return (await read($, turnCardA)) !== null || workingOf(await read($, workingA)).length > 0
+  return (await read($, turnCardA)) !== null || (await read($, inTurnA)) || workingOf(await read($, workingA)).length > 0
 }
 
 /** The board's one sort, read from state. */
@@ -2170,6 +2175,42 @@ async function isPaneShown($: EngineInterface): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------- the manager note
+
+/** The origins that are a person at the prompt: Enter in the terminal or desktop composer, or the Remote Control bridge. */
+const PERSON_ORIGINS = new Set(['composer', 'bridge'])
+
+/** The cards in a lane of role `needs-you`, in board order, each with its flag (never its title). */
+function needsYouCards(snap: KanbanSnapshot): NoteCard[] {
+  const out: NoteCard[] = []
+  for (const g of groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes) {
+    if (g.lane.role !== 'needs-you') continue
+    for (const c of g.cards) out.push({ id: c.id, flag: c.flag })
+  }
+  return out
+}
+
+/**
+ * The manager note for a prompt the person typed, or null when none belongs on it: a prompt that did not come from a person
+ * (the origin says so), the pane's own `Kanban:` prompts, a slash command, a project with no board or one whose board.md
+ * cannot be read. One folder list, and a read only of a file that changed since the last one. Never throws.
+ */
+async function chatNote($: EngineInterface, ctx: Ctx, kind: string | undefined, text: string): Promise<string | null> {
+  try {
+    if (kind === undefined || !PERSON_ORIGINS.has(kind)) return null
+    const typed = String(text).trimStart()
+    if (typed.startsWith('Kanban:') || typed.startsWith('/')) return null
+    const run = ctx.chain.then(() => load($, ctx))
+    ctx.chain = run.catch(() => {})
+    await run
+    const snap = await read($, snapshotA)
+    if (snap === null || !snap.hasBoard || snap.isReadOnly) return null
+    return managerNote(snap.settings.owner, needsYouCards(snap))
+  } catch {
+    return null
+  }
+}
+
 // ---------------------------------------------------------------- the module
 
 export const register: Register = (on) => {
@@ -2179,6 +2220,8 @@ export const register: Register = (on) => {
     await $.command.register({ name: 'board', description: 'Open the kanban board pane' })
     // Find is not remembered: it starts empty with each session.
     await update($, findA, () => '')
+    // A new session has no turn running.
+    await update($, inTurnA, () => false)
     // A `-p` run or the SDK has nobody at the prompt and nothing draws: no pane, no tick, and never a model switch.
     if (e.isInteractive) {
       await refresh($, ctx)
@@ -2209,6 +2252,7 @@ export const register: Register = (on) => {
     const working = workingOf(await read($, workingA))
     const queued = await read($, queuedA)
     const turnCard = await read($, turnCardA)
+    const isInTurn = await read($, inTurnA)
     const selected = await read($, selectedA)
     const comment = await read($, commentA)
     const chosenTab = await read($, tabA)
@@ -2241,7 +2285,7 @@ export const register: Register = (on) => {
       const columns = e.props.bodyColumns
       const s = snap.settings
       const tab = shownTab(snap, chosenTab)
-      const open = tab === 'board' ? await openCardOf($, ctx, snap, selected, working, queued, turnCard, showLog) : null
+      const open = tab === 'board' ? await openCardOf($, ctx, snap, selected, working, queued, turnCard, showLog, isInTurn) : null
       const view = open === null ? null : open.model
       // Previous and Next: where the open card stands among the cards the board shows (null when Find hides it).
       const shown = view === null ? [] : shownIds(snap, lanesView, find)
@@ -2355,7 +2399,7 @@ export const register: Register = (on) => {
             </Box>
           )}
           {view === null && tab === 'board' && (
-            <Client key="board" module="./board.tsx" props={boardProps(snap, working, queued, turnCard, selected, boardView, nowMs, find)} width={columns} />
+            <Client key="board" module="./board.tsx" props={boardProps(snap, working, queued, turnCard, selected, boardView, nowMs, find, isInTurn)} width={columns} />
           )}
           {view !== null &&
             open !== null &&
@@ -2507,7 +2551,13 @@ export const register: Register = (on) => {
     }
     ctx.busy.add(name)
     try {
-      return await next(e)
+      const result = await next(e)
+      // A card file written by the main session (a subagent's call carries an agentId) while no card is marked: the turn is about it.
+      if (e.agentId === undefined && isCardFileName(name) && !(typeof result === 'object' && result !== null && 'deny' in result)) {
+        const id = /^([A-Z]{1,10}-\d{4,})-/.exec(name)?.[1]
+        if (id !== undefined && (await read($, turnCardA)) === null) await update($, turnCardA, () => id)
+      }
+      return result
     } finally {
       ctx.busy.delete(name)
       ctx.skip = 0
@@ -2515,14 +2565,30 @@ export const register: Register = (on) => {
     }
   }).catch(($, e, next) => next(e))
 
+  // The manager note rides on what the person types, as hidden context: the text is never touched, and every other case passes through.
+  on('prompt.submit', async ($, e, next) => {
+    const note = await chatNote($, ctx, e.origin?.kind, e.text)
+    return next(note === null ? e : { ...e, context: [...(e.context ?? []), note] })
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', async ($, e, next) => {
     const result = await next(e)
+    await update($, inTurnA, () => true)
     const about = CARD_PROMPT.exec(e.text)
     if (about !== null && about[1] !== undefined && about[2] !== undefined) {
       const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : 'delete'
       const id = about[2]
       await dequeue($, e.text, (q) => q.kind === kind && q.id === id)
       await update($, turnCardA, () => id)
+    } else if (!String(e.text).trimStart().startsWith('Kanban:')) {
+      // A typed prompt that names a card on the board (a full ID, any letter case): that card is the one being worked.
+      const named = String(e.text).match(/\b[A-Za-z]{1,10}-\d{4,}\b/g) ?? []
+      const snap = await read($, snapshotA)
+      if (snap !== null && snap.hasBoard) {
+        const ids = new Set(snap.cards.map((c) => c.id))
+        const hit = named.map((n) => n.toUpperCase()).find((n) => ids.has(n))
+        if (hit !== undefined) await update($, turnCardA, () => hit)
+      }
     }
     return result
   }).catch(($, e, next) => next(e))
@@ -2531,6 +2597,7 @@ export const register: Register = (on) => {
     const result = await next(e)
     if (e.agentId === undefined) {
       if ((await read($, turnCardA)) !== null) await update($, turnCardA, () => null)
+      if (await read($, inTurnA)) await update($, inTurnA, () => false)
       await refresh($, ctx)
     }
     return result

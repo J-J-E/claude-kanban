@@ -18,9 +18,9 @@ Only `needs-you` is enforced (code `claude-only`, format.md section 12). Everyth
 
 ## Shared rules
 
-- The owner's drag is the go-ahead. Claude never re-asks for the same card except at a gate. In chat, "move KB-12 to Auto" is the same go-ahead: the action runs.
+- The owner's drag is the go-ahead. Claude never re-asks for the same card except at a gate. In chat, "move KB-12 to Auto" is the same go-ahead: the action runs. So is an answer in chat to a card waiting in Needs You (SKILL.md, Requests in chat, points 8 to 10): logged and moved as the owner.
 - Every accepted move writes one dated Log line, `moved A -> B` (format.md section 5); a refused drop writes nothing. The pane or the move verb writes it; the action does not write it again.
-- Creating a card directly in a `plan` or `auto` lane from the pane is the same go-ahead as dragging it there; the pane does not offer it for `needs-you`. A card created in an `intake` or `backlog` lane starts nothing.
+- Creating a card directly in a `plan` or `auto` lane from the pane, or asking for it in chat (SKILL.md, Requests in chat), is the same go-ahead as dragging it there; the pane does not offer it for `needs-you`. A card made from a request in chat is logged `<owner>: created in <lane>` and its body is the person's words. A card created in an `intake` or `backlog` lane starts nothing.
 - An action fires on a person's move, never on a Claude move. When a flow needs another action it says so (Auto step 2 runs the children itself).
 - A **Claude move** is Claude editing `status:` (the label as spelled in `board.md`), `order:` (the target lane's highest + 1000) and `updated:`, and appending `- <stamp> Claude: moved <from> -> <to>`, exactly as the move verb does.
 - An action writes its Log lines as `Claude` and takes a fresh stamp for each (SKILL.md rule 5 gives one stamp per verb; an action can run for hours). It may edit `flag`, `branch`, `pr`, `## Plan` and create child cards with the add verb: the drop is the ask format.md section 11 wants. It touches nothing else in the card.
@@ -32,7 +32,7 @@ Only `needs-you` is enforced (code `claude-only`, format.md section 12). Everyth
 
 ## Plan action
 
-Runs on a person's move into a `plan` lane, or a card created there from the pane, and for the cards waiting in a `plan` lane when a turn starts. Nothing else happens: no branch, no code edits, no step workers. The manager does not write the plan; a planning agent does.
+Runs on a person's move into a `plan` lane, or a card created there from the pane or from a request in chat, and for the cards waiting in a `plan` lane when a turn starts. Nothing else happens: no branch, no code edits, no step workers. The manager does not write the plan; a planning agent does.
 
 1. Start a planning agent: Agent tool, `model: <planner_model>`, `effort: <planner_thinking>` (left out when it is `none`; the card's own `model` and `thinking` replace them when set), `description` `KB-0012 plan: <title>`. Its brief holds the card path, the requirement, the open questions and the Log, and the plan rules: numbered worker-sized steps each naming the files it touches and how it is checked; a "To settle when you approve" list with the assumed answer in brackets after each question; child cards past about 8 steps; a last line saying which steps can run together. It edits nothing and returns the plan. It counts against `workers` like any agent.
 2. Write `## Plan` into the card from the reviewed plan: replace one that is there, else insert it before `## Log`. The manager reads the returned plan against the card and sends it back if a step is not worker-sized or lacks files or a check. Steps read like `1. Format the date in the local zone. Files: summary.py, tests/test_summary.py. Check: pytest tests/test_summary.py.`
@@ -44,14 +44,14 @@ Runs on a person's move into a `plan` lane, or a card created there from the pan
 A person's drop is refused by the pane, with a message and nothing written; in chat it is the Claude-only refusal. Claude moves cards here itself, with a Claude move:
 
 - `PLAN READY`: the Plan action.
-- `QUESTION`: set `flag: QUESTION: <the question>`, Claude-move, then Log the one question as the newest line, `question: <the question>`.
+- `QUESTION`: set `flag: QUESTION: <the question>`, Claude-move, then Log the one question as the newest line, `question: <the question>`. Every question that stops work on a card (Plan or Auto flow, a held merge, a request that needs an answer first) goes this way and is also asked in chat in the same reply; a question is never asked in chat only.
 - `FAILED`: Auto step 5.
 
-The person answers with a comment or in chat, then drags the card on (Auto or Plan).
+The person answers with a comment or in chat, then drags the card on (Auto or Plan). A reply typed in chat that answers the card does both for him: it is appended to the Log as `<owner>: <his words>` and the card is moved Needs You -> Auto as his move, which runs the Auto flow (Gate approval for a `GATE` card); `no` or a change request on a `PLAN READY` or `GATE` card is a comment only and the card stays. Redoing a plan still takes his move to the Plan lane. The rules for which card and the exact texts are in SKILL.md, Requests in chat.
 
 ## Auto flow
 
-Runs on a person's move into an `auto` lane, or a card created there from the pane. If the card came from a `needs-you` lane and its `flag` starts with `GATE`, do the Gate approval first (below), which says where to continue; otherwise start at step 0.
+Runs on a person's move into an `auto` lane, or a card created there from the pane or from a request in chat (the card file and its `created in` Log line are already written; step 0 is the first Claude Log line). If the card came from a `needs-you` lane and its `flag` starts with `GATE`, do the Gate approval first (below), which says where to continue; otherwise start at step 0.
 
 0. Start. Re-read the card. Clear a `flag` of `PLAN READY`, `QUESTION: ...` or `FAILED`: the drag answered it (a question's answer is the person's newest comment). Make this the flow's first Log line: `started: <branch>`, the branch name step 3 uses, or `started: in place` when the project is not a git repo. "What's next" reads `Claude: started` to tell a started card from a queued one.
 
