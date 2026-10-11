@@ -273,11 +273,12 @@ test('a drop on an accepting lane posts move { id, from, to, rev } and draws the
     const t = tile(l, 'KB-0001').rect
     drag(h, { x: t.x + 2, y: t.y }, { x: laneX(l, 'Manual'), y: laneY(l, 'Manual') })
     expect(h.posts).toEqual([{ type: 'move', id: 'KB-0001', from: 'Inbox', to: 'Manual', rev: 5 }])
-    // In flight: the card is in Manual, its fill darker and its title dim, `Moving…` in place of the marks.
+    // in flight: the card is in Manual, an outline with no fill and its title dim, `Moving…` in place of the marks.
     const moving = lay(withMoved(p, 'KB-0001', 'Manual'))
     const node = tileNode(h.tree, 'KB-0001') as Node
     expect(placed(h.tree, 'tile-KB-0001').top).toBe(tile(moving, 'KB-0001').rect.y)
-    expect(node.props.backgroundColor).toBe('#1f1f1e')
+    expect(node.props.backgroundColor).toBeUndefined() // no fill: the moving card's place is an outline only
+    expect(node.props.borderColor).toBe('subtle')
     expect(text(node)).toContain('Moving…')
     expect(find(node, (n) => n.type === 'Text' && text(n) === 'Title of KB-0001')[0]?.props.dimColor).toBe(true)
     // The card shows no hover while it moves.
@@ -311,8 +312,8 @@ test('a drop on a lane only Claude fills posts the move and shows nothing in fli
   expect(h.posts[1]).toEqual({ type: 'move', id: 'KB-0001', from: 'Inbox', to: 'Gated', rev: 5 })
   expect(text(h.render())).not.toContain('Moving…')
   // The tile is where it was, and its hover is back.
-  expect((tileNode(h.tree, 'KB-0001') as Node).props.backgroundColor).toBe('#262624')
-  expect((tileNode(h.tree, 'KB-0001') as Node).props.hover).toMatchObject({ backgroundColor: '#2e2e2c' })
+  expect((tileNode(h.tree, 'KB-0001') as Node).props.backgroundColor).toBe('composerSidebarBackground')
+  expect((tileNode(h.tree, 'KB-0001') as Node).props.hover).toMatchObject({ borderColor: 'inactive' })
 })
 
 test('a drop on the lane the card is in posts the move with its place; it shows in flight only when the place changes the order', async () => {
@@ -436,14 +437,14 @@ test('a press on the ⋯ of a card posts menu { id, rev } and draws the small me
   const node = nodes[0] as Node
   // Placed from the lane's own corner like a tile, borderless, in the card's fill, three rows tall; nothing floats outside the lane's Box.
   expect(placed(tree, 'menu-KB-0001')).toEqual({ top: m.y, left: m.x })
-  expect(node.props).toMatchObject({ position: 'absolute', width: m.w, height: 3, backgroundColor: '#262624' })
+  expect(node.props).toMatchObject({ position: 'absolute', width: m.w, height: 3, backgroundColor: 'composerSidebarBackground' })
   expect(node.props.borderStyle).toBeUndefined()
   const rows = find(node, (n) => String(n.props.key).startsWith('menu-row-KB-0001-'))
   const want = cardMenuRows('KB-0001', 'first')
   expect(rows.map((r) => text(r))).toEqual(want.map((r) => r.label))
   for (const r of rows) {
     expect(r.props).toMatchObject({ height: 1, width: m.w, paddingLeft: 1, paddingRight: 1 })
-    expect(r.props.hover).toMatchObject({ backgroundColor: '#2e2e2c' })
+    expect(r.props.hover).toMatchObject({ backgroundColor: 'subtle' })
     // The text sits in a Box that may shrink below it, clips it, and is cut with an ellipsis.
     const inner = r.children[0] as Node
     expect(inner.props).toMatchObject({ minWidth: 0, overflow: 'hidden' })
@@ -929,7 +930,7 @@ test('a drop on a collapsed line posts the move; the line of a lane only Claude 
   drag(g, { x: u.x + 2, y: u.y }, { x: laneX(lq, 'Needs You'), y: laneY(lq, 'Needs You') }, false)
   expect(text(titleBar(g.render(), 'Needs You'))).toContain('Claude only')
   expect(byKey(g.tree, 'drop-Needs You')?.props).toMatchObject({ borderStyle: 'round', borderColor: 'error', height: 1 })
-  expect(titleBar(g.tree, 'Needs You').props.backgroundColor).toBe('#3a2e12') // a folded lane that holds a waiting card keeps its warm fill
+  expect(titleBar(g.tree, 'Needs You').props.backgroundColor).toBe('composerSidebarBackground') // a folded lane that holds a waiting card keeps its warm fill
   g.event({ type: 'up', x: laneX(lq, 'Needs You'), y: laneY(lq, 'Needs You'), button: 'left' })
   expect(g.posts).toEqual([{ type: 'move', id: 'KB-0001', from: 'Inbox', to: 'Needs You', rev: 5 }])
   expect(text(g.render())).not.toContain('Moving…')
@@ -1002,7 +1003,7 @@ test('a card with a worker, one waiting to start and the running turn: marks in 
   const tree = h.render()
   const l = lay(p)
   const working = tileNode(tree, 'KB-0003') as Node
-  expect(working.props).toMatchObject({ borderColor: '#262624', height: 2, borderStyle: 'round' })
+  expect(working.props).toMatchObject({ borderColor: 'composerSidebarBackground', height: 2, borderStyle: 'round' })
   expect((working.children[0] as Node).props).toMatchObject({ position: 'absolute', top: 0, left: 0, height: 2, paddingLeft: 2, paddingRight: 2 })
   const mark = find(working, (n) => n.type === 'Text' && text(n) === '● Working')[0] as Node
   expect(mark.props).toMatchObject({ bold: true, color: 'claude' })
@@ -1022,7 +1023,7 @@ test('a card with a worker, one waiting to start and the running turn: marks in 
   // A plain card: one row, no second row.
   const plain = tileNode(tree, 'KB-0011') as Node
   expect(plain.props.height).toBe(1)
-  expect(plain.props.hover).toMatchObject({ backgroundColor: '#2e2e2c' })
+  expect(plain.props.hover).toMatchObject({ borderColor: 'inactive' })
   // The lane says how many work and how many wait.
   const bar2 = titleBar(tree, 'Auto')
   expect(text(bar2)).toContain('● 1 working')
@@ -1045,11 +1046,11 @@ test('a card waiting on him has an orange spine, a failed one a red spine, and t
   expect(spine('KB-0005')?.props).toMatchObject({ position: 'absolute', top: 0, left: 0, width: 1, height: 2, backgroundColor: 'warning' })
   expect(spine('KB-0007')?.props.backgroundColor).toBe('error')
   expect(spine('KB-0001')).toBeUndefined()
-  expect((tileNode(tree, 'KB-0005') as Node).props.borderColor).toBe('#262624')
+  expect((tileNode(tree, 'KB-0005') as Node).props.borderColor).toBe('composerSidebarBackground')
   expect(byKey(tree, 'panel-Needs You')?.props.borderColor).toBeUndefined()
   expect(byKey(tree, 'panel-Inbox')?.props.borderColor).toBeUndefined()
   const bar = titleBar(tree, 'Needs You')
-  expect(bar.props.backgroundColor).toBe('#3a2e12')
+  expect(bar.props.backgroundColor).toBe('composerSidebarBackground')
   expect(titleBar(tree, 'Inbox').props.backgroundColor).toBeUndefined()
   expect(find(bar, (n) => n.type === 'Text' && text(n) === 'Needs You')[0]?.props).toMatchObject({ bold: true, color: 'warning' })
   const count = find(bar, (n) => n.type === 'Text' && text(n) === '2')[0] as Node
@@ -1061,12 +1062,12 @@ test('a card waiting on him has an orange spine, a failed one a red spine, and t
   expect(inboxCount.props.inverse).toBeUndefined()
 })
 
-test('the selected card has a lighter fill and no hover', async () => {
+test('the selected card has the card fill and a stronger outline, and no hover', async () => {
   const p = props({ selected: 'KB-0001' })
   const h = await board(p)
   const node = tileNode(h.tree, 'KB-0001') as Node
-  expect(node.props.backgroundColor).toBe('#34342f')
-  expect(node.props.borderColor).toBe('#34342f')
+  expect(node.props.backgroundColor).toBe('composerSidebarBackground')
+  expect(node.props.borderColor).toBe('subtle')
   expect(node.props.hover).toBeUndefined()
 })
 
@@ -1371,4 +1372,71 @@ test('a view whose stamp is not a number reads as 0', async () => {
   expect(tileNode(h.tree, 'KB-0001')).toBeDefined()
   h.setProps({ ...props(), rev: 6, view: { fold: ALL_SHUT, more: {}, stamp: 0 } })
   expect(tileNode(h.tree, 'KB-0001')).toBeDefined()
+})
+
+// ---- Theme (KB-0041): every colour the board draws is a theme key, so the lanes and cards follow light and dark ----
+
+/** A raw colour: a hex value, an rgb(...) call or a hsl(...) call. A theme key (`userMessageBackground`, `subtle`, `warning`) is not. */
+const RAW_COLOUR = /^\s*(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i
+const COLOUR_PROPS = ['color', 'backgroundColor', 'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor']
+
+/** Every raw colour in a drawn tree, props and hover props both: `path: prop = value`. */
+function rawColours(n: Node | string | null, path = 'root', out: string[] = []): string[] {
+  if (n === null || typeof n === 'string') return out
+  const here = `${path}/${n.type}${n.props.key !== undefined ? '#' + String(n.props.key) : ''}`
+  for (const set of [n.props, n.props.hover ?? {}]) {
+    for (const k of COLOUR_PROPS) {
+      const v = (set as Record<string, unknown>)[k]
+      if (typeof v === 'string' && RAW_COLOUR.test(v)) out.push(`${here}: ${k} = ${v}`)
+    }
+  }
+  n.children.forEach((c, i) => rawColours(c, `${here}[${i}]`, out))
+  return out
+}
+
+test('no Box or Text of the board carries a raw hex or rgb colour, in any state it draws: at rest, selected, moving, in the hand, over a refusing lane, with a menu open', async () => {
+  const waiting = props()
+  ;(waiting.lanes[2] as BoardLane).cards = [
+    card('KB-0005', { flag: 'QUESTION: which repo?', status: { kind: 'waiting', text: '? Which repo?', colour: 'warning', bar: null, time: '12 min ago' } }),
+    card('KB-0007', { flag: 'FAILED', status: { kind: 'waiting', text: '✕ A step failed 4 times. Open it to see why', colour: 'error', bar: null, time: '' } }),
+  ]
+  ;(waiting.lanes[2] as BoardLane).total = 2
+  const trees: [string, Node][] = []
+  trees.push(['rest', (await board(waiting)).tree])
+  trees.push(['selected', (await board(props({ selected: 'KB-0001' }))).tree])
+  const m = await board(props())
+  const l = lay(props())
+  const t = tile(l, 'KB-0001').rect
+  drag(m, { x: t.x + 2, y: t.y }, { x: laneX(l, 'Manual'), y: laneY(l, 'Manual') })
+  trees.push(['moving', m.render()])
+  const g = await board(waiting)
+  const gl = lay(waiting)
+  const gt = tile(gl, 'KB-0001').rect
+  drag(g, { x: gt.x + 2, y: gt.y }, { x: laneX(gl, 'Needs You'), y: laneY(gl, 'Needs You') }, false)
+  trees.push(['in the hand over a Claude-only lane', g.render()])
+  const o = await board(props())
+  const z = tile(lay(props()), 'KB-0001').menuRect
+  o.event({ type: 'down', x: z.x + 1, y: z.y, button: 'left' })
+  trees.push(['menu open', o.render()])
+  for (const [name, tree] of trees) expect({ name, raw: rawColours(tree) }).toEqual({ name, raw: [] })
+})
+
+test('the guard sees a raw colour: a Box with a hex fill or a hex hover is found', () => {
+  const bad: Node = { type: 'Box', props: { key: 'x', backgroundColor: '#262624', hover: { borderColor: 'rgb(1,2,3)' } }, children: [] }
+  expect(rawColours(bad)).toHaveLength(2)
+  expect(rawColours({ type: 'Box', props: { backgroundColor: 'composerSidebarBackground', borderColor: 'subtle' }, children: [] })).toEqual([])
+})
+
+test('theme: a card is the surface key, the card in hand and the menu block too; the hovered card, the open card and the held card are told apart by outline, not by fixed fills', async () => {
+  const p = props({ selected: 'KB-0002' })
+  const h = await board(p)
+  const rest = tileNode(h.tree, 'KB-0001') as Node
+  const open = tileNode(h.tree, 'KB-0002') as Node
+  // Resting: fill and outline are the surface key (so it reads as a borderless fill). Open: the same fill, a visible outline. Hover: a stronger outline.
+  expect(rest.props).toMatchObject({ backgroundColor: 'composerSidebarBackground', borderColor: 'composerSidebarBackground' })
+  expect(rest.props.hover).toEqual({ borderColor: 'inactive' })
+  expect(open.props).toMatchObject({ backgroundColor: 'composerSidebarBackground', borderColor: 'subtle' })
+  expect(new Set([rest.props.borderColor, open.props.borderColor, rest.props.hover.borderColor]).size).toBe(3)
+  // Text on a filled card is the default colour or a theme key / dim, never a fixed colour: no Text inside carries a colour that is not a key.
+  for (const tx of find(rest, (n) => n.type === 'Text')) if (tx.props.color !== undefined) expect(['claude', 'warning', 'error', 'inactive', 'subtle']).toContain(tx.props.color)
 })

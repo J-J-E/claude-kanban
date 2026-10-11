@@ -183,8 +183,8 @@ const MID_DRAG: string[] = [
   "",
   "  ▾ Gated 1                                              · It is already here.",
   "",
-  "      KB-0007 Later: MCP wrapper so any agent can use the board         ⋯",
-  "              ▲ Held: merge touches package.json                   4 h ago",
+  "    ╭ KB-0007 Later: MCP wrapper so any agent can use the board         ⋯  ╮",
+  "    ╰         ▲ Held: merge touches package.json                   4 h ago ╯",
   "",
   "",
   "  ▸ Done 7                                                           Finish it",
@@ -196,7 +196,7 @@ const MID_DRAG: string[] = [
 
 const MID_DRAG_COLOURS: string[] = [
   " 8: 66-77 accent",
-  "10: 4-12 orange, 14-14 orange",
+  "10: 4-12 orange, 14-14 orange, 43-77 orange",
   "12: 4-4 orange",
   "13: 4-4 orange, 14-51 orange",
   "15: 4-4 orange",
@@ -211,6 +211,8 @@ const MID_DRAG_COLOURS: string[] = [
   "26: 1-78 accent",
   "27: 66-77 accent",
   "29: 4-8 orange, 10-10 orange",
+  "31: 4-4 bright, 75-75 bright",
+  "32: 4-4 bright, 75-75 bright",
 ]
 
 const AFTER_DROP: string[] = [

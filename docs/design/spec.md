@@ -31,8 +31,12 @@ One font, one size. Hierarchy comes from fill, outline, weight, dimming and spac
 | Role | Token | Dark (sampled) | Light (guess, check) | Used for |
 |---|---|---|---|---|
 | Ground | the pane's own | `#1a1a19` | `#faf9f5` | Between panels, between tiles, inside a lane panel |
-| Surface | `backgroundColor: 'userMessageBackground'` | `#151515` | `#f0eee7` | The chosen tab's chip (and a tab under the pointer), lane title bar, collapsed lane line, tiles, the open card's title bar and status box |
-| Opaque cover | the ground colour | | | The card in hand, so it hides what is under it. If the ground is not a token, use `userMessageBackground` |
+| Surface | `backgroundColor: 'userMessageBackground'` | `#151515` | `#f0eee7` | The chosen tab's chip (and a tab under the pointer), the open card's title bar and status box |
+| Card fill | `backgroundColor: 'composerSidebarBackground'` | | | Tiles, the Needs You title bar, the card menu block: a step darker than the surface in light (too faint otherwise, seen on the real pane, KB-0041). Fallback: `userMessageBackground` |
+| Opaque cover | `composerSidebarBackground` | | | The card in hand, so it hides what is under it |
+| Card states | outline keys | | | Resting: fill and outline are both the surface key. Under the pointer: outline `inactive` (the fill does not change, since a second fill would be a fixed colour). The open card: outline `subtle`. The card's own place while it is held or moving: no fill, outline `subtle`. Menu row under the pointer: fill `subtle`, text full strength |
+| Plan bar | `inactive`, `subtle` | | | Done blocks `inactive` (the accent while a worker runs), empty blocks `subtle` |
+| Refused-drop sentence | `warning` + `dimColor` | | | The lane only Claude fills, while dragging (dim amber, as before) |
 | Lane outline | raw `#74746f` | | | Every lane panel and collapsed line (3.7 to 1 on dark, 4.4 to 1 on light). Use a theme key such as `subtle` instead if it paints and adapts |
 | Resting outline | default, dim | about `#232323` | about `#dedcd4` | Tiles |
 | Text | default | `#f0efec` | `#1f1e1d` | Titles, lane names (bold) |
@@ -374,7 +378,7 @@ The view follows the live card. When the card moves out of the lane it was waiti
 
 The toolbar (`hooks/ui/toolbar.tsx`) sits between the header and the lanes on the Board tab, and is not drawn while a card is open. Two rows of native controls. Row 1: the `New card` button at the left (not drawn when the board cannot be read), the `Find` field in the growing space (section 13.1), and the one `Sort` (section 13) at the right edge. Row 2, a quiet sub-row one blank row under row 1 with its count text lined up with the label of `New card`: the dim card count (`32 cards`, or `4 of 32 match` while Find is on) at the left, and at the right ONE quiet plain button that names what it will do: `Collapse all` while any lane with cards is open, else `Expand all` (section 5). While Find is on the button is not drawn (lanes with matches are open whatever the folds say). When Find matches nothing the count is replaced by the line `No card matches "zzzz"` with its own `Clear`, and Enter in the Find field says the same in a toast. Two blank rows stand between the toolbar and the first lane.
 
-- **Press `New card`.** A second row opens under it: the title `Input` (placeholder `What needs doing?`), a `Lane` `Select`, `Add` (the one filled button of the row) and `Cancel`. From `W` 76 the four share one row; below that the field has the row to itself and the lane, `Add` and `Cancel` sit under it. The field takes the keyboard when the row opens, and **only then**.
+- **Press `New card`.** A second row opens under it: the title `Input` (placeholder `What needs doing?`), a `Lane` `Select`, `Cancel`; the one `Add` is the field's own submit (`submitLabel`), which the app draws beside the field, as in the comment field (section 11): no separate `Add` button, since a second one is a bug. Enter or that submit adds the card, the field clears and stays open. From `W` 76 the field, the lane and `Cancel` share one row; below that the field has the row to itself and the lane and `Cancel` sit under it. The field takes all the free width of its row (its Box has `flexGrow` 1, is a column so the native field stretches across it, and from 76 cells keeps at least 35% of the row); the `Lane` Box sizes to its value and does not grow; no Box in the row has a fixed width. Text longer than the field scrolls inside it as a native field does; there is no longest title. The field takes the keyboard when the row opens, and **only then**.
 - **The lanes offered** are the lanes a person may create in, in board order: roles `intake`, `plan`, `auto`, `manual` and `backlog`, never a Claude-only lane. The lane shown is the one picked, else the first `intake` lane (Pending).
 - **Enter** in the field, or `Add`: makes the card at the end of the lane, empties the field, keeps the row open and gives the field the keyboard again. `Cancel` closes the row and drops what was typed. With no lane that takes cards the toast is `No lane takes new cards.`
 - Toast: `Added KB-0016 to Pending.` plus ` Claude is writing the plan.` (plan), ` Claude is starting.` (auto) or ` Claude is planning the first step.` (manual); when Claude is busy: ` Claude will start when it finishes what it is doing.` A card made in Pending or Backlog starts nothing.
@@ -658,7 +662,7 @@ In the open card the `Model` and `Thinking` selects show the values, and the lin
 | `▰ ▱ ↕ ⋯ ▾ ▸ ◂ ✓` do not render | Bar: `#` and `-`; sort `v`; chevrons `v` and `>`; back `<`. |
 | hover reveals fail | They are already off (7.4).
 
-The mock draws the light theme with the same layout; only the colours in section 1 change.
+The board follows the app's theme (KB-0041): every colour it draws is a theme key (section 1), never a hex value, because the kit gives a Client no theme to choose a palette by. `tests/client.test.ts` fails if a drawn Box or Text carries a raw colour. In the dark theme the cards are the surface colour (a little darker than the pane) with outlines for hover, open and held, where the first build had lighter and darker fixed fills. The mock draws the light theme with the same layout; only the colours in section 1 change.
 
 ## 20. Terminal fallback
 

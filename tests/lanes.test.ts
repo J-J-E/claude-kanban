@@ -279,14 +279,14 @@ test('a lane that holds waiting cards is the one header with a fill: a warm tint
   const { ui } = await setup($, on, busyFiles())
   const tree = await drawn(ui)
   const needs = titleNode(tree, 'Needs You')
-  expect(needs.props).toMatchObject({ backgroundColor: '#3a2e12', left: -1, width: 62, paddingLeft: 1, paddingRight: 1 })
+  expect(needs.props).toMatchObject({ backgroundColor: 'composerSidebarBackground', left: -1, width: 62, paddingLeft: 1, paddingRight: 1 })
   const [name] = kids(needs)
   const [, label, count] = kids(name as Node)
   expect(firstText(label as Node).props).toMatchObject({ bold: true, color: 'warning' })
   expect(textOf(count)).toBe('2')
   expect(firstText(count as Node).props).toMatchObject({ color: 'warning' })
   expect('inverse' in firstText(count as Node).props).toBe(false)
-  expect(titleNode(tree, 'Gated').props.backgroundColor).toBe('#3a2e12')
+  expect(titleNode(tree, 'Gated').props.backgroundColor).toBe('composerSidebarBackground')
   // The other headers have no fill, and no panel has an outline.
   for (const lane of ['Inbox', 'Auto', 'Plan', 'Done']) expect('backgroundColor' in titleNode(tree, lane).props).toBe(false)
   for (const lane of ['Needs You', 'Gated', 'Auto']) expect('borderColor' in panelNode(tree, lane).props).toBe(false)
@@ -357,9 +357,9 @@ test('a card: a plain one is one row, a rounded fill with no visible outline; th
   const tile = tileNode(tree, 'KB-0001') as Node
   expect(tile.props).toMatchObject({
     borderStyle: 'round',
-    borderColor: '#262624',
+    borderColor: 'composerSidebarBackground',
     borderDimColor: false,
-    backgroundColor: '#262624',
+    backgroundColor: 'composerSidebarBackground',
     width: 56,
     height: 1,
     left: 2,
@@ -367,7 +367,7 @@ test('a card: a plain one is one row, a rounded fill with no visible outline; th
     key: 'tile-KB-0001',
   })
   expect(tile.props.hover).toBeUndefined()
-  expect(tile.hover).toEqual({ borderColor: '#2e2e2c', backgroundColor: '#2e2e2c' })
+  expect(tile.hover).toEqual({ borderColor: 'inactive' })
   // The tile is the outline and the fill; its one child is as big as it, placed from its corner, and holds the rows inside 2 cells of padding.
   const body = bodyOf(tile)
   expect(body.props).toMatchObject({ position: 'absolute', top: 0, left: 0, width: 56, height: 1, flexDirection: 'column', paddingLeft: 2, paddingRight: 2, overflow: 'hidden' })
@@ -398,7 +398,7 @@ test('a card that waits on him has 2 rows and an orange spine, a failed one a re
   const l = await lay(ui)
   const tree = await drawn(ui)
   const question = tileNode(tree, 'KB-0005') as Node
-  expect(question.props).toMatchObject({ borderColor: '#262624', backgroundColor: '#262624', height: 2, borderStyle: 'round' })
+  expect(question.props).toMatchObject({ borderColor: 'composerSidebarBackground', backgroundColor: 'composerSidebarBackground', height: 2, borderStyle: 'round' })
   // The spine: one cell wide, the card's height, at its left edge, after the body.
   expect(kids(question)[1]?.props).toMatchObject({ position: 'absolute', top: 0, left: 0, width: 1, height: 2, backgroundColor: 'warning' })
   expect(kids(bodyOf(question))).toHaveLength(2)
@@ -454,7 +454,7 @@ test('a card with a worker: the Working mark in the accent colour with no fill a
   await w.clock.settle()
   let tree = await drawn(ui)
   const tile = tileNode(tree, 'KB-0003') as Node
-  expect(tile.props.borderColor).toBe('#262624')
+  expect(tile.props.borderColor).toBe('composerSidebarBackground')
   expect(tile.props.height).toBe(2)
   const marks = all(tile, (n) => n.type === 'Text' && textOf(n) === '● Working')
   expect(marks).toHaveLength(1)
@@ -761,7 +761,7 @@ test('while a card is in the hand every open title bar says what a drop there do
   // The sentence is bold and in the lane's colour: accent where Claude acts, red where it refuses, plain for the rest.
   const sentence = (name: string) => all(titleNode(tree, name), (n) => n.type === 'Text').slice(-1)[0]?.props as Record<string, unknown>
   expect(sentence('Auto')).toMatchObject({ bold: true, color: 'claude' })
-  expect(sentence('Gated')).toMatchObject({ color: '#b89a5a' })
+  expect(sentence('Gated')).toMatchObject({ color: 'warning', dimColor: true })
   expect(sentence('Gated').bold).toBeUndefined()
   expect(sentence('Inbox')).toMatchObject({ dimColor: true })
   expect(sentence('Inbox').bold).toBeUndefined()
@@ -770,7 +770,7 @@ test('while a card is in the hand every open title bar says what a drop there do
   // The lane under the pointer (Auto) is outlined, not filled: no header is filled in a colour for a drop, and no text is inverse.
   expect('backgroundColor' in titleNode(tree, 'Auto').props).toBe(false)
   expect(all(tree, (n) => n.type === 'Text' && n.props.inverse === true)).toEqual([])
-  expect(titleNode(tree, 'Needs You').props.backgroundColor).toBe('#3a2e12')
+  expect(titleNode(tree, 'Needs You').props.backgroundColor).toBe('composerSidebarBackground')
   expect(keyed(tree, 'drop-Auto')?.props).toMatchObject({ borderStyle: 'round', borderColor: 'claude' })
 
   // Nothing was written, nothing asked.
@@ -791,12 +791,13 @@ test('while a card is in the hand only the lane under the pointer is outlined: a
   expect(drops[0]?.props).toMatchObject({ position: 'absolute', top: 0, left: -1, width: auto.rect.w + 2, height: auto.rect.h, borderStyle: 'round', borderColor: 'claude' })
   expect(kids(drops[0] as Node)).toHaveLength(0)
   // The cards keep their own fill; a card that waits keeps its spine.
-  expect(tileNode(tree, 'KB-0003')?.props).toMatchObject({ borderStyle: 'round', borderColor: '#262624' })
-  expect(tileNode(tree, 'KB-0005')?.props).toMatchObject({ borderColor: '#262624' })
+  expect(tileNode(tree, 'KB-0003')?.props).toMatchObject({ borderStyle: 'round', borderColor: 'composerSidebarBackground' })
+  expect(tileNode(tree, 'KB-0005')?.props).toMatchObject({ borderColor: 'composerSidebarBackground' })
   expect(kids(tileNode(tree, 'KB-0005') as Node)[1]?.props.backgroundColor).toBe('warning')
   // The card's own lane, in Your order, is not outlined; the source card is darker and dim in every text, and not a hover scope.
   const source = tileNode(tree, 'KB-0001') as Node
-  expect(source.props).toMatchObject({ borderStyle: 'round', backgroundColor: '#1f1f1e', borderColor: '#1f1f1e' })
+  expect(source.props).toMatchObject({ borderStyle: 'round', borderColor: 'subtle' })
+  expect(source.props.backgroundColor).toBeUndefined()
   expect(firstText(kids(kids(bodyOf(source))[0] as Node)[1] as Node).props.dimColor).toBe(true)
   expect(source.hover).toBeUndefined()
   expect(tileNode(tree, 'KB-0002')?.hover).toBeUndefined()
@@ -818,7 +819,7 @@ test('over a plain lane the outline is the default colour; the headers stay flat
   // KB-0003 is in Auto; Inbox files it (plain).
   await dragTo(ui, { x: tile.x + 2, y: tile.y }, spot(l, 'Inbox'), false)
   const tree = await drawn(ui)
-  expect(tileNode(tree, 'KB-0001')?.props.borderColor).toBe('#262624')
+  expect(tileNode(tree, 'KB-0001')?.props.borderColor).toBe('composerSidebarBackground')
   const drop = keyed(tree, 'drop-Inbox') as Node
   expect(drop.props).toMatchObject({ borderStyle: 'round', borderDimColor: false })
   expect('borderColor' in drop.props).toBe(false)

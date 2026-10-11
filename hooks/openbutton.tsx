@@ -4,10 +4,9 @@
 // A variable is never named `h`: JSX compiles to calls of `h`.
 import type { ClientModule, ClientPointerEvent, ClientSurface } from 'claude-code'
 
-/** The fill of the chip and of the chip under the pointer: the board's selected-card fill and a lighter one, so the chip reads against the band and belongs with the pane it opens. */
-const CHIP_BG = '#34342f'
-const CHIP_HOVER_BG = '#403f3a'
-const CHIP_MARK = '#cfcfca'
+/** The fill of the chip and of the chip under the pointer, as theme keys (KB-0041): the surface fill the board's cards use, and a mid grey of the theme under the pointer, with the label in the default colour, so the chip reads in the light and the dark theme. */
+const CHIP_BG = 'composerSidebarBackground'
+const CHIP_HOVER_BG = 'subtle'
 
 type ChipProps = { label: string }
 
@@ -30,7 +29,7 @@ const openButton: ClientModule<ChipProps> = (props, surface) => {
     return (
       <Box flexDirection="row">
         <Box key="chip" paddingX={2} backgroundColor={CHIP_BG} hover={{ backgroundColor: CHIP_HOVER_BG }}>
-          <Text color={CHIP_MARK}>{'▦ ' + label}</Text>
+          <Text>{'▦ ' + label}</Text>
         </Box>
       </Box>
     )

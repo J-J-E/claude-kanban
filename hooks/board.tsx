@@ -45,24 +45,35 @@ import {
 } from './lib/strings.ts'
 import type { DropLook, Labels } from './lib/strings.ts'
 
-/** The fill of a card, as a raw colour (a card is a borderless-looking rounded fill: its border is this same colour). */
-const TILE_BG = '#262624'
-/** The fill of a card under the pointer (a hover on a keyed Box restyles it with no pointer round-trip). */
-const TILE_HOVER_BG = '#2e2e2c'
-/** The fill of the card whose view is open. */
-const TILE_SELECTED_BG = '#34342f'
-/** The fill of the card in the hand's own place while it is held. */
-const TILE_SOURCE_BG = '#1f1f1e'
-/** The warm dark tint of the Needs You header: the only lane header with a fill. */
-const NEEDS_BG = '#3a2e12'
+/**
+ * Every colour the board draws is a theme KEY, never a hex value (KB-0041): the kit gives a Client no theme value, only keys that the
+ * app resolves in the person's current theme, so a key is the one way to follow light and dark. A card is a fill in the surface key
+ * (`userMessageBackground`, the same fill the header chip and the open card's boxes use); its border is that same key, so it reads as
+ * a borderless rounded fill.
+ */
+const SURFACE = 'userMessageBackground'
+/**
+ * The fill of a card, its drag ghost and the menu block. `composerSidebarBackground`: a step darker than the surface key in the light theme (terminal
+ * theme values: light rgb(235) against rgb(240), dark rgb(38) against rgb(55)), because on the real pane in light mode the surface key was too
+ * faint against the white ground (KB-0041). FALLBACK if the pane paints nothing for it: set this to SURFACE.
+ */
+const TILE_BG = 'composerSidebarBackground'
+/** The outline of a card under the pointer (a hover on a keyed Box restyles it with no pointer round-trip): a stronger grey than the open card's. */
+const TILE_HOVER_BORDER = 'inactive'
+/** The outline of the card whose view is open (its fill is any card's, so the outline marks it). */
+const TILE_SELECTED_BORDER = 'subtle'
+/** The outline of the card's own place while it is held (or moving): no fill, so the place reads as a hole. */
+const TILE_SOURCE_BORDER = 'subtle'
+/** The fill of a menu row under the pointer: a mid grey of the theme, under text of the default colour. */
+const MENU_HOVER_BG = 'subtle'
+/** The fill of the Needs You header: the surface fill (the other headers have none), with its name and count in the warning colour. */
+const NEEDS_BG = TILE_BG
 
-/** The bar of a card: one block per plan step, filled for done (light grey when idle, the accent only while a worker runs on it) and empty for the rest (dim). */
-const BAR_FILLED = '#b4b4af'
-const BAR_EMPTY = '#4a4a46'
+/** The bar of a card: one block per plan step, filled for done (a mid grey when idle, the accent only while a worker runs on it) and empty for the rest (the faintest grey). */
+const BAR_FILLED = 'inactive'
+const BAR_EMPTY = 'subtle'
 const BLOCK_FULL = '▰'
 const BLOCK_EMPTY = '▱'
-/** The dim amber of the verdict on a lane Claude alone fills (no red: it is a statement, not an error). */
-const REFUSE_TEXT = '#b89a5a'
 
 /** The cells of padding on each side of a menu row's text (the block has 1 cell of padding, so the delete note fits at 45 cells). */
 const MENU_INSET = 1
@@ -231,7 +242,7 @@ function drawActivity(p: Parts, panel: LanePanel, under: boolean): RenderElement
   if (look !== undefined) {
     const colour = look.colour
     const quiet = (look.kind === 'same' && !under) || look.kind === 'place'
-    const style = quiet ? { dimColor: true } : look.kind === 'refuse' ? { color: REFUSE_TEXT } : { bold: true, ...only('color', colour) }
+    const style = quiet ? { dimColor: true } : look.kind === 'refuse' ? { color: 'warning', dimColor: true } : { bold: true, ...only('color', colour) }
     const sentence = look.kind === 'place' && p.slot !== null && p.slot.lane === panel.name ? placeVerdict(p.slot.after, p.slot.before) : look.text
     return (
       <Box height={1} marginLeft={2} flexGrow={1} flexShrink={100} minWidth={0} overflow="hidden" justifyContent="flex-end">
@@ -330,17 +341,17 @@ function drawTitleBar(p: Parts, panel: LanePanel): RenderElement {
  * spine (a one-cell strip in the warning colour, or the error colour for a failure, at its left edge). The card in the hand's place and a
  * card in flight are dim; the open card has a lighter fill; a card under the pointer lightens (a hover, no code).
  */
-function lookOf(p: Parts, panel: LanePanel, card: BoardCard): { fill: string; hovers: boolean; isSource: boolean; spine: string | null } {
+function lookOf(p: Parts, panel: LanePanel, card: BoardCard): { fill: string | undefined; border: string; hovers: boolean; isSource: boolean; spine: string | null } {
   const d = p.state.drag
   const dragging = !!d && d.isMoved && p.looks !== null
   const waits = panel.isClaudeOnly && String(card.flag ?? '').trim() !== ''
   const reason = waits ? flagReason(card.flag) : null
   const own = waits ? (card.status?.kind === 'waiting' && (card.status.colour === 'warning' || card.status.colour === 'error') ? card.status.colour : (reason?.colour ?? 'warning')) : null
-  if (dragging && d !== null && d.id === card.id) return { fill: TILE_SOURCE_BG, hovers: false, isSource: true, spine: null }
-  if (dragging) return { fill: TILE_BG, hovers: false, isSource: false, spine: own }
-  if (card.id === p.pendingId) return { fill: TILE_SOURCE_BG, hovers: false, isSource: false, spine: own }
-  if (card.id === p.selected) return { fill: TILE_SELECTED_BG, hovers: false, isSource: false, spine: own }
-  return { fill: TILE_BG, hovers: true, isSource: false, spine: own }
+  if (dragging && d !== null && d.id === card.id) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: true, spine: null }
+  if (dragging) return { fill: TILE_BG, border: TILE_BG, hovers: false, isSource: false, spine: own }
+  if (card.id === p.pendingId) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: false, spine: own }
+  if (card.id === p.selected) return { fill: TILE_BG, border: TILE_SELECTED_BORDER, hovers: false, isSource: false, spine: own }
+  return { fill: TILE_BG, border: TILE_BG, hovers: true, isSource: false, spine: own }
 }
 
 /** A text style from a status colour: `claude`, `warning` and `error` are colours, `dim` is dimmed, `default` is plain. */
@@ -457,11 +468,11 @@ function drawTile(p: Parts, panel: LanePanel, t: CardTile, card: BoardCard): Ren
       width={r.w}
       height={r.h}
       borderStyle="round"
-      borderColor={o.fill}
+      borderColor={o.border}
       borderDimColor={false}
-      backgroundColor={o.fill}
+      {...only('backgroundColor', o.fill)}
       overflow="hidden"
-      {...(o.hovers ? { hover: { borderColor: TILE_HOVER_BG, backgroundColor: TILE_HOVER_BG } } : {})}
+      {...(o.hovers ? { hover: { borderColor: TILE_HOVER_BORDER } } : {})}
     >
       <Box position="absolute" top={0} left={0} width={r.w} height={r.h} flexDirection="column" paddingLeft={PADDING} paddingRight={PADDING} overflow="hidden">
         <Box height={1} flexDirection="row">
@@ -546,10 +557,10 @@ function drawMenu(p: Parts, t: CardTile): RenderElement | null {
           flexDirection="row"
           paddingLeft={MENU_INSET}
           paddingRight={MENU_INSET}
-          {...(row.action !== null ? { hover: { backgroundColor: TILE_HOVER_BG } } : {})}
+          {...(row.action !== null ? { hover: { backgroundColor: MENU_HOVER_BG } } : {})}
         >
           <Box height={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <Text wrap="truncate-end" {...styleOfColour(row.tone, false)}>
+            <Text wrap="truncate-end" {...styleOfColour(row.tone, false)} {...(row.action !== null ? { hover: { dimColor: false } } : {})}>
               {row.label}
             </Text>
           </Box>
