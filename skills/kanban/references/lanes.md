@@ -2,19 +2,17 @@
 
 What each lane role is for, who may move cards in, and what Claude does when a card lands there. Behaviour hangs on the role (format.md section 6), so a project can rename a label without changing it. "Owner" is the `owner` in `board.md`; the labels below are the defaults.
 
-Rows marked `default` were chosen on 2026-10-08 to get to testing; change one by editing this file. Rows marked `chosen` are the owner's own choice.
-
 ## Lane table
 
-| Label | Role | Who moves cards in | What Claude does on a drop | Status |
-|---|---|---|---|---|
-| Needs You | `needs-you` | Claude only | An owner drop is refused (pane: a message, nothing written; chat: the Claude-only refusal). Claude moves cards here itself, only for an issue or for approval: `PLAN READY`, `QUESTION`, `FAILED` or `GATE` (a held action). One lane for everything that waits on the owner; the flag tells them apart. A drag out to Auto of a card flagged `GATE` approves the one action named in `flag` and nothing else (Gate approval, below). | drag out: chosen; drop in: default |
-| Pending | `intake` | either | Nothing. No turn starts. New cards and Claude's own suggestions (`labels: [claude]`) land here. A card being worked and dragged here stops (Pausing, below). | chosen |
-| Plan | `plan` | owner | A planning agent returns the plan; the manager reviews it and writes `## Plan` into the card (child cards if it runs past about 8 steps or spans repos), sets `PLAN READY`, moves the card to Needs You, stops. | chosen |
-| Auto | `auto` | owner, or Claude resuming | Run the card end to end: plan if none (a planning agent), branch, workers, review and commit each step, gate check, merge, then Done. | chosen |
-| Backlog | `backlog` | either | Nothing. No turn starts, and "what's next" does not list it. Ideas we may or may not do. A card being worked and dragged here stops (Pausing, below). | chosen |
-| Done | `done` | Claude, or owner | On an owner drop: Log it, report any uncommitted or unmerged work, edit nothing else. | default |
-| Discarded | `scrapped` | owner, or Claude when asked | Stop, Log it, reply with the branch and PR to close or delete. Delete nothing. | default |
+| Label | Role | Who moves cards in | What Claude does on a drop |
+|---|---|---|---|
+| Needs You | `needs-you` | Claude only | An owner drop is refused (pane: a message, nothing written; chat: the Claude-only refusal). Claude moves cards here itself, only for an issue or for approval: `PLAN READY`, `QUESTION`, `FAILED` or `GATE` (a held action). One lane for everything that waits on the owner; the flag tells them apart. A drag out to Auto of a card flagged `GATE` approves the one action named in `flag` and nothing else (Gate approval, below). |
+| Pending | `intake` | either | Nothing. No turn starts. New cards and Claude's own suggestions (`labels: [claude]`) land here. A card being worked and dragged here stops (Pausing, below). |
+| Plan | `plan` | owner | A planning agent returns the plan; the manager reviews it and writes `## Plan` into the card (child cards if it runs past about 8 steps or spans repos), sets `PLAN READY`, moves the card to Needs You, stops. |
+| Auto | `auto` | owner, or Claude resuming | Run the card end to end: plan if none (a planning agent), branch, workers, review and commit each step, gate check, merge, then Done. |
+| Backlog | `backlog` | either | Nothing. No turn starts, and "what's next" does not list it. Ideas we may or may not do. A card being worked and dragged here stops (Pausing, below). |
+| Done | `done` | Claude, or owner | On an owner drop: Log it, report any uncommitted or unmerged work, edit nothing else. |
+| Discarded | `scrapped` | owner, or Claude when asked | Stop, Log it, reply with the branch and PR to close or delete. Delete nothing. |
 
 Only `needs-you` is enforced (code `claude-only`, format.md section 12). Everything else in "Who moves cards in" is convention. Claude moves cards only INTO lanes with role `needs-you`, `auto`, `done` or `scrapped`, never into an `intake`, `plan` or `backlog` lane; it moves a card into `scrapped` only when the person asks or a lane action says so. A finished plan goes Plan -> Needs You with `PLAN READY`; after the person approves it (a drag to Auto) Claude carries the card to Done and returns it to Needs You only for an issue: a `QUESTION:`, a `FAILED` or a `GATE:` held step.
 
@@ -108,14 +106,6 @@ A drag out of Needs You approves the actions the flag names and nothing else.
 | `QUESTION: <question>` | Needs You | Claude needs an answer before it can go on. |
 | `FAILED` | Needs You | A step failed its fourth attempt (Auto step 5). |
 | `GATE: <reason>` | Needs You | The named action is held, e.g. `GATE: deploy`, `GATE: merge touches package.json`. |
-
-## Open questions
-
-- Should a card stop for review before the merge, and if so as a PR when there is a GitHub remote and as a diff summary when there is none?
-- Does a gate approval on a parent card cover its child cards, or does each child gate on its own?
-- Should gate path words match inside longer names (`auth` in `author.md`) and ignore case?
-- What else counts as destructive besides deleting data, dropping tables, force-pushing and removing files outside the repo?
-- Where should a card wait when `gh pr merge` is refused for required checks or review?
 
 ## Roles older boards may list
 
