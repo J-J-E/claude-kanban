@@ -137,18 +137,43 @@ export function planView(facts: CardFacts): PlanView | null {
 // ---------------------------------------------------------------- the Log
 
 /** One Log line. `isClaude` is true when Claude wrote it (default colour); the others are `dimColor`. */
-export type LogRow = { stamp: string; who: string; text: string; line: string; isClaude: boolean }
+export type LogRow = { stamp: string; who: string; text: string; line: string; isClaude: boolean; commands: string[] }
+
+/**
+ * Each stretch of `text` between backticks, exactly as written (nothing trimmed). A span opened by two backticks closes at
+ * the next two, so a command holding one backtick can be written. An unclosed backtick gives no span; an empty span is left out.
+ */
+export function codeSpans(text: string): string[] {
+  const spans: string[] = []
+  let i = 0
+  while (i < text.length) {
+    if (text[i] !== '`') {
+      i++
+      continue
+    }
+    const mark = text.startsWith('``', i) ? '``' : '`'
+    const end = text.indexOf(mark, i + mark.length)
+    if (end < 0) {
+      i += mark.length
+      continue
+    }
+    if (end > i + mark.length) spans.push(text.slice(i + mark.length, end))
+    i = end + mark.length
+  }
+  return spans
+}
 
 /**
  * The Log as the open card draws it: `lines` oldest first, only the newest 6 unless `isOpen`; `hidden` is how many older
- * lines are behind the link; `showAll` is the link's words, null when nothing is hidden (or the log is already open).
+ * lines are behind the link; `showAll` is the link's words, null when nothing is hidden (or the log is already open);
+ * `all` is every line (the hidden ones too) as `line`, oldest first, one per row, nothing trimmed.
  */
-export type LogView = { lines: LogRow[]; total: number; hidden: number; showAll: string | null }
+export type LogView = { lines: LogRow[]; total: number; hidden: number; showAll: string | null; all: string }
 
 export function logView(log: readonly { date: string; time: string; who: string; text: string }[], isOpen: boolean): LogView {
   const rows: LogRow[] = log.map((l) => {
     const stamp = l.date + ' ' + l.time
-    return { stamp, who: l.who, text: l.text, line: stamp + ' ' + l.who + ': ' + l.text, isClaude: l.who === 'Claude' }
+    return { stamp, who: l.who, text: l.text, line: stamp + ' ' + l.who + ': ' + l.text, isClaude: l.who === 'Claude', commands: codeSpans(l.text) }
   })
   const hidden = isOpen ? 0 : Math.max(0, rows.length - LOG_SHOWN)
   return {
@@ -156,6 +181,7 @@ export function logView(log: readonly { date: string; time: string; who: string;
     total: rows.length,
     hidden,
     showAll: hidden > 0 ? SHOW_WHOLE_LOG : null,
+    all: rows.map((r) => r.line).join('\n'),
   }
 }
 

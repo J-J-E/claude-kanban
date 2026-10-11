@@ -387,7 +387,23 @@ describe('log', () => {
 
   test('an empty log', () => {
     const l = logView([], false)
-    expect(l).toEqual({ lines: [], total: 0, hidden: 0, showAll: null })
+    expect(l).toEqual({ lines: [], total: 0, hidden: 0, showAll: null, all: '' })
+  })
+
+  test('all: every line with its date, time and name, oldest first, also the ones hidden', () => {
+    const l = logView(entries(9), false)
+    expect(l.lines).toHaveLength(6)
+    const rows = l.all.split('\n')
+    expect(rows).toHaveLength(9)
+    expect(rows[0]).toBe('2026-10-08 10:00 John: line 1')
+    expect(rows[8]).toBe('2026-10-08 10:08 John: line 9')
+    expect(logView(entries(9), true).all).toBe(l.all)
+  })
+
+  test('all: a line with backticks, double spaces and a trailing space is kept byte for byte', () => {
+    const text = 'run `a  b`  now '
+    const l = logView([{ date: '2026-10-08', time: '10:00', who: 'John', text }], false)
+    expect(l.all).toBe('2026-10-08 10:00 John: ' + text)
   })
 
   test('from a card file: the cut and the open flag reach the view', () => {
@@ -397,6 +413,40 @@ describe('log', () => {
     expect(cut.hidden).toBe(2)
     expect(cut.lines[5].isClaude).toBe(true)
     expect(view(file({ log: many }), { isLogOpen: true }).log.lines).toHaveLength(8)
+  })
+
+  describe('commands in a line', () => {
+    const row = (text: string) => logView([{ date: '2026-10-08', time: '10:00', who: 'Claude', text }], false).lines[0]
+
+    test('a command with quotes, paths, semicolons, brackets and colons comes out byte for byte', () => {
+      const cmd = "Set-Location 'C:\\work\\my-repo'; $r = [IO.Path]::Combine('A:\\x', \"y\"); git status"
+      const r = row('the command, for PowerShell; it ends the run and removes nothing: `' + cmd + '`')
+      expect(r.commands).toEqual([cmd])
+    })
+
+    test('a line with no backticks has none', () => {
+      expect(row('nothing to copy here').commands).toEqual([])
+    })
+
+    test('two spans give two', () => {
+      expect(row('first `one` then `two`').commands).toEqual(['one', 'two'])
+    })
+
+    test('a double-backtick span holding one backtick is kept whole', () => {
+      expect(row('run ``a`b`` now').commands).toEqual(['a`b'])
+    })
+
+    test('an unclosed backtick gives none', () => {
+      expect(row('broken `command').commands).toEqual([])
+    })
+
+    test('two spaces in a row are kept, and nothing is trimmed', () => {
+      expect(row('x ` a  b `').commands).toEqual([' a  b '])
+    })
+
+    test('an empty span is left out', () => {
+      expect(row('empty `` and `ok`').commands).toEqual(['ok'])
+    })
   })
 })
 

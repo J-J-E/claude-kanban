@@ -122,6 +122,8 @@ export function deleteAsk(id: string): string {
 
 export const MENU_OPEN = 'Open card'
 export const MENU_COPY = 'Copy ID'
+export const LOG_COPY_ALL = 'Copy entire log'
+export const LOG_COPY_COMMAND = 'Copy command'
 export const MENU_DELETE = 'Delete card…'
 export const MENU_DELETE_IT = 'Delete it'
 export const MENU_KEEP = 'Keep it'

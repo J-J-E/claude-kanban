@@ -4,6 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { KanbanSnapshot } from '../../types'
 import type { CardView as CardModel, StatusBox } from '../lib/cardview.ts'
+import { LOG_COPY_ALL, LOG_COPY_COMMAND } from '../lib/strings.ts'
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -27,6 +28,8 @@ export type CardActions = {
   /** Opens the previous (-1) or next (1) card in the order the board shows them. */
   step: (dir: -1 | 1) => void
   move: (id: string, from: string, to: string) => void
+  /** A flag box button: the same move, then the card closes and the lanes show. A refused press leaves the card open. */
+  approve: (id: string, from: string, to: string) => void
   set: (id: string, field: 'model' | 'thinking', choice: string) => void
   /** The Type list picked a type name: only held, nothing is written or asked. Picking the card's own type puts the pick away. */
   pickType: (name: string) => void
@@ -40,6 +43,12 @@ export type CardActions = {
   confirmedDelete: (id: string) => void
   setConfirm: (isAsking: boolean) => void
   copy: (id: string) => void
+  /** A press on a Log line's date: puts the whole line (date, time, name, words) on the clipboard. */
+  copyLine: (text: string) => void
+  /** `Copy entire log`: puts every Log line, the hidden ones too, on the clipboard. */
+  copyLog: (text: string) => void
+  /** A Log line's `Copy command`: puts one stretch the line had between backticks on the clipboard. */
+  copyCommand: (text: string) => void
   /** Opens (true) or closes (false) the Rename field; opening starts it with the card's title. */
   setRenaming: (isOpen: boolean) => void
   typeRename: (value: string) => void
@@ -245,7 +254,7 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
                             key={`card-flag-${b.key}`}
                             label={b.label}
                             variant={b.key}
-                            onPress={() => act.move(view.id, view.lane, b.to)}
+                            onPress={() => act.approve(view.id, view.lane, b.to)}
                           />
                         ))}
                       </Box>
@@ -440,7 +449,22 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
               </Box>
             )}
             <Box key="card-log" marginTop={2} flexDirection="column">
-              <Text bold dimColor>Log</Text>
+              <Box key="card-log-head" flexDirection="row" columnGap={2}>
+                <Text bold dimColor>Log</Text>
+                {view.log.total > 0 && (
+                  <Box key="card-log-copy-all-box" flexShrink={0}>
+                    <Button
+                      key="card-log-copy-all"
+                      label={LOG_COPY_ALL}
+                      plain
+                      dimColor
+                      onPress={() => {
+                        act.copyLog(view.log.all)
+                      }}
+                    />
+                  </Box>
+                )}
+              </Box>
               {!snap.isReadOnly && (
                 <Box key="card-comment-row">
                   <Input
@@ -460,10 +484,37 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
               {[...view.log.lines].reverse().map((l, n) => (
                 <Box key={`card-log-line-${n}`} flexDirection="row" alignItems="flex-start" columnGap={1}>
                   <Box key={`card-log-stamp-${n}`} width={15} flexShrink={0}>
-                    <Text dimColor>{l.stamp}</Text>
+                    <Button
+                      key={`card-log-copy-stamp-${n}`}
+                      label={l.stamp}
+                      plain
+                      dimColor
+                      onPress={() => {
+                        act.copyLine(l.line)
+                      }}
+                    />
                   </Box>
-                  <Box key={`card-log-text-${n}`} flexShrink={1} minWidth={0}>
-                    <Text wrap="wrap">{`${l.who}: ${l.text}`}</Text>
+                  <Box key={`card-log-words-${n}`} flexDirection="column" flexShrink={1} minWidth={0}>
+                    <Box key={`card-log-text-${n}`} flexShrink={1} minWidth={0}>
+                      <Text wrap="wrap">{`${l.who}: ${l.text}`}</Text>
+                    </Box>
+                    {l.commands.length > 0 && (
+                      <Box key={`card-log-tools-${n}`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+                        {l.commands.map((c, k) => (
+                          <Box key={`card-log-cmd-box-${n}-${k}`} flexShrink={0}>
+                            <Button
+                              key={`card-log-cmd-${n}-${k}`}
+                              label={l.commands.length > 1 ? `${LOG_COPY_COMMAND} ${k + 1}` : LOG_COPY_COMMAND}
+                              plain
+                              dimColor
+                              onPress={() => {
+                                act.copyCommand(c)
+                              }}
+                            />
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
                   </Box>
                 </Box>
               ))}

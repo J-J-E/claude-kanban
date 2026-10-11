@@ -892,6 +892,9 @@ test('Approve and run, pressed once on a card in Needs You, leaves nothing on th
   expect((await ui.find({ key: 'card-flag-primary' }))?.props.label).toBe('Approve and run')
 
   await ui.press({ key: 'card-flag-primary' })
+  // The press closed the card; opened again it is in Auto.
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  await ui.post({ type: 'select', id: 'KB-0001' }, { in: 'board' })
   expect((await ui.find({ key: 'card-header' }))?.text).toBe('KB-0001  in Auto')
   const buttons = (await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => b.props.label)
   expect(buttons).not.toContain('Approve and run')

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+What changed:
+
+- The open card's Log can be copied: press a Log line's date to copy the whole line (date, time, name and words; the words stay plain text that wraps and are not pressable); a line that holds text between backticks has a `Copy command` button under it for each such stretch (it copies only that text, exactly as written); and `Copy entire log`, beside the `Log` heading, copies every line, also the hidden ones, oldest first. They show `Copied the Log line.`, `Copied the command.` or `Copied the entire log.`, and also work when the board cannot be read. Nothing is written and nothing is sent to Claude.
+- Pressing `Approve and run`, `Approve and continue` or `Retry in Auto` in the open card now closes the card and shows the lanes, as `◂ Board` does. The move, the Log line, the toast and the message to Claude are the same as before. A refused press leaves the card open; the `Lane` list and `Comment` also keep it open.
+
 ## 0.2.0
 
 What changed:

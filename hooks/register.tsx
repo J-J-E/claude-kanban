@@ -1858,6 +1858,18 @@ async function copyCardId($: EngineInterface, surface: RenderSurface, id: string
   $.ui.toast(done)
 }
 
+/** A Log line, the entire Log or a command on the clipboard, exactly as handed in: the text is never cleaned, a command would break. */
+async function copyText($: EngineInterface, surface: RenderSurface, text: string, what: string): Promise<void> {
+  let done: string
+  try {
+    const copied = await $.ui.copy({ text, surface })
+    done = copied.isCopied ? `Copied the ${what}.` : `Could not copy the ${what}: ${cleanText(copied.reason, 80)}.`
+  } catch (err) {
+    done = `Could not copy the ${what}: ${describe(err)}`
+  }
+  $.ui.toast(done)
+}
+
 /** What the toast says once Claude was asked to delete a card: it starts at once, or when it is free. */
 function deleteToast(id: string, isBusy: boolean): string {
   return isBusy ? `Claude will delete ${id} when it finishes what it is doing.` : `Claude is deleting ${id}.`
@@ -2228,6 +2240,17 @@ function moveFromView($: EngineInterface, ctx: Ctx, id: string, from: string, to
   void performMove($, ctx, { type: 'move', id, from, to }).catch((err: unknown) => noticeError($, err))
 }
 
+/** A flag box button (Approve and run, Approve and continue, Retry in Auto): the same move, then the open card closes as `◂ Board` does, but only if the card is now in the lane and is still the open one. A refused press leaves it open. */
+function approveFromView($: EngineInterface, ctx: Ctx, id: string, from: string, to: string): void {
+  void (async () => {
+    await performMove($, ctx, { type: 'move', id, from, to })
+    const snap = await read($, snapshotA)
+    const found = snap?.cards.find((c) => c.id === id)
+    if (snap === null || found === undefined || laneOfCard(snap, found)?.label !== to) return
+    if ((await read($, selectedA)) === id) await pickSelected($, null)
+  })().catch((err: unknown) => noticeError($, err))
+}
+
 /** A pick in the open card's Model or Thinking Select: `Auto` puts the field back, any other word is set. */
 function setFromView($: EngineInterface, ctx: Ctx, id: string, field: CardField, choice: string): void {
   void performSet($, ctx, { type: 'set', id, field, value: choice === AUTO ? null : field === 'thinking' ? (thinkingFromChoice(choice) ?? choice) : choice }).catch((err: unknown) => noticeError($, err))
@@ -2585,6 +2608,7 @@ export const register: Register = (on) => {
                   void stepCard($, dir).catch((err: unknown) => noticeError($, err))
                 },
                 move: (id, from, to) => moveFromView($, ctx, id, from, to),
+                approve: (id, from, to) => approveFromView($, ctx, id, from, to),
                 set: (id, field, choice) => setFromView($, ctx, id, field, choice),
                 pickType: (name) => {
                   void pickType($, name).catch(() => {})
@@ -2612,6 +2636,15 @@ export const register: Register = (on) => {
                 },
                 copy: (id) => {
                   void copyCardId($, e.surface, id).catch((err: unknown) => noticeError($, err))
+                },
+                copyLine: (text) => {
+                  void copyText($, e.surface, text, 'Log line').catch((err: unknown) => noticeError($, err))
+                },
+                copyLog: (text) => {
+                  void copyText($, e.surface, text, 'entire log').catch((err: unknown) => noticeError($, err))
+                },
+                copyCommand: (text) => {
+                  void copyText($, e.surface, text, 'command').catch((err: unknown) => noticeError($, err))
                 },
                 setRenaming: (isOpen) => {
                   void setRenaming($, view.id, isOpen).catch((err: unknown) => noticeError($, err))

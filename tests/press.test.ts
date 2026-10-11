@@ -45,6 +45,9 @@ test('Approve and continue: one press moves the card and submits the prompt, and
     'Kanban: John moved KB-0001 "Fix footer" from Needs You to Auto. Do the auto lane action from the kanban skill.',
   ])
   expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
+  // The same press closed the card: the lanes are drawn.
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect(await ui.find({ type: 'Client', key: 'board' })).toBeDefined()
 })
 
 test('the other buttons of the open card also act on one press', async ($, on) => {
@@ -63,7 +66,8 @@ test('the other buttons of the open card also act on one press', async ($, on) =
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
   await ui.press({ key: 'card-flag-primary' })
   expect(w.text(FOOTER)).toContain('\nstatus: Auto\n')
-  await ui.press({ key: 'card-back' })
+  // The press closed the card, so no back button is left to press.
+  expect(await ui.find({ key: 'card-back' })).toBeUndefined()
   expect(await ui.find({ key: 'card' })).toBeUndefined()
 })
 

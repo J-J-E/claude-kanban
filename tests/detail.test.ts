@@ -144,7 +144,7 @@ test('the open card has the title bar, the title, Move to, the plan, the text, t
   expect(await ui.find({ key: 'card-comment-send' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Input' })).length).toBe(1)
   expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => b.props.label)).not.toContain('Comment')
-  expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => b.props.label)).toEqual(['◂ Board', ...(await ui.find({ key: 'card-prev' }) ? ['◂ Prev'] : []), ...(await ui.find({ key: 'card-next' }) ? ['Next ▸'] : []), 'Rename', 'Copy ID', 'Delete card…'])
+  expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-') && !String(b.key).startsWith('card-log-copy-') && !String(b.key).startsWith('card-log-cmd-')).map((b) => b.props.label)).toEqual(['◂ Board', ...(await ui.find({ key: 'card-prev' }) ? ['◂ Prev'] : []), ...(await ui.find({ key: 'card-next' }) ? ['Next ▸'] : []), 'Rename', 'Copy ID', 'Delete card…'])
   expect((await ui.find({ key: 'card-copy' }))?.props.label).toBe('Copy ID')
   expect((await ui.find({ key: 'card-delete' }))?.props.label).toBe('Delete card\u2026')
 
@@ -223,10 +223,22 @@ test('a plan that is ready: Approve and run, and no Do it step by step', async (
     'Kanban: John moved KB-0001 "Fix footer" from Needs You to Auto. Do the auto lane action from the kanban skill.',
   ])
   expect(w.toasts).toEqual(['KB-0001 moved to Auto. Claude is starting.'])
+  // His move answered the plan and the one press closed the card: the lanes are drawn, nothing is selected. The file keeps its
+  // flag: only Claude clears it.
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect((await boardProps(ui)).selected).toBeNull()
+  expect(w.text(FOOTER)).toContain('\nflag: PLAN READY\n')
+  expect(w.writes).toEqual([FOOTER])
+  expect(w.sent).toHaveLength(1)
+  expect(w.toasts).toHaveLength(1)
+  // Of the two plans only the one still in Needs You waits on him, and the lanes draw the answered card with no flag.
+  expect((await headerState(ui)).waiting).toEqual({ total: 1, plan: 1, question: 0, failed: 0, held: 0 })
+  expect(await tileOf(ui, 'KB-0001')).toMatchObject({ flag: '', isQueued: true })
+  expect(await tileOf(ui, 'KB-0002')).toMatchObject({ flag: 'PLAN READY' })
+
+  // Opened again, the card shows the waiting box and no buttons, and the Lane list reads Auto.
+  await select(ui, 'KB-0001')
   expect(await header(ui)).toBe('KB-0001  in Auto')
-  // His move answered the plan: the view stays on the card, the waiting box and both buttons are gone at once (so a second press
-  // cannot happen), and the box says the move is waiting to start. The file keeps its flag: only Claude clears it.
-  expect(await ui.find({ key: 'card' })).toBeDefined()
   expect(await ui.find({ key: 'card-flag' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
@@ -237,16 +249,8 @@ test('a plan that is ready: Approve and run, and no Do it step by step', async (
   expect(await boxText(ui)).toContain(QUEUED_IDLE)
   expect(await boxText(ui)).toContain('You can still change your mind with the Lane menu.')
   expect((await ui.find({ key: 'card-move' }))?.props.value).toBe('Auto')
-  expect(w.text(FOOTER)).toContain('\nflag: PLAN READY\n')
-  expect(w.writes).toEqual([FOOTER])
-  expect(w.sent).toHaveLength(1)
-  expect(w.toasts).toHaveLength(1)
-  // Of the two plans only the one still in Needs You waits on him, and the lanes draw the answered card with no flag.
-  expect((await headerState(ui)).waiting).toEqual({ total: 1, plan: 1, question: 0, failed: 0, held: 0 })
-  await ui.press({ key: 'card-back' })
-  expect(await tileOf(ui, 'KB-0001')).toMatchObject({ flag: '', isQueued: true })
-  expect(await tileOf(ui, 'KB-0002')).toMatchObject({ flag: 'PLAN READY' })
 
+  await ui.press({ key: 'card-back' })
   await select(ui, 'KB-0002')
   expect(await ui.find({ key: 'card-flag-primary' })).toBeDefined()
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
@@ -265,6 +269,15 @@ test('check 4: Approve and run while Claude is busy: the box says the card waits
   expect((await headerState(ui)).waiting.total).toBe(1)
   expect(await boxText(ui)).toContain('Plan ready: 2 steps.')
   await ui.press({ key: 'card-flag-primary' })
+  // The press closed the card; the tile and the lanes say it, and the card, opened again, has the waiting box.
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect(w.toasts).toEqual(['KB-0001 moved to Auto. Claude will start when it finishes what it is doing.'])
+  expect(w.writes).toEqual([FOOTER])
+  expect(w.sent).toHaveLength(1)
+  const tile = await tileOf(ui, 'KB-0001')
+  expect(tile).toMatchObject({ flag: '', isQueued: true })
+  expect(tile?.status?.text).toBe('Waiting for Claude to start. It is busy with another turn.')
+  await select(ui, 'KB-0001')
 
   const text = await boxText(ui)
   expect(text).toContain(QUEUED_TITLE)
@@ -274,15 +287,10 @@ test('check 4: Approve and run while Claude is busy: the box says the card waits
   expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
   // The box has no buttons at all, and the header's orange count has dropped.
-  expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => b.props.label)).toEqual(['◂ Board', ...(await ui.find({ key: 'card-prev' }) ? ['◂ Prev'] : []), ...(await ui.find({ key: 'card-next' }) ? ['Next ▸'] : []), 'Rename', 'Copy ID', 'Delete card…'])
+  expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-') && !String(b.key).startsWith('card-log-copy-') && !String(b.key).startsWith('card-log-cmd-')).map((b) => b.props.label)).toEqual(['◂ Board', ...(await ui.find({ key: 'card-prev' }) ? ['◂ Prev'] : []), ...(await ui.find({ key: 'card-next' }) ? ['Next ▸'] : []), 'Rename', 'Copy ID', 'Delete card…'])
   const top = await headerState(ui)
   expect(top.waiting.total).toBe(0)
   expect(top.queued).toBe(1)
-  // The tile and the lane say it too.
-  await ui.press({ key: 'card-back' })
-  const tile = await tileOf(ui, 'KB-0001')
-  expect(tile).toMatchObject({ flag: '', isQueued: true })
-  expect(tile?.status?.text).toBe('Waiting for Claude to start. It is busy with another turn.')
 })
 
 test('a held step: Approve and continue, and no Park it', async ($, on) => {
@@ -302,20 +310,23 @@ test('a held step: Approve and continue, and no Park it', async ($, on) => {
   expect(w.text(FOOTER)).toContain('\nstatus: Auto\n')
   expect(w.toasts).toEqual(['KB-0001 approved. Claude is carrying on in Auto.'])
   expect(w.sent[0]?.text).toContain('moved KB-0001 "Fix footer" from Gated to Auto.')
-  // The pane did not write the flag (Claude reads it to know what was approved), yet the card no longer waits on him: no waiting
-  // box, no buttons, the waiting-to-start box, nothing of it counted in the header, no flag on the tile.
+  // The one press closed the card. The pane did not write the flag (Claude reads it to know what was approved), yet the card no
+  // longer waits on him: opened again it has no waiting box and no buttons, the waiting-to-start box, nothing of it counted in
+  // the header, no flag on the tile.
   expect(w.text(FOOTER)).toContain('\nflag: GATE: merge touches package.json\n')
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect(await tileOf(ui, 'KB-0001')).toMatchObject({ flag: '' })
+  expect((await headerState(ui)).waiting).toEqual({ total: 1, plan: 0, question: 0, failed: 0, held: 1 })
+  expect(w.sent).toHaveLength(1)
+  await select(ui, 'KB-0001')
   expect(await header(ui)).toBe('KB-0001  in Auto')
   expect(await ui.find({ key: 'card-flag' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '▲ Held: merge touches package.json. Claude will not go on until you approve.' })).toBeUndefined()
   expect(await boxText(ui)).toContain(QUEUED_TITLE)
-  expect((await headerState(ui)).waiting).toEqual({ total: 1, plan: 0, question: 0, failed: 0, held: 1 })
-  expect(w.sent).toHaveLength(1)
 
   await ui.press({ key: 'card-back' })
-  expect(await tileOf(ui, 'KB-0001')).toMatchObject({ flag: '' })
   await select(ui, 'KB-0002')
   expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
   expect((await ui.find({ key: 'card-flag-primary' }))?.props.label).toBe('Approve and continue')
@@ -335,10 +346,81 @@ test('a failed step: Retry in the auto lane, in the error colour', async ($, on)
   await ui.press({ key: 'card-flag-primary' })
   expect(w.text(FOOTER)).toContain('\nstatus: Auto\n')
   expect(w.toasts).toEqual(['KB-0001 moved to Auto. Claude is starting.'])
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect((await headerState(ui)).waiting.total).toBe(0)
+  await select(ui, 'KB-0001')
   expect(await ui.find({ key: 'card-flag' })).toBeUndefined()
   expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
   expect(await boxText(ui)).toContain(QUEUED_TITLE)
-  expect((await headerState(ui)).waiting.total).toBe(0)
+})
+
+const APPROVALS = [
+  { flag: 'PLAN READY', from: 'Needs You', label: 'Approve and run', toast: 'KB-0001 moved to Auto. Claude is starting.' },
+  { flag: 'GATE: merge touches package.json', from: 'Gated', label: 'Approve and continue', toast: 'KB-0001 approved. Claude is carrying on in Auto.' },
+  { flag: 'FAILED', from: 'Needs You', label: 'Retry in Auto', toast: 'KB-0001 moved to Auto. Claude is starting.' },
+]
+
+for (const c of APPROVALS) {
+  test(`one press on ${c.label} closes the card and shows the lanes, the move as before`, async ($, on) => {
+    const files = defaultFiles()
+    files[FOOTER] = longCard('KB-0001', 'Fix footer', c.from, c.flag)
+    const w = await boot($, on, files)
+    const ui = await mountPane($, 'desktop')
+    await select(ui, 'KB-0001')
+    expect((await ui.find({ key: 'card-flag-primary' }))?.props.label).toBe(c.label)
+    await ui.press({ key: 'card-flag-primary' })
+    expect(await ui.find({ key: 'card' })).toBeUndefined()
+    expect((await boardProps(ui)).selected).toBeNull()
+    expect(w.text(FOOTER)).toContain('\nstatus: Auto\n')
+    expect(w.text(FOOTER)).toContain(`\nflag: ${c.flag}\n`)
+    expect(w.text(FOOTER)).toMatch(new RegExp(`\\n- \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d John: moved ${c.from} -> Auto\\n$`))
+    expect(w.writes).toEqual([FOOTER])
+    expect(w.toasts).toEqual([c.toast])
+    expect(w.sent.map((s) => s.text)).toEqual([`Kanban: John moved KB-0001 "Fix footer" from ${c.from} to Auto. Do the auto lane action from the kanban skill.`])
+    expect(await tileOf(ui, 'KB-0001')).toMatchObject({ flag: '', isQueued: true })
+  })
+}
+
+test('what he folded and opened is kept when an approval closes the card', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = longCard('KB-0001', 'Fix footer', 'Needs You', 'PLAN READY')
+  await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  const view = { fold: { Done: { isOpen: true, flagged: 0 }, Auto: { isOpen: false, flagged: 0 } }, more: { Inbox: true } }
+  await ui.post({ type: 'view', ...view } as never, { in: 'board' })
+  expect((await boardProps(ui)).view).toEqual(view)
+  await select(ui, 'KB-0001')
+  await ui.press({ key: 'card-flag-primary' })
+  expect(await ui.find({ key: 'card' })).toBeUndefined()
+  expect((await boardProps(ui)).view).toEqual(view)
+})
+
+test('a refused press on an approval button keeps the card open: the toast says why and nothing is written or sent', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = longCard('KB-0001', 'Fix footer', 'Needs You', 'PLAN READY')
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  // The file changed since the pane read it and the clock has not run, so the move is refused as stale.
+  w.put(FOOTER, cardText('KB-0001', 'Fix footer', 'Pending', 1000))
+  await ui.press({ key: 'card-flag-primary' })
+  expect(w.toasts).toHaveLength(1)
+  expect(w.writes).toEqual([])
+  expect(w.sent).toHaveLength(0)
+  expect(await ui.find({ key: 'card' })).toBeDefined()
+})
+
+test('Lane: Auto on a card in Needs You moves it and leaves the card open', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = longCard('KB-0001', 'Fix footer', 'Needs You', 'PLAN READY')
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  await ui.select({ key: 'card-move', value: 'Auto' })
+  expect(w.text(FOOTER)).toContain('\nstatus: Auto\n')
+  expect(w.sent).toHaveLength(1)
+  expect(await ui.find({ key: 'card' })).toBeDefined()
+  expect(await header(ui)).toBe('KB-0001  in Auto')
 })
 
 test('Move to answers a flag as well: the box goes and the card does not wait on him', async ($, on) => {
@@ -637,10 +719,11 @@ test('the log shows the newest 6 lines until Show the whole log is pressed; ever
   ])
   expect((await ui.find({ key: 'card-log-all' }))?.props.label).toBe('Show the whole log')
   // One tone for every line: the words are the default colour whoever wrote them, only the time stamp is dim.
-  expect((await ui.find({ type: 'Text', text: 'Claude: an answer for John' }))?.props.dimColor).not.toBe(true)
-  expect((await ui.find({ type: 'Text', text: 'John: note 10' }))?.props.dimColor).not.toBe(true)
-  expect((await ui.find({ type: 'Text', text: '2026-10-08 10:10' }))?.props.dimColor).toBe(true)
-  expect((await ui.find({ type: 'Text', text: '2026-10-08 11:00' }))?.props.dimColor).toBe(true)
+  const words = (await ui.findAll({ type: 'Text' })).filter((t) => /^(John|Claude): /.test(t.text))
+  expect(words.length).toBeGreaterThanOrEqual(2)
+  for (const t of words) expect(t.props.dimColor).not.toBe(true)
+  expect((await ui.find({ key: 'card-log-copy-stamp-0' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ key: 'card-log-copy-stamp-1' }))?.props.dimColor).toBe(true)
   await ui.press({ key: 'card-log-all' })
   const all = await logLines(ui)
   expect(all).toHaveLength(13)
@@ -685,6 +768,185 @@ test('Copy ID puts the ID on the clipboard of the surface the pane is on', async
   expect(w.toasts[1]).toBe('Could not copy KB-0002: no-clipboard.')
   expect(w.writes).toEqual([])
   expect(w.sent).toEqual([])
+})
+
+// A command with single and double quotes, a backslash path, a semicolon and two spaces in a row, between backticks in the newest line.
+const LOG_COMMAND = `Stop-Process -Id 42; Get-Item 'C:\\Temp\\a b.txt'  -Filter "x y"`
+const LOG_WORDS = 'ran the command, for PowerShell: `' + LOG_COMMAND + '`  then check the result.'
+
+/** A card with eight notes, then the newest line that holds the command. */
+function commandCard(): string {
+  return longCard('KB-0001', 'Fix footer', 'Inbox', '', 8) + `- 2026-10-08 11:00 Claude: ${LOG_WORDS}\n`
+}
+
+function clipboard(on: Parameters<typeof stubs>[0], answer: () => string | undefined) {
+  const copies: { text: string; surface: string | undefined }[] = []
+  on('ui.copy', ($, e) => {
+    copies.push({ text: e.text, surface: e.surface })
+    const reason = answer()
+    return { value: reason === undefined ? { isCopied: true as const } : { isCopied: false as const, reason: reason as 'no-clipboard' } }
+  })
+  return copies
+}
+
+const LOG_LINE = `2026-10-08 11:00 Claude: ${LOG_WORDS}`
+
+test('pressing the date of a Log line copies the whole line, byte for byte, and writes and sends nothing', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect((await ui.find({ key: 'card-log-copy-stamp-0' }))?.props.label).toBe('2026-10-08 11:00')
+  await ui.press({ key: 'card-log-copy-stamp-0' })
+  expect(copies).toEqual([{ text: LOG_LINE, surface: 'desktop' }])
+  expect(w.toasts).toEqual(['Copied the Log line.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('the words of a Log line are a wrapping Text, not a Button', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await ui.find({ key: 'card-log-copy-0' })).toBeUndefined()
+  const words = await ui.find({ key: 'card-log-text-0' })
+  expect(words?.text).toBe(`Claude: ${LOG_WORDS}`)
+  const text = (await ui.findAll({ type: 'Text' })).find((t) => t.text === `Claude: ${LOG_WORDS}`)
+  expect(text?.props.wrap).toBe('wrap')
+  expect((await ui.findAll({ type: 'Button' })).find((b) => String(b.props.label).includes(LOG_WORDS))).toBeUndefined()
+})
+
+/** The nine lines of the card with eight notes and a command line, oldest first, as the file holds them (the card's own line first). */
+const ALL_NINE = [
+  '2026-10-08 09:10 John: created in Inbox',
+  ...Array.from({ length: 8 }, (_, i) => `2026-10-08 10:0${i} John: note ${i}`),
+  LOG_LINE,
+]
+
+test('Copy entire log copies every line, also the hidden ones, oldest first, and writes and sends nothing', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await ui.find({ key: 'card-log-all' })).toBeDefined()
+  expect(await logLines(ui)).toHaveLength(6)
+  expect((await ui.find({ key: 'card-log-copy-all' }))?.props.label).toBe('Copy entire log')
+  await ui.press({ key: 'card-log-copy-all' })
+  expect(copies).toEqual([{ text: ALL_NINE.join('\n'), surface: 'desktop' }])
+  expect(w.toasts).toEqual(['Copied the entire log.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('when the surface cannot copy, Copy entire log says so', async ($, on) => {
+  clipboard(on, () => 'no-clipboard')
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  await ui.press({ key: 'card-log-copy-all' })
+  expect(w.toasts).toEqual(['Could not copy the entire log: no-clipboard.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('a card with no Log lines has no Copy entire log', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = longCard('KB-0001', 'Fix footer', 'Inbox').replace(/^- 2026.*\n/gm, '')
+  await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await logLines(ui)).toEqual([])
+  expect(await ui.find({ key: 'card-log-head' })).toBeDefined()
+  expect(await ui.find({ key: 'card-log-copy-all' })).toBeUndefined()
+})
+
+test('on a board that cannot be read the date and Copy entire log still copy', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('workers: 1', 'workers: 9'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(await ui.find({ key: 'error' })).toBeDefined()
+  await ui.press({ key: 'card-log-copy-stamp-0' })
+  await ui.press({ key: 'card-log-copy-all' })
+  expect(copies.map((c) => c.text)).toEqual([LOG_LINE, ALL_NINE.join('\n')])
+  expect(w.toasts).toEqual(['Copied the Log line.', 'Copied the entire log.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('Copy command copies only the text between the backticks, byte for byte', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await ui.find({ key: 'card-log-cmd-0-1' })).toBeUndefined()
+  await ui.press({ key: 'card-log-cmd-0-0' })
+  expect(copies).toEqual([{ text: LOG_COMMAND, surface: 'desktop' }])
+  expect(w.toasts).toEqual(['Copied the command.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('when the surface cannot copy, the Log line and the command say so and still write and send nothing', async ($, on) => {  const copies = clipboard(on, () => 'no-clipboard')
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  await ui.press({ key: 'card-log-copy-stamp-0' })
+  await ui.press({ key: 'card-log-cmd-0-0' })
+  expect(copies.map((c) => c.text)).toEqual([LOG_LINE, LOG_COMMAND])
+  expect(w.toasts).toEqual(['Could not copy the Log line: no-clipboard.', 'Could not copy the command: no-clipboard.'])
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('a Log line without backticks has no Copy command; Show the whole log gives older lines their pressable date', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await ui.find({ key: 'card-log-copy-stamp-1' })).toBeDefined()
+  expect(await ui.find({ key: 'card-log-cmd-1-0' })).toBeUndefined()
+  expect(await ui.find({ key: 'card-log-copy-stamp-8' })).toBeUndefined()
+  await ui.press({ key: 'card-log-all' })
+  await ui.press({ key: 'card-log-copy-stamp-8' })
+  expect(copies).toEqual([{ text: '2026-10-08 10:00 John: note 0', surface: 'desktop' }])
+  expect(w.toasts).toEqual(['Copied the Log line.'])
+  for (let n = 1; n < 10; n++) expect(await ui.find({ key: `card-log-cmd-${n}-0` })).toBeUndefined()
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('at a narrow pane the Log buttons are drawn and found', async ($, on) => {
+  const copies = clipboard(on, () => undefined)
+  const files = defaultFiles()
+  files[FOOTER] = commandCard()
+  await boot($, on, files)
+  const ui = await mountPane($, 'desktop', 40)
+  await select(ui, 'KB-0001')
+  for (const key of ['card-log-copy-all', 'card-log-copy-stamp-0']) expect(await ui.find({ key })).toBeDefined()
+  await ui.press({ key: 'card-log-copy-all' })
+  await ui.press({ key: 'card-log-copy-stamp-0' })
+  await ui.press({ key: 'card-log-cmd-0-0' })
+  expect(copies.map((c) => c.text)).toEqual([ALL_NINE.join('\n'), LOG_LINE, LOG_COMMAND])
 })
 
 test('Delete card… asks first: Keep it does nothing, Delete it asks Claude', async ($, on) => {
@@ -848,12 +1110,10 @@ test('a long Log line and a long flag reason wrap over as many rows as they need
   const ui = await mountPane($, 'desktop')
   await select(ui, 'KB-0001')
   const logLine = (await ui.findAll({ type: 'Text' })).find((t) => t.text.includes('a very long note'))
+  expect(logLine?.text).toBe('John: ' + 'a very long note '.repeat(12).trim())
   expect(logLine?.props.wrap).toBe('wrap')
   const flag = (await ui.findAll({ type: 'Text' })).find((t) => t.text.includes('which of the two footers'))
   expect(flag?.props.wrap).toBe('wrap')
-  for (const t of await ui.findAll({ type: 'Text' })) {
-    if (/^2026-10-08 \d\d:\d\d /.test(t.text)) expect(t.props.wrap).toBe('wrap')
-  }
 })
 
 test('a held step in Needs You on the default board: Approve and continue is the gate approval', async ($, on) => {
@@ -1332,7 +1592,7 @@ test('Back, the ID and the stepper make the top bar; Rename and Copy ID are quie
   expect(tools?.text).toContain('Copy ID')
   expect((await ui.find({ key: 'card-rename-open' }))?.props.dimColor).toBe(true)
   const log = (await ui.find({ key: 'card-log' })) as { children?: { props?: { key?: string }; text?: string }[] } | undefined
-  expect(String((log?.children?.[0] as { type?: string } | undefined)?.type)).toBe('Text')
+  expect(log?.children?.[0]?.props?.key).toBe('card-log-head')
   expect(log?.children?.[1]?.props?.key).toBe('card-comment-row')
   await ui.press({ key: 'card-rename-open' })
   // While renaming the field, Save (the field's own submit) and Cancel stand in one row; Rename leaves the tools.
