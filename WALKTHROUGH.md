@@ -26,7 +26,7 @@ In board order. "Who" is who may move a card in.
 | Plan | you | A planning agent writes a numbered plan and Claude puts it into the card, sets the flag `PLAN READY`, moves the card to Needs You, stops. |
 | Auto | you | Claude runs the card start to finish: branch, workers, a commit per step, merge, Done. Drag a running card out to Pending or Backlog to pause it. |
 | Backlog | you or Claude | Ideas that may or may not be done. Nothing happens to a card here. No turn starts. |
-| Done | Claude or you | Finished. If you drop a card here, Claude Logs it and reports any unmerged work. |
+| Done | Claude or you | Finished. If you drop a card here, Claude Logs it, clears a flag the card was waiting on, and reports any unmerged work. |
 | Discarded | you | Abandoned. Claude Logs it and names the branch for you to delete. It deletes nothing. |
 
 Every lane is a full-width row you can fold: press its bar (the `▾` or `▸`, the name and the count) to fold or open it. A lane with no cards is one quiet line with its name. A board made earlier may still list Manual, Parked or Gated lanes. It loads and works, but the default board has none of them.
@@ -74,14 +74,14 @@ If `kanban:kanban` or `kanban:setup` is missing, quit the desktop app and reopen
 
 ## 4. Set up the board
 
-Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up (3 cards)`.
+Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up at <folder>/kanban/board.md (3 cards). /board opens it.`.
 
 On the hand-made repo, type: `/kanban:setup`. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
 ```
 Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong.
 ```
 
-If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up (0 cards)`.
+If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up at hello-board/kanban/board.md (0 cards). /board opens it.`.
 
 `kanban/board.md` as the setup writes it:
 ```
@@ -127,7 +127,7 @@ The Settings tab (picture: `docs/design/real-pane-settings.png`) has `Workers at
 
 Each Thinking list marks the level the app recommends for the role's model; changing a role's model does not change its thinking. `Restore all defaults` asks `Restore` or `Keep`. `Save as defaults` makes the current settings this board's own defaults at once (`Saved as your defaults.`): each row's default, its `Reset` and `Restore all defaults` then use them, and no other board changes. `Restore original defaults` (shown only when the board has saved defaults) asks `Remove your saved defaults and put every setting back to the original?` with `Restore` or `Keep`. The shipped defaults are Workers 2; Manager opus, medium; Planner opus, high; Worker sonnet, medium; Advisor fable, high. The controls write to `board.md`:
 - `workers`: how many agents the manager runs at once, planning agents and step workers together. Default 2.
-- `manager_model`: the session's own model. Default opus, medium. Changing it runs `/model` for you, or tells you to run it.
+- `manager_model`: the model the board suggests for your chat. Default opus, medium. The board never switches the chat's model: the header says which model the chat is on and offers `Change to opus` (copies `/model opus`) and `Keep sonnet` (makes the chat's model the board's Manager model).
 - `planner_model`: what the planning agents run on. They write the plans; the manager reviews each plan and writes it into the card. Default opus, high.
 - `worker_model`: what each worker runs on. Default sonnet, medium.
 - `advisor_model`: consulted when the same failure happens twice. Default fable, high.

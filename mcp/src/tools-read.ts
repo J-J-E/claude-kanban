@@ -2,7 +2,7 @@
 // text (the skill's own list and what's-next layouts), so tests need no server; registerReadTools wires them to MCP.
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { findLane, groupByLane } from '../../hooks/lib/board.ts'
+import { findLane, groupByLane, typeOfId } from '../../hooks/lib/board.ts'
 import type { Board } from '../../hooks/lib/board.ts'
 import { compareIds } from '../../hooks/lib/cards.ts'
 import { labelsOf, roleWords, verdictFor } from '../../hooks/lib/strings.ts'
@@ -20,6 +20,15 @@ function byOrder(a: Card, b: Card): number {
   return a.order - b.order || compareIds(a.id, b.id)
 }
 
+/** The line after `Fix needed:` for `unknown-type`: the board's type names in board order, and an example that retypes the first offending card to the last type. */
+function unknownTypeFix(board: Board, cards: readonly Card[]): string {
+  const names = board.types.map((t) => t.name)
+  const last = names[names.length - 1]
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${last}` : last
+  const bad = cards.find((c) => typeOfId(board, c.id) === undefined)
+  return `To fix unknown-type: retype each card to a type on this board (${list} here), e.g. "retype ${bad?.id} as ${last}".`
+}
+
 /** The skill's `list` verb: each lane in board order as `Lane (n)`, its cards under it, then one `Fix needed:` line when anything is wrong. */
 export function boardList(dir: string): Text {
   const loaded = loadBoard(dir)
@@ -34,6 +43,7 @@ export function boardList(dir: string): Text {
   }
   if (problems.length > 0) {
     out.push(`Fix needed: ${problems.map((p) => `${p.file}: ${p.code}`).join('; ')}`)
+    if (problems.some((p) => p.code === 'unknown-type')) out.push(unknownTypeFix(board, cards))
   }
   return { ok: true, message: '', text: out.join('\n') }
 }

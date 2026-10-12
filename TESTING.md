@@ -1,6 +1,6 @@
 # Manual test checklist
 
-This is a manual test script for someone developing the plugin: it checks by hand what the automated tests cannot (the real desktop pane, drag, the `/model` switch, Obsidian). If you only want to use the plugin, read `README.md` and then `WALKTHROUGH.md` instead.
+This is a manual test script for someone developing the plugin: it checks by hand what the automated tests cannot (the real desktop pane, drag, the chat's model line, Obsidian). If you only want to use the plugin, read `README.md` and then `WALKTHROUGH.md` instead.
 
 It was written and run on Windows 11 with the Claude Code desktop app, the only setup it has been checked on. Commands are given for PowerShell; the git and Node commands are the same in bash or zsh. Do the steps in order. Every step opens with Do and ends with Expect. Open a NEW Code tab session each time a step says so: sessions opened before the plugin was installed or loaded do not have it. Anything that fails: see "If it does not work" at the bottom.
 
@@ -37,7 +37,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
    - Expect: `kanban:kanban` and `kanban:setup` are in the menu. If not, quit and reopen the app, then start another new session.
 3. Open the pane.
    - Do: type `/board`. (The pane may not open by itself at session start in a narrow docked pane. `/board` is the sure way.)
-   - Expect: the header (`Claude is idle`, the `Board` and `Settings` tabs, a time like `changed 14:02` or `3 min ago`, and `◆ 1 need you` when a card waits on you), the toolbar (`New card`, `Find a card`, `Sort`, `Collapse all`, a line like `3 cards`) and the lanes, each a flat row. The three sample cards are in Pending. Within a few seconds the session may switch to opus (the `manager_model`), or a notice says `run /model opus yourself`.
+   - Expect: the header (`Claude is idle`, the `Board` and `Settings` tabs, a time like `changed 14:02` or `3 min ago`, and `◆ 1 need you` when a card waits on you), the toolbar (`New card`, `Find a card`, `Sort`, `Collapse all`, a line like `3 cards`) and the lanes, each a flat row. The three sample cards are in Pending. The board does not switch the chat's model. The last row of the header says which model the chat is on: dim `This chat is on opus.` when it is the `manager_model`, else `This chat is on sonnet. This board suggests opus.` with `Change to opus` and `Keep sonnet` (see the model checks after step 16). Not verified in the live app.
 4. The Board chip.
    - Do: close the pane with its `x`.
    - Expect: a `Board` chip above the chat box. Press it: the pane opens. With the pane open the chip is gone.
@@ -47,6 +47,9 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 5a. The Type list in New card.
    - Do: press `New card`. Look at the `Type` list, pick `enhancement`, type `Footer link`, press Enter. Press `Cancel`. Press `New card` again.
    - Expect: `Type` sits beside `Lane` and lists `bug`, `enhancement`, `chore` in that order, starting on `bug`. The card is made as an enhancement with the next enhancement number (`ENH-0003` in the demo) and `board.md` shows `next_enh: 4`. The footer card of step 5 kept its own number and type. Reopened, `Type` still shows `enhancement` (it keeps the last pick while the pane is open). Delete the `Footer link` card afterwards (step 10 shows how); the number is not handed out again.
+5b. Fast typing in the text fields. NOT VERIFIED: nobody has typed fast into the real pane since the fields stopped redrawing the pane on every keystroke, so a failure here is a finding, not a mistake in your steps.
+   - Do: press `New card`. In the `What needs doing?` field type `the quick brown fox jumps over the lazy dog` as fast as you can, spaces included, and press Enter. Open a card, type the same text in `Write a comment for Claude` and press Enter. Press `Rename`, type the same text in the title field and press Enter. Press `◂ Board`. In `Find a card` type `footer` as fast as you can. Repeat the find once while a card is in Auto and Claude is working.
+   - Expect: each field shows exactly that text, nothing dropped, no letters out of order and no flicker. After Enter the `New card` field and the comment field clear and the title edit closes. In `Find a card` the text stays whole and the cards filter just after you stop typing, also while Claude is working. Delete the test card and restore the renamed title afterwards.
 6. Find a card.
    - Do: type `footer` in `Find a card`. Then `zzzz`. Then press `Clear`.
    - Expect: with `footer` only the footer card shows. With `zzzz` the pane says `No card matches "zzzz"` with a `Clear`, and every lane shows 0. `Clear` brings every card back.
@@ -63,7 +66,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 9d. Approving from the open card. NOT VERIFIED: nobody has tried this in the real pane yet, so a failure here is a finding, not a mistake in your steps.
    - Do: open the gate card of step 11 while it sits in Needs You (or a card with `PLAN READY`) and press `Approve and continue` (`Approve and run` on a plan card) once.
    - Expect: the toast `<ID> approved. Claude is carrying on in Auto.` (a plan card: `<ID> moved to Auto. Claude is starting.`), the open card closes and the lanes show with the same folds and sort, and the card is in Auto. Open it again: the accent box `Waiting for Claude to start` and no button.
-9c. Copying from the Log. `Copy command`, a press on a Log line and `Copy entire log` have been tried in the real pane and copy. NOT VERIFIED: that long Log lines wrap whole again and that the date press still copies after this change, so a failure in those is a finding, not a mistake in your steps.
+9c. Copying from the Log. `Copy command`, a press on a Log line and `Copy entire log` have been tried in the real pane and copy. NOT VERIFIED: that long Log lines wrap whole again and that the date press still copies after this change, so a failure in those is a finding, not a mistake in your steps. Open a card whose newest Log line has a command in backticks after `question:`, press `Copy command`, paste; expect exactly the command.
    - Do: open a card that has more than 6 Log lines. Press a line's date (not its words), then paste with Ctrl+V into a text editor. Press another line's date and paste again. Press `Copy entire log` beside the `Log` heading and paste. Then open or write a Log line that holds text between backticks (for example by commenting ``Get-Date`` on a card), press `Copy command` under it and paste again. If a press does nothing, press again: the first click in a pane that does not hold the keyboard only gives it the keyboard (`docs/design/desktop-paint-notes.md` rule 1), so a second click may be needed.
    - Expect: a press on a line's date shows `Copied the Log line.` and Ctrl+V pastes the whole line: date, time, name and words. The words are text that wraps over as many rows as they need, are never cut, and cannot be pressed. There is no `Copy` button under a line. `Copy entire log` shows `Copied the entire log.` and Ctrl+V pastes every line of the Log, also the ones hidden until `Show the whole log`, one per row, oldest first, each with date, time and name. A card with no Log lines has no `Copy entire log`. `Copy command` shows `Copied the command.` and Ctrl+V pastes only the text between the backticks, exactly as written; a line without backticks has no `Copy command`. Does a long line wrap whole, and do the lines still look like text rather than a stack of buttons? Nothing in the card file changes and Claude gets no message. A failed copy shows `Could not copy the Log line: <reason>.`, `Could not copy the command: <reason>.` or `Could not copy the entire log: <reason>.`.
 9a. The small menu under a card. NOT VERIFIED: nobody has looked at this menu on the real pane yet, so a failure here is a finding, not a mistake in your steps.
@@ -83,6 +86,12 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: chat shows `Kanban: <you> moved <ID> "<title>" from Needs You to Auto. Do the auto lane action from the kanban skill.` The card shows `● Working` or `○ Waiting to start` while the turn runs.
     - Expect: Claude adds `started: <letters>-<n>-<slug>`, `approved: GATE: merge touches <manifest file>`, `merged <letters>-<n>-<slug>`, `moved Auto -> Done`. The flag is empty. The card is in Done.
     - Check, in a terminal (reads only): `git -C <demo-folder> log --oneline --graph` shows a merge commit starting with the gate card's ID and, on top, `<ID> board: done`. The project's dependency file now lists the new package.
+11a. A flagged card dropped into Done or Discarded. NEEDS SETUP: a card in Needs You with a question, which a fresh demo does not have.
+    - Setup: get a card into Needs You with a flag `QUESTION: ...` (for example drag a card with a vague request to Auto and wait for Claude's question). Do this twice, or use two cards.
+    - Do: drag the first card from Needs You to Done. Let Claude finish its turn.
+    - Expect: the Log has a line `closed by <owner>: ...` ending `; cleared flag QUESTION: ...`, and the card file has an empty `flag:` line. The pane shows no orange for the card.
+    - Do: drag the second card from Needs You to Discarded. Let Claude finish its turn.
+    - Expect: the Log has a line `scrapped at step <n>; ...` ending `; cleared flag QUESTION: ...`, and the card file has an empty `flag:` line.
 12. Bounce.
     - Do: drag the footer card from Pending onto Needs You.
     - Expect: while held, Needs You says `Claude's lane. You can't drop here.` On release the card stays in Pending. No Claude turn starts.
@@ -94,7 +103,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: the card moves to Backlog within about a second, then back to Pending. No Claude turn starts.
 15. Settings.
     - Do: press the `Settings` tab. Set `Workers at once` to 2. Then set Manager `Model` to sonnet. Then press `Reset` on the Manager row. Then press `Restore all defaults` and `Keep`, then `Restore all defaults` and `Restore`.
-    - Expect: `kanban/board.md` shows `workers: 2`, then `manager_model: sonnet` (and either `/model` runs for you and the session shows sonnet, or a notice says `run /model sonnet yourself`), then `Reset` removes the Manager lines. `Keep` changes nothing. `Restore` removes every settings line and shows `All settings are back to their defaults.`; the tab then says `Everything is at its default`. Each Thinking list marks one level `(recommended)`. Press `Board` to go back.
+    - Expect: `kanban/board.md` shows `workers: 2`, then `manager_model: sonnet` (the chat's model does not change and no `/model` runs; the toast says only `Manager model set to sonnet.`), then `Reset` removes the Manager lines. `Keep` changes nothing. `Restore` removes every settings line and shows `All settings are back to their defaults.`; the tab then says `Everything is at its default`. Each Thinking list marks one level `(recommended)`. Press `Board` to go back.
     - Do: still on the `Settings` tab, set `Workers at once` to 3. Press `Save as defaults`. Then set `Workers at once` to 4, and press `Reset` on that row.
     - Expect: after `Save as defaults` a toast says `Saved as your defaults.` and `kanban/board.md` shows `default_workers: 3`. After the change to 4 the row shows `Default: 3`; `Reset` puts it back to 3 and removes the `workers` line. Other boards keep the original defaults.
     - Do: press `Restore original defaults`, then `Keep`; then `Restore original defaults` and `Restore`.
@@ -102,10 +111,31 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 16. Narrow pane. NOT VERIFIED: nobody has checked drag or the toolbar in a narrow pane since the pane was rebuilt, so a failure here is a finding, not a mistake in your steps.
     - Do: drag the pane edge until it is narrow. Press `New card`, then `Cancel`. Drag the footer card down to the Backlog lane, then up to the Pending lane.
     - Expect: the toolbar controls stay readable and pressable and nothing is cut off. The first drag moves the card to Backlog and starts no turn. The second moves it back to Pending and starts no turn.
+16a. The chat's model line. NOT VERIFIED: needs the live app, where the model picker under the prompt box can be read.
+    - Do: with the chat on a model other than `manager_model` (for example the picker on `Sonnet` and `manager_model: opus`), look at the last row of the pane header. Press `Change to opus`, paste in the chat box and send.
+    - Expect: the row reads `This chat is on sonnet. This board suggests opus.` with `Change to opus` and `Keep sonnet`. Pressing `Change to opus` toasts `To change: paste /model opus in the chat (it is copied), or choose opus in the model picker under the prompt box.` and changes nothing itself. After you paste and send `/model opus`, see whether the picker follows and the row turns to the dim `This chat is on opus.` within a few seconds. No `/model` ever runs from the pane. If the picker does not follow, or the row does not turn, that is the finding.
+16b. Following the picker, and Keep.
+    - Do: change the model in the picker to another model and wait about 5 seconds. Then, while the model differs, press `Keep sonnet` (use the name shown).
+    - Expect: the row follows the picker within about 5 seconds. `Keep sonnet` toasts `Manager model set to sonnet.`, writes `manager_model: sonnet` in `kanban/board.md`, runs no `/model`, and makes the row the dim `This chat is on sonnet.` with no buttons; the Settings tab then shows Manager `Model` sonnet. NOT VERIFIED.
 17. Seeing it (a screenshot, no clicking). Windows only: the script uses PowerShell and Windows screen capture.
     - Do: in PowerShell run `powershell -NoProfile -File <path-to-your-clone>\tools\capture-pane.ps1 <output-folder>\out.png`. It writes one PNG and removes nothing. By default it saves the right-hand 660 px of the Claude window (the pane); `-PaneWidth N` changes that width.
     - Also: add `-Full` for the whole window; `-Left N` keeps only the left N px (the chat column); `-Bottom N` keeps only the bottom N px (the band above the chat box and the chat box). `-Left` and `-Bottom` imply `-Full` and can be used together.
     - Expect: with a board and the pane closed, the bottom of the chat column shows a `Board` chip above the chat box; with the pane open it shows nothing.
+17a. The board stays found when the chat's shell changes folder. NOT VERIFIED: only the live desktop app can show this, so a failure here is a finding, not a mistake in your steps.
+    - Do: open a chat in a folder that has a board (the demo project). Have Claude run a Bash `cd` into `kanban\`, and then a `cd` into another subfolder.
+    - Expect: the pane still shows the board, and the chat never gets `Kanban: set up a board here with the kanban skill.`
+    - Do: reload the plugin after that `cd`.
+    - Expect: the board is still found.
+    - Do: with the shell still in `kanban\`, move a card, add a card, add a comment and change one Setting in the pane.
+    - Expect: each is written to the real files in `kanban\`, and no `kanban\kanban\` folder is created.
+    - Do: open a chat inside a board's `kanban\` folder. Then open a chat in a subfolder of a project that has a board.
+    - Expect: the first shows that board; the second shows the parent project's board.
+    - Do: in the chat from the first step (shell in a subfolder), say `set up the kanban board`.
+    - Expect: `Board already set up at <path> (N cards). /board opens it.` with the path of that `board.md`, and nothing is created.
+17b. The pane is never blank. NOT VERIFIED: only the live desktop app can show this, so a failure here is a finding, not a mistake in your steps.
+    - Do: open the pane, run `/board`, drag one card to another lane, press the `Settings` tab and then `Board` to go back.
+    - Expect: the board, or a line `kanban: the board could not be drawn: <reason>` with a `Retry` button, every time. Never the app's own `Nothing to show yet`. `Retry` draws the board again.
+    - If the pane is ever blank again: in PowerShell run `cd <your claude-kanban folder>; claude --debug-file <a folder you choose>\kanban-debug.log` (starts a terminal chat that writes a debug log to that one file; it removes nothing), then type `/board`, then search that file for `refused` or `kanban` and report the lines.
 
 ## C. Chat checks, in a fresh empty folder
 
@@ -135,6 +165,8 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 23. List and what's next.
     - Do: type `list the board`, then `what's next`.
     - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, and `Untriaged` with BUG-0001, ENH-0001 and CHORE-0001.
+    - Also: put a card whose ID letters are no type on the board (for example `KB-0001-old.md` on a board with no KB type) into a board, read the pane's line above the lanes, then type `list the board`.
+    - Expect: the pane shows `▲ 1 card has ID letters KB that are no type on this board. It still shows on the board. Ask Claude to retype the card.` in orange, wrapped in full, with `KB-0001` under it. The list ends with `Fix needed: KB-0001-old.md: unknown-type` and the next line `To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype KB-0001 as chore".` (with the board's own type names)
 24. Decide.
     - Do: type `decide: Pending is the inbox, because one place`. Then record a second decision.
     - Expect: `D1 recorded: Pending is the inbox`. `DECISIONS.md` has a line `- **D1 (<date>) Pending is the inbox:** ...` ending `Reason: one place.` The second one is D2.
@@ -210,10 +242,10 @@ Obsidian 1.14 or later is needed (read from 1.14.4). The steps to open the vault
 
 ## If it does not work
 
-Drag, the `/model` switch and hot reload are confirmed on the desktop. Only the narrow pane (step 16) is unchecked. If something fails, that is the finding, not a mistake in your steps.
+Drag and hot reload are confirmed on the desktop. Only the narrow pane (step 16) is unchecked. If something fails, that is the finding, not a mistake in your steps.
 
 - Dragging in the desktop pane. If the card does not follow the pointer or does not move on release, type `move <ID> to Auto` in chat instead (same go-ahead as a drag) and tell Claude what you saw. The fallback is the `Lane` list in the open card, which moves a card the same way.
-- The `/model` switch from the dropdown. If the session model does not change and no notice appears, type `/model sonnet` yourself. The `board.md` setting is still saved.
+- The chat's model line. The board never switches the chat's model; if the line does not follow a change you made in the model picker within about 5 seconds, that is the finding. Type `/model sonnet` in the chat to change it yourself.
 - Hot reload of plugin edits in a desktop session. If a change to the plugin does not show, type `/reload-plugins`. If it still does not, quit and reopen the app.
 - Plugin missing: you are in an old session. Start a new Code tab session. If `kanban:kanban` is still missing, quit and reopen the desktop app.
 - Permission prompts during an Auto run are the normal ones for Edit, Write and Bash. The `Kanban:` messages arrive as your own words, so nothing is pre-approved.

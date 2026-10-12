@@ -78,6 +78,14 @@ export type World = {
   existsChecks: number
   /** Paths read through fs.read, in order. */
   reads: string[]
+  /** Every path an fs.* hook received, as the engine handed it (absolute: a relative path is resolved against the engine's folder first). */
+  paths: string[]
+  /** When true the fake files are keyed by their full path (`/a/kanban/board.md`), so a board in another folder is a different file; default: keyed `kanban/...` whatever the folder. */
+  isExact: boolean
+  /** What `$.session.root()` answers: null = the cwd the session started with; '' = no usable root. */
+  root: string | null
+  /** The cwd the session started with. */
+  startCwd: string
   /** Paths written through fs.write, in order. */
   writes: string[]
   /** What `$.session.model()` answers. */
@@ -125,6 +133,10 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     listed: 0,
     existsChecks: 0,
     reads: [],
+    paths: [],
+    isExact: false,
+    root: null,
+    startCwd: '',
     writes: [],
     model: 'opus',
     agents: [],
@@ -154,7 +166,10 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
 
   // The engine hands the bottom hook an absolute path (the folder the test runs in) with the platform's
   // separators; the fake files are keyed by `kanban/...`.
-  const rel = relKanban
+  const rel = (path: string): string => {
+    w.paths.push(path)
+    return w.isExact ? path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '') : relKanban(path)
+  }
   const missing = (path: string) => ({ deny: 'ENOENT: no such file ' + path })
   const size = (text: string) => text.length
 
@@ -210,7 +225,11 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     return { value: undefined }
   })
   on('session.model', () => ({ value: w.model }))
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', ($, e) => {
+    w.startCwd = e.cwd
+    return { cwd: e.cwd }
+  })
+  on('session.root', () => ({ value: w.root === null ? w.startCwd : w.root }))
   on('prompt.submit', ($, e) => {
     w.sent.push({ text: e.text })
     w.contexts.push(e.context)
@@ -325,4 +344,11 @@ export async function headerState(ui: Awaited<ReturnType<typeof mountPane>>): Pr
     workers: workers === null ? null : { running: Number(workers[1]), limit: Number(workers[2]) },
     changed: ((await said('header-changed')) ?? '').replace(/^changed /, ''),
   }
+}
+
+/** Types into the Find field the way the field does (a change per edit), then waits out the pause before the cards are filtered (FIND_PAUSE_MS in hooks/register.tsx). */
+export async function typeFind(ui: Awaited<ReturnType<typeof mountPane>>, w: World, text: string): Promise<void> {
+  await ui.input({ key: 'toolbar-find', text, kind: 'change' })
+  await w.clock.advance(150)
+  await w.clock.settle()
 }

@@ -292,3 +292,28 @@ test('all three top-row controls are there at every width, and the row wraps ins
     await ui.unmount()
   }
 })
+
+test('the Settings tab says which model the chat is on, after the notes', async ($, on) => {
+  const w = await boot($, on)
+  let ui = await open($)
+  expect(await flat(ui)).toContain('Advisor gives a second opinion on risky steps.')
+  expect((await ui.find({ key: 'settings-chat-model' }))?.text).toBe('This chat is on opus.')
+  await ui.unmount()
+  // Another model: the line says the board suggests, never changes, and how the person does.
+  w.model = 'claude-sonnet-4'
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  ui = await open($)
+  expect(await flat(ui)).toContain(
+    "This chat is on sonnet. This board suggests opus; the board never changes the chat's model. To change it, choose opus in the model picker under the prompt box, or type /model opus.",
+  )
+  expect(w.ran).toEqual([])
+  await ui.unmount()
+  // Not known: no line.
+  w.model = ''
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  ui = await open($)
+  expect(await ui.find({ key: 'settings-chat-model' })).toBeUndefined()
+  expect(NOTES[0]).toBe("Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.")
+})

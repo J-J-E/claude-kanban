@@ -37,6 +37,16 @@ test('board_list ends with a Fix needed line for a card in an unknown lane', () 
   assert.match(boardList(dir).text, /\nFix needed: BUG-0001-lost\.md: unknown-lane$/)
 })
 
+test('board_list adds the To fix unknown-type line after Fix needed for a card whose ID letters are no type', () => {
+  const dir = makeBoard([['ZZ-0001', 'Old', 'Pending', 1000]])
+  const lines = boardList(dir).text.split('\n')
+  assert.equal(lines.at(-2), 'Fix needed: ZZ-0001-old.md: unknown-type')
+  assert.equal(
+    lines.at(-1),
+    'To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype ZZ-0001 as chore".',
+  )
+})
+
 test('whats_next sections, with queued Auto cards dropping out once Claude has started', () => {
   const dir = makeBoard([
     ['BUG-0001', 'Fresh', 'Auto', 1000],

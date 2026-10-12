@@ -9,7 +9,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, FsEntry, Register, RenderSurface, Timer, UiMessageResult, UiOpenResult } from 'claude-code'
 
-import type { KanbanCard, KanbanFacts, KanbanLane, KanbanLanesView, KanbanQueued, KanbanSnapshot, KanbanWorking } from '../types'
+import type { KanbanBad, KanbanCard, KanbanFacts, KanbanLane, KanbanLanesView, KanbanQueued, KanbanSnapshot, KanbanWorking } from '../types'
 import { clearSavedDefaults, DEFAULT_TYPES, findLane, findType, groupByLane, moveCard, parseBoard, readCards, saveDefaults, setBoardSetting, setCounter, typeOfId } from './lib/board.ts'
 import type { Board } from './lib/board.ts'
 import { allocateId, lineage } from './lib/ids.ts'
@@ -66,6 +66,7 @@ import { canPlace, DEFAULT_SORT, isSortKey, sortCards, sortKeyOf, sortName, SORT
 import type { SortKey } from './lib/sort.ts'
 import type { Defaults, SettingsTarget, SettingsValues } from './lib/settings.ts'
 import type { HeaderProps } from './lib/header.ts'
+import { modelLine, modelWord } from './lib/modelline.ts'
 import { cardTree } from './ui/card.tsx'
 import { headerTree } from './ui/header.tsx'
 import { settingsTree } from './ui/settings.tsx'
@@ -78,13 +79,83 @@ import type { CardFacts } from './lib/status.ts'
 import type { Card, Result, Stamp } from './lib/types.ts'
 
 const PANE = 'kanban'
-const BOARD_FILE = 'kanban/board.md'
+/** The project root the board belongs to: `$.session.root()`, which a shell `cd` in the chat does not move (it follows `/cd` and worktree moves). Else the folder the session started in (`startRoot`, `e.cwd`); '' means the engine's current folder, as before. */
+let sessionRoot = ''
+let startRoot = ''
+/** Re-reads the project root; a failed lookup falls back to the start folder and never breaks the pane. */
+async function syncRoot($: EngineInterface): Promise<void> {
+  let root: unknown = ''
+  try {
+    root = await $.session.root()
+  } catch {}
+  const next = typeof root === 'string' && root !== '' ? root : startRoot
+  if (next !== sessionRoot) boardDir = ''
+  sessionRoot = next
+}
+/** The root with `/` separators and no trailing one ('' when there is no root, or for `/`). */
+function rootDir(): string {
+  return sessionRoot.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+/** The board folder in use: '' means the root's own `<root>/kanban`; else the folder `findBoard` found. `kanbanPath` is the one place that turns it into a path. */
+let boardDir = ''
+/** The path of the board folder (no name) or of one file in it, absolute so a chat's `cd` cannot lose the board; the relative `kanban/...` when there is no root. */
+function kanbanPath(name = ''): string {
+  const dir = sessionRoot === '' ? 'kanban' : boardDir !== '' ? boardDir : rootDir() + '/kanban'
+  return name === '' ? dir : dir + '/' + name
+}
+/** Where a board may stand when `<root>/kanban` has none: the root itself when it is named kanban, then `kanban` in each parent folder, nearest first, up to the drive or filesystem root. Bounded by the folder depth. */
+function boardFolders(): string[] {
+  const root = rootDir()
+  const out: string[] = []
+  if (root.slice(root.lastIndexOf('/') + 1) === 'kanban') out.push(root)
+  for (let d = root; d.includes('/'); ) {
+    d = d.slice(0, d.lastIndexOf('/'))
+    out.push(d + '/kanban')
+    if (d === '' || /^[A-Za-z]:$/.test(d)) break
+  }
+  return out
+}
+/** Whether a file exists (stat, so the no-board tick's own exists check stays the only one counted). Never throws. */
+async function isFile($: EngineInterface, path: string): Promise<boolean> {
+  try {
+    await $.fs.stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+/** The first folder of `boardFolders` holding a board.md, else '' (the root's own `kanban`, which wins whenever it has one). Never throws. */
+async function findBoard($: EngineInterface): Promise<string> {
+  try {
+    if (await isFile($, rootDir() + '/kanban/board.md')) return ''
+    for (const dir of boardFolders()) if (await isFile($, dir + '/board.md')) return dir
+  } catch {}
+  return ''
+}
+/** Lists the board folder. With a root, and no board.md in the root's own kanban/ (or a fallback folder in use), the search above runs first, so `<root>/kanban/board.md` wins once it exists. */
+async function listBoard($: EngineInterface): Promise<FsEntry[]> {
+  const list = async (): Promise<FsEntry[]> => {
+    try {
+      return await $.fs.list(kanbanPath())
+    } catch {
+      return []
+    }
+  }
+  const entries = await list()
+  if (sessionRoot === '' || (boardDir === '' && entries.some((en) => en.name === 'board.md'))) return entries
+  const found = await findBoard($)
+  if (found === boardDir) return entries
+  boardDir = found
+  return list()
+}
 const TICK_MS = 1000
+/** The Find field filters the cards this long after the last key; the letters themselves are never held back. */
+const FIND_PAUSE_MS = 150
 /** With no board the tick only looks every 10th second (C10). */
 const NO_BOARD_TICKS = 10
 const QUEUED_MS = 15 * 60 * 1000
-/** A model switch waits this long after the session or the pane opens (C6). */
-const MODEL_CHECK_MS = 1500
+/** The chat's own model is re-read every this many ticks (and at session start and after each turn). */
+const MODEL_READ_TICKS = 5
 /** The body width the pane asks for when it opens (a request the surface may ignore). */
 const PANE_COLUMNS = 100
 const TITLE_MAX = 120
@@ -120,25 +191,44 @@ const workingA = atom({ plugin: 'kanban', key: 'working' } as const, [])
 const turnCardA = atom({ plugin: 'kanban', key: 'turnCard' } as const, null)
 /** True from any main-session turn.start to its turn.complete: Claude is in a turn even when no card is marked (a chat turn). */
 const inTurnA = atom({ plugin: 'kanban', key: 'inTurn' } as const, false)
+/** The model the chat is really on, as the engine names it ('' = not known). The pane only says it; the board never switches it. */
+const chatModelA = atom({ plugin: 'kanban', key: 'chatModel' } as const, '')
 const queuedA = atom({ plugin: 'kanban', key: 'queued' } as const, [])
 const selectedA = atom({ plugin: 'kanban', key: 'selected' } as const, null)
-const commentA = atom({ plugin: 'kanban', key: 'comment' } as const, '')
 const tabA = atom({ plugin: 'kanban', key: 'tab' } as const, 'board')
 const minuteA = atom({ plugin: 'kanban', key: 'minute' } as const, 0)
 const showLogA = atom({ plugin: 'kanban', key: 'showLog' } as const, false)
 const showDetailsA = atom({ plugin: 'kanban', key: 'showDetails' } as const, false)
+/** `Show all` is on: every list under the problem sentences above the lanes is drawn in full, not three entries and `and N more`. */
+const showAllProblemsA = atom({ plugin: 'kanban', key: 'showAllProblems' } as const, false)
+/** Why the app said it could not draw the board region (ui.fault): shown with Retry in its place; null: nothing wrong. */
+const faultA = atom({ plugin: 'kanban', key: 'fault' } as const, null)
+/** The line the pane shows when it could not be drawn, whatever the reason: one line, cut so it fits a narrow pane. */
+const DRAW_FAULT_MAX = 160
+function drawFaultLine(reason: string): string {
+  const one = reason.split(/\s+/).join(' ').trim()
+  return `kanban: the board could not be drawn: ${one.length > DRAW_FAULT_MAX ? one.slice(0, DRAW_FAULT_MAX - 1) + '…' : one}`
+}
 const confirmDeleteA = atom({ plugin: 'kanban', key: 'confirmDelete' } as const, false)
 /** The type name picked in the open card's Type list and not yet asked for ('' = none): the question row shows while it differs from the card's own type. */
 const retypePickA = atom({ plugin: 'kanban', key: 'retypePick' } as const, '')
-const renamingA = atom({ plugin: 'kanban', key: 'renaming' } as const, { isOpen: false, title: '' })
+/** Whether the title edit is open; its text is `ctx.drafts.rename`. */
+const renamingA = atom({ plugin: 'kanban', key: 'renaming' } as const, { isOpen: false })
 const confirmRestoreA = atom({ plugin: 'kanban', key: 'confirmRestore' } as const, false)
 /** Whether `Restore original defaults` is asking its question in place. */
 const confirmOriginalA = atom({ plugin: 'kanban', key: 'confirmOriginal' } as const, false)
 const lanesViewA = atom({ plugin: 'kanban', key: 'lanesView' } as const, { fold: {}, more: {} })
 /** How many times the Settings tab was chosen: it is added to the view's stamp the Client is handed, so the Client drops what is open on it (the small card menu) even though its saved state outlives a remount. */
 const tabChangesA = atom({ plugin: 'kanban', key: 'tabChanges' } as const, 0)
+/** The Find text the cards are filtered by: the draft in `ctx.drafts.find` after its short pause, or at once on Clear and Enter. */
 const findA = atom({ plugin: 'kanban', key: 'find' } as const, '')
-const addA = atom({ plugin: 'kanban', key: 'add' } as const, { isOpen: false, title: '', lane: '', type: '' })
+/** The New card row's state apart from its title (`ctx.drafts.add`): open, the lane and the type picked. */
+const addA = atom({ plugin: 'kanban', key: 'add' } as const, { isOpen: false, lane: '', type: '' })
+/**
+ * Counts the redraws asked for a text field that changed for a reason other than typing (a field emptied after Add or Comment,
+ * Clear in Find). The drawing reads it; typing itself writes nothing, so a keystroke redraws nothing.
+ */
+const draftsA = atom({ plugin: 'kanban', key: 'drafts' } as const, 0)
 const paneShownA = atom({ plugin: 'kanban', key: 'paneShown' } as const, null)
 
 /** The board.md key of a Select on the Settings tab: `workers`, or a role's `..._model` or `..._thinking` line. */
@@ -284,10 +374,6 @@ function addedToast(id: string, lane: KanbanLane, isBusy: boolean, sort: SortKey
     default:
       return said + note
   }
-}
-
-function modelIs(current: string, wanted: string): boolean {
-  return String(current).toLowerCase().indexOf(wanted) !== -1
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -507,6 +593,7 @@ function headerProps(
   turnCard: string | null,
   tab: unknown,
   selected: string | null,
+  chatModel: string,
 ): HeaderProps {
   const waiting = { total: 0, plan: 0, question: 0, failed: 0, gate: 0, other: 0 }
   for (const c of snap.cards) {
@@ -541,6 +628,7 @@ function headerProps(
     turnCard: turn,
     changed: clockOf(snap.changedAt),
     isReadOnly: snap.isReadOnly,
+    model: modelLine(chatModel, snap.settings.managerModel),
   }
 }
 
@@ -751,6 +839,8 @@ type Ctx = {
   isTicking: boolean
   /** Ticks still to skip while there is no board. */
   skip: number
+  /** Ticks made, so the chat's model is re-read every MODEL_READ_TICKS-th. */
+  ticks: number
   /** The new-card field takes the focus on the next drawing that shows it, once (set when the row opens and after a card is added). */
   isFocusDue: boolean
   /** Each card's status as the last refresh saw it, by ID: a change with no matching Log line is a move made outside the pane (Obsidian). */
@@ -759,10 +849,18 @@ type Ctx = {
   pendingMoves: Map<string, { from: string; to: string }>
   /** Whether the session has a person at the prompt (set at session start); a `-p` run or the SDK never opens the pane. */
   isInteractive: boolean
+  /**
+   * What each text field holds, kept here and not in an atom: the drawing reads these and hands them back as the fields' `value`,
+   * so a keystroke sets one with no await and no redraw (a redraw carrying older text would overwrite what was typed since).
+   * Anything that changes a field for another reason sets it and then redraws once (`redrawDrafts`).
+   */
+  drafts: { add: string; find: string; comment: string; rename: string }
+  /** The pause before the Find draft filters the cards; null when none is waiting. */
+  findTimer: Timer | null
 }
 
 function newCtx(): Ctx {
-  return { isInteractive: false, busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isTicking: false, skip: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
+  return { drafts: { add: '', find: '', comment: '', rename: '' }, findTimer: null, isInteractive: false, busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isTicking: false, skip: 0, ticks: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
 }
 
 // ---------------------------------------------------------------- state helpers
@@ -771,6 +869,11 @@ function newCtx(): Ctx {
 async function bumpRev($: EngineInterface): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap !== null) await update($, snapshotA, (s) => (s === null ? s : { ...s, rev: s.rev + 1 }))
+}
+
+/** Redraws the pane once, for a text field that was changed by something other than typing. */
+async function redrawDrafts($: EngineInterface): Promise<void> {
+  await update($, draftsA, (n) => n + 1)
 }
 
 /** Drops the queued entry with this prompt text, or failing that the first one `isSame` accepts. */
@@ -786,14 +889,10 @@ async function dequeue($: EngineInterface, text: string, isSame: (q: KanbanQueue
 
 /** Reads kanban/ into the snapshot. Re-reads only files whose mtime or size changed; writes only on a real change. */
 async function load($: EngineInterface, ctx: Ctx): Promise<void> {
+  await syncRoot($)
   const now = await $.clock.now()
   const prev = await read($, snapshotA)
-  let entries: FsEntry[] = []
-  try {
-    entries = await $.fs.list('kanban')
-  } catch {
-    entries = []
-  }
+  const entries = await listBoard($)
   const wanted = entries
     .filter((en) => en.kind === 'file' && (en.name === 'board.md' || isCardFileName(en.name)))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -812,7 +911,7 @@ async function load($: EngineInterface, ctx: Ctx): Promise<void> {
       const hit = ctx.cache.get(en.name)
       if (hit !== undefined && hit.sig === sig) continue
       try {
-        const text = await $.fs.read('kanban/' + en.name)
+        const text = await $.fs.read(kanbanPath(en.name))
         ctx.cache.set(en.name, { sig, text })
       } catch {
         unreadable[en.name] = true
@@ -825,15 +924,89 @@ async function load($: EngineInterface, ctx: Ctx): Promise<void> {
   await update($, snapshotA, () => out)
 }
 
-/** The most files named above the lanes as unreadable; the rest are counted. */
-const MAX_UNREADABLE_LINES = 3
+/** The most entries a problem list names above the lanes before `Show all`; the rest are counted. */
+const MAX_PROBLEM_ENTRIES = 3
 
-/** The dim lines above the lanes for the files that cannot be read (board.md has its own red line): up to 3 `Can't read <file>: <reason>`, then `and N more`. */
-function unreadableLines(bad: readonly { file: string; reason: string }[]): string[] {
+/** One group of card-file problems above the lanes: a warning sentence ending with the next step, and the cards or files it is about. */
+type ProblemGroup = { sentence: string; entries: string[]; isLines: boolean }
+
+/** The letters and the card ID at the start of a card file's name (`KB-0001-title.md`), or null for a name that does not start with one. */
+function idOfFile(file: string): { letters: string; id: string } | null {
+  const m = /^([A-Za-z]+)-(\d+)/.exec(file)
+  return m === null ? null : { letters: m[1], id: `${m[1]}-${m[2]}` }
+}
+
+/**
+ * The warning groups above the lanes for the card files with a problem (board.md has its own red line), by kind:
+ * unknown ID letters (one group per set of letters), unknown lane, duplicate ID, and a file that could not be read.
+ * A problem with no code (an older snapshot) reads as a file that could not be read.
+ */
+function problemGroups(bad: readonly KanbanBad[]): ProblemGroup[] {
   const others = bad.filter((b) => b.file !== 'board.md')
-  const lines = others.slice(0, MAX_UNREADABLE_LINES).map((b) => `Can't read ${b.file}: ${b.reason}`)
-  if (others.length > MAX_UNREADABLE_LINES) lines.push(`and ${others.length - MAX_UNREADABLE_LINES} more`)
-  return lines
+  const groups: ProblemGroup[] = []
+  const byLetters = new Map<string, string[]>()
+  const lane: string[] = []
+  const duplicate: string[] = []
+  const unreadable: string[] = []
+  for (const b of others) {
+    const own = idOfFile(b.file)
+    if (b.code === 'unknown-type' && own !== null) {
+      byLetters.set(own.letters, [...(byLetters.get(own.letters) ?? []), own.id])
+    } else if (b.code === 'unknown-lane') {
+      lane.push(own === null ? b.file : own.id)
+    } else if (b.code === 'duplicate-id') {
+      duplicate.push(b.file)
+    } else {
+      unreadable.push(`${b.file}: ${b.reason}`)
+    }
+  }
+  for (const [letters, ids] of byLetters) {
+    const n = ids.length
+    groups.push({
+      sentence:
+        n === 1
+          ? `▲ 1 card has ID letters ${letters} that are no type on this board. It still shows on the board. Ask Claude to retype the card.`
+          : `▲ ${n} cards have ID letters ${letters} that are no type on this board. They still show on the board. Ask Claude to retype the cards.`,
+      entries: ids,
+      isLines: false,
+    })
+  }
+  if (lane.length > 0) {
+    groups.push({
+      sentence:
+        lane.length === 1
+          ? '▲ 1 card has a status that is no lane on this board, so the board does not show it. Ask Claude to move it to a lane.'
+          : `▲ ${lane.length} cards have a status that is no lane on this board, so the board does not show them. Ask Claude to move them to a lane.`,
+      entries: lane,
+      isLines: false,
+    })
+  }
+  if (duplicate.length > 0) {
+    groups.push({
+      sentence: `▲ ${duplicate.length} card files share an ID, and ${duplicate.length === 2 ? 'neither' : 'none of them'} can be moved. Ask Claude to give ${duplicate.length === 2 ? 'one of them' : 'all but one'} a new ID.`,
+      entries: duplicate,
+      isLines: false,
+    })
+  }
+  if (unreadable.length > 0) {
+    groups.push({
+      sentence:
+        unreadable.length === 1
+          ? "▲ 1 card file can't be read, so its card is not on the board. Ask Claude to fix it."
+          : `▲ ${unreadable.length} card files can't be read, so their cards are not on the board. Ask Claude to fix them.`,
+      entries: unreadable,
+      isLines: true,
+    })
+  }
+  return groups
+}
+
+/** The dim list under a group's sentence: three entries then `and N more`, or all of them under `Show all`. */
+function problemList(g: ProblemGroup, isAll: boolean): string {
+  const shown = isAll ? g.entries : g.entries.slice(0, MAX_PROBLEM_ENTRIES)
+  const more = g.entries.length - shown.length
+  if (g.isLines) return more > 0 ? [...shown, `and ${more} more`].join('\n') : shown.join('\n')
+  return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ')
 }
 
 /** The red line for a board.md that cannot be read, with the reason the reader gave. */
@@ -867,9 +1040,9 @@ function buildSnapshot(
     if (en.name !== 'board.md' && hit !== undefined) cardFiles.push({ name: en.name, text: hit.text })
   }
   const scanned = readCards(board, cardFiles)
-  const bad = scanned.problems.map((p) => ({ file: p.file, reason: p.message }))
+  const bad: KanbanBad[] = scanned.problems.map((p) => ({ file: p.file, reason: p.message, code: p.code }))
   for (const name of Object.keys(unreadable)) {
-    if (name !== 'board.md' && !bad.some((b) => b.file === name)) bad.push({ file: name, reason: 'cannot be read' })
+    if (name !== 'board.md' && !bad.some((b) => b.file === name)) bad.push({ file: name, reason: 'cannot be read', code: 'unreadable' })
   }
   const cards: KanbanCard[] = scanned.cards.map((c) => ({
     id: c.id,
@@ -938,14 +1111,15 @@ async function loadWorking($: EngineInterface): Promise<void> {
   if (JSON.stringify(cur) !== JSON.stringify(list)) await update($, workingA, () => list)
 }
 
-/** Resets what belongs to the card shown: the comment typed, the whole log, the delete question, the type picked, the Rename field. */
-async function resetCardView($: EngineInterface): Promise<void> {
-  await update($, commentA, () => '')
+/** Resets what belongs to the card shown: the comment typed, the whole log, the delete question, the type picked, the Rename field. The caller has changed the selection, which redraws. */
+async function resetCardView($: EngineInterface, ctx: Ctx): Promise<void> {
+  ctx.drafts.comment = ''
+  ctx.drafts.rename = ''
   await update($, showLogA, () => false)
   await update($, showDetailsA, () => false)
   await update($, confirmDeleteA, () => false)
   await update($, retypePickA, () => '')
-  await update($, renamingA, () => ({ isOpen: false, title: '' }))
+  await update($, renamingA, () => ({ isOpen: false }))
 }
 
 /**
@@ -967,7 +1141,7 @@ async function followRetypes($: EngineInterface): Promise<void> {
 }
 
 /** Closes the card view (and what it keeps) once its card is gone or unreadable; a retyped card stays open under its new ID. */
-async function dropStaleSelection($: EngineInterface): Promise<void> {
+async function dropStaleSelection($: EngineInterface, ctx: Ctx): Promise<void> {
   const selected = await read($, selectedA)
   if (selected === null) return
   const snap = await read($, snapshotA)
@@ -980,7 +1154,7 @@ async function dropStaleSelection($: EngineInterface): Promise<void> {
     return
   }
   await update($, selectedA, () => null)
-  await resetCardView($)
+  await resetCardView($, ctx)
 }
 
 /** What the open card draws: the content model of hooks/lib/cardview.ts, and the card's text as Markdown (everything but the plan and the Log). */
@@ -1008,7 +1182,7 @@ async function openCardOf(
   let text = ctx.cache.get(card.file)?.text
   if (text === undefined) {
     try {
-      text = await $.fs.read('kanban/' + card.file)
+      text = await $.fs.read(kanbanPath(card.file))
     } catch {
       return null
     }
@@ -1091,7 +1265,7 @@ async function logOutsideMoves($: EngineInterface, ctx: Ctx): Promise<void> {
     }
     ctx.busy.add(c.file)
     try {
-      const path = 'kanban/' + c.file
+      const path = kanbanPath(c.file)
       const before = await $.fs.stat(path)
       const text = await $.fs.read(path)
       const card = parseCard(text, c.file)
@@ -1122,7 +1296,7 @@ function refresh($: EngineInterface, ctx: Ctx): Promise<void> {
       await logOutsideMoves($, ctx)
       await loadWorking($)
       await followRetypes($)
-      await dropStaleSelection($)
+      await dropStaleSelection($, ctx)
     })
     .catch(async (err: unknown) => {
       try {
@@ -1161,7 +1335,9 @@ function tick($: EngineInterface, ctx: Ctx): void {
   void (async () => {
     try {
       await bumpMinute($)
-      if (!(await $.fs.exists(BOARD_FILE))) {
+      ctx.ticks += 1
+      if (ctx.ticks % MODEL_READ_TICKS === 0) await syncChatModel($)
+      if (!(await $.fs.exists(kanbanPath('board.md')))) {
         ctx.skip = NO_BOARD_TICKS - 1
         await refresh($, ctx)
         return
@@ -1180,7 +1356,7 @@ function ensureTicker($: EngineInterface, ctx: Ctx): void {
   if (ctx.ticker === null) ctx.ticker = $.clock.every(TICK_MS, () => tick($, ctx))
 }
 
-// ---------------------------------------------------------------- prompts and the manager model
+// ---------------------------------------------------------------- prompts and the chat's model
 
 /** Submits a prompt as the person's words. Never awaited: it resolves when its turn starts, which can be long. */
 function submitPrompt($: EngineInterface, text: string): void {
@@ -1197,39 +1373,19 @@ function submitPrompt($: EngineInterface, text: string): void {
     .catch(() => {})
 }
 
-/** C6: run /model <wanted>, then check it took; if not, tell the person to run it. Resolves to whether it took. */
-async function switchModel($: EngineInterface, wanted: string): Promise<boolean> {
+/** Reads the chat's own model; '' when the engine cannot say. */
+async function readChatModel($: EngineInterface): Promise<string> {
   try {
-    await $.command.run({ command: 'model', args: wanted })
+    return String(await $.session.model())
   } catch {
-    // the check below says whether it took
+    return ''
   }
-  let current = ''
-  try {
-    current = await $.session.model()
-  } catch {
-    current = ''
-  }
-  if (modelIs(current, wanted)) return true
-  $.ui.toast(`run /model ${wanted} yourself`)
-  return false
 }
 
-/** The check made after the session or the pane opens. A switch it makes is said out loud, not left as a bare /model line. */
-async function checkModel($: EngineInterface): Promise<void> {
-  const snap = await read($, snapshotA)
-  if (snap === null || !snap.hasBoard || snap.isReadOnly) return
-  const wanted = snap.settings.managerModel
-  if (modelIs(await $.session.model(), wanted)) return
-  if (!(await switchModel($, wanted))) return
-  $.ui.toast(`Kanban: this board's manager model is ${wanted}, so the session was switched to it. Change it under Settings.`)
-}
-
-/** After the dispatch: `command.run` rejects inside a hook the turn is waiting on. */
-function scheduleModelCheck($: EngineInterface): void {
-  $.clock.after(MODEL_CHECK_MS, () => {
-    void checkModel($).catch(() => {})
-  })
+/** Keeps the chat's model in state, writing only when it changed so the pane does not redraw each tick. The board never switches it. */
+async function syncChatModel($: EngineInterface): Promise<void> {
+  const current = await readChatModel($)
+  if ((await read($, chatModelA)) !== current) await update($, chatModelA, () => current)
 }
 
 // ---------------------------------------------------------------- writing: moves, adds, comments, settings
@@ -1302,7 +1458,7 @@ function slotFor(others: readonly PlaceCard[], before: string | null): Slot | un
 async function placedAsShown($: EngineInterface, board: Board, lane: string, card: PlaceCard): Promise<boolean> {
   if (!isCardFileName(card.file)) return false
   try {
-    const parsed = parseCard(await $.fs.read('kanban/' + card.file), card.file)
+    const parsed = parseCard(await $.fs.read(kanbanPath(card.file)), card.file)
     return parsed.ok && parsed.value.id === card.id && parsed.value.order === card.order && findLane(board, parsed.value.status)?.label === lane
   } catch {
     return false
@@ -1351,7 +1507,7 @@ async function performMove($: EngineInterface, ctx: Ctx, data: unknown): Promise
   const held: string[] = [file]
   ctx.busy.add(file)
   try {
-    const boardRead = parseBoard(await $.fs.read(BOARD_FILE))
+    const boardRead = parseBoard(await $.fs.read(kanbanPath('board.md')))
     if (!boardRead.ok) return await refuse(`${NOT_READABLE} Nothing was moved.`)
     const board = boardRead.value
     const from = findLane(board, fromName)
@@ -1365,7 +1521,7 @@ async function performMove($: EngineInterface, ctx: Ctx, data: unknown): Promise
     if (isSameLane && !(isPlace && !to.isClaudeOnly && canPlace(sort))) return await refuse(`${id} is already in ${from.label}.`)
 
     // Re-read the card: the Client's view may be a second old, and a person or Claude may have changed it since.
-    const path = 'kanban/' + file
+    const path = kanbanPath(file)
     const before = await $.fs.stat(path)
     const text = await $.fs.read(path)
     const card = parseCard(text, file)
@@ -1401,7 +1557,7 @@ async function performMove($: EngineInterface, ctx: Ctx, data: unknown): Promise
         held.push(c.file)
       }
       for (const c of slot.rewrites) {
-        const renumbered = setOrder(await $.fs.read('kanban/' + c.file), c.order)
+        const renumbered = setOrder(await $.fs.read(kanbanPath(c.file)), c.order)
         if (!renumbered.ok) return await refuse(`${c.id} cannot be read: ${renumbered.message} Nothing was moved.`)
         rewrites.push({ card: c, text: renumbered.value })
       }
@@ -1414,13 +1570,13 @@ async function performMove($: EngineInterface, ctx: Ctx, data: unknown): Promise
     if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) return await refuse(STALE_MOVE)
     // Each renumbered card is stat-ed, read and stat-ed again: a changed one stops the whole move before any write.
     for (const r of rewrites) {
-      const rp = 'kanban/' + r.card.file
+      const rp = kanbanPath(r.card.file)
       const first = await $.fs.stat(rp)
       const edited = setOrder(await $.fs.read(rp), r.card.order)
       const second = await $.fs.stat(rp)
       if (!edited.ok || edited.value !== r.text || second.mtimeMs !== first.mtimeMs || second.size !== first.size) return await refuse(STALE_MOVE)
     }
-    for (const r of rewrites) await $.fs.write('kanban/' + r.card.file, r.text)
+    for (const r of rewrites) await $.fs.write(kanbanPath(r.card.file), r.text)
     if (moved.value !== text) await $.fs.write(path, moved.value)
     const isBusy = await claudeIsBusy($)
     await refresh($, ctx)
@@ -1494,7 +1650,7 @@ async function performSet($: EngineInterface, ctx: Ctx, data: unknown): Promise<
 
   ctx.busy.add(file)
   try {
-    const path = 'kanban/' + file
+    const path = kanbanPath(file)
     const before = await $.fs.stat(path)
     const text = await $.fs.read(path)
     const card = parseCard(text, file)
@@ -1528,7 +1684,7 @@ const ADD_TRIES = 3
 /** The file names in kanban/ now ([] when the folder cannot be listed). */
 async function cardFileNames($: EngineInterface): Promise<string[]> {
   try {
-    const entries: FsEntry[] = await $.fs.list('kanban')
+    const entries: FsEntry[] = await $.fs.list(kanbanPath())
     return entries.map((en) => en.name)
   } catch {
     return []
@@ -1563,8 +1719,8 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
     // that reads the board afterwards takes the next number. If board.md moved between the read and the write, read it again
     // and compute again rather than overwrite someone else's change.
     for (let attempt = 1; ; attempt++) {
-      const before = await $.fs.stat(BOARD_FILE)
-      const boardText = await $.fs.read(BOARD_FILE)
+      const before = await $.fs.stat(kanbanPath('board.md'))
+      const boardText = await $.fs.read(kanbanPath('board.md'))
       const boardRead = parseBoard(boardText)
       if (!boardRead.ok) return await refuse(`${NOT_READABLE} Nothing was added.`)
       const board = boardRead.value
@@ -1585,15 +1741,15 @@ async function performAdd($: EngineInterface, ctx: Ctx, laneName: string, rawTit
       if (!nextBoard.ok) return await refuse(nextBoard.message)
 
       const file = cardFileName(made.id, title)
-      const path = 'kanban/' + file
+      const path = kanbanPath(file)
       if (!isCardFileName(file)) return await refuse(`${made.id} already exists; nothing was added.`)
-      const after = await $.fs.stat(BOARD_FILE)
+      const after = await $.fs.stat(kanbanPath('board.md'))
       if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
         if (attempt < ADD_TRIES) continue
         return await refuse('board.md changed while the card was made; nothing was added.')
       }
 
-      await $.fs.write(BOARD_FILE, nextBoard.value)
+      await $.fs.write(kanbanPath('board.md'), nextBoard.value)
       // The number is ours now (a number reserved and not used is a gap, accepted). Any file with this ID, whatever its slug, means someone else took it first.
       if ((await cardFileNames($)).some((n) => n.startsWith(made.id + '-'))) {
         await refresh($, ctx)
@@ -1688,13 +1844,9 @@ async function openAdd($: EngineInterface, ctx: Ctx): Promise<void> {
 }
 
 /** `Cancel`: hides the row and forgets the title, the lane and the type picked. */
-async function closeAdd($: EngineInterface): Promise<void> {
-  await update($, addA, () => ({ isOpen: false, title: '', lane: '', type: '' }))
-}
-
-/** Keeps the title typed so the one-second redraw gives it back. */
-async function typeAdd($: EngineInterface, value: string): Promise<void> {
-  await update($, addA, (a) => ({ ...a, title: value }))
+async function closeAdd($: EngineInterface, ctx: Ctx): Promise<void> {
+  ctx.drafts.add = ''
+  await update($, addA, () => ({ isOpen: false, lane: '', type: '' }))
 }
 
 async function pickAddLane($: EngineInterface, label: string): Promise<void> {
@@ -1722,27 +1874,55 @@ async function submitAdd($: EngineInterface, ctx: Ctx, value: string | null): Pr
     $.ui.toast('No lane takes new cards.')
     return
   }
-  if (await performAdd($, ctx, lane, value ?? kept.title, addTypeOf(snap, kept.type ?? ''))) {
+  if (await performAdd($, ctx, lane, value ?? ctx.drafts.add, addTypeOf(snap, kept.type ?? ''))) {
     ctx.isFocusDue = true
-    await update($, addA, (a) => ({ ...a, title: '' }))
+    ctx.drafts.add = ''
+    await redrawDrafts($)
   }
 }
 
-/** Enter in the Find field: opens the first card that matches, in board order (lane by lane, each lane by card order). Nothing matches: nothing happens. */
-async function openFirstMatch($: EngineInterface): Promise<void> {
+/** Typing in the Find field: the text is kept at once and the cards are filtered by it after a short pause with no key (each key restarts the pause). */
+function typeFind($: EngineInterface, ctx: Ctx, value: string): void {
+  ctx.drafts.find = value
+  ctx.findTimer?.cancel()
+  ctx.findTimer = $.clock.after(FIND_PAUSE_MS, () => {
+    ctx.findTimer = null
+    void update($, findA, () => ctx.drafts.find).catch(() => {})
+  })
+}
+
+/** Stops a waiting Find pause; the caller filters at once. */
+function stopFindPause(ctx: Ctx): void {
+  ctx.findTimer?.cancel()
+  ctx.findTimer = null
+}
+
+/** `Clear`: empties the field and shows every card at once. The field changes even when the cards already show all of them, so it redraws either way. */
+async function clearFind($: EngineInterface, ctx: Ctx): Promise<void> {
+  stopFindPause(ctx)
+  ctx.drafts.find = ''
+  await update($, findA, () => '')
+  await redrawDrafts($)
+}
+
+/** Enter in the Find field: opens the first card that matches the text typed, in board order (lane by lane, each lane by card order). Nothing matches: a toast. */
+async function openFirstMatch($: EngineInterface, ctx: Ctx): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard) return
-  const words = findWords(await read($, findA))
+  const find = ctx.drafts.find
+  stopFindPause(ctx)
+  await update($, findA, () => find)
+  const words = findWords(find)
   if (words.length === 0) return
   const board = boardOf(snap)
   for (const g of groupByLane(board, snap.cards.map(toCard)).lanes) {
     const hit = g.cards.find((c) => matchesFind(c, words, board.types))
     if (hit !== undefined) {
-      await openCard($, hit.id)
+      await openCard($, ctx, hit.id)
       return
     }
   }
-  $.ui.toast(noMatchText(await read($, findA)) + '.')
+  $.ui.toast(noMatchText(find) + '.')
 }
 
 /** The one Sort for the whole board, kept the way a `view` message keeps it (rememberView). */
@@ -1775,7 +1955,7 @@ async function foldAll($: EngineInterface, isOpen: boolean): Promise<void> {
 }
 
 /** The Client, the top zone or a Close button selected a card, or none. A card the snapshot does not have is ignored. */
-async function pickSelected($: EngineInterface, id: string | null): Promise<void> {
+async function pickSelected($: EngineInterface, ctx: Ctx, id: string | null): Promise<void> {
   let to = id
   if (id !== null) {
     const snap = await read($, snapshotA)
@@ -1784,11 +1964,11 @@ async function pickSelected($: EngineInterface, id: string | null): Promise<void
   }
   if ((await read($, selectedA)) === to) return
   await update($, selectedA, () => to)
-  await resetCardView($)
+  await resetCardView($, ctx)
 }
 
 /** The open card's Previous (-1) and Next (1): opens the neighbour in shownIds. No wrap; at either end, or when the open card is not in the list, nothing happens. */
-async function stepCard($: EngineInterface, dir: -1 | 1): Promise<void> {
+async function stepCard($: EngineInterface, ctx: Ctx, dir: -1 | 1): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard) return
   const selected = await read($, selectedA)
@@ -1796,12 +1976,12 @@ async function stepCard($: EngineInterface, dir: -1 | 1): Promise<void> {
   const ids = shownIds(snap, await read($, lanesViewA), await read($, findA))
   const at = ids.indexOf(selected)
   const to = at === -1 ? undefined : ids[at + dir]
-  if (to !== undefined) await pickSelected($, to)
+  if (to !== undefined) await pickSelected($, ctx, to)
 }
 
 /** The header opens a card: on the Board tab, whichever tab was chosen. A card the snapshot does not have changes nothing. */
-async function openCard($: EngineInterface, id: string | null): Promise<void> {
-  await pickSelected($, id)
+async function openCard($: EngineInterface, ctx: Ctx, id: string | null): Promise<void> {
+  await pickSelected($, ctx, id)
   if (id !== null && (await read($, selectedA)) === id) {
     await update($, confirmRestoreA, () => false)
     await update($, confirmOriginalA, () => false)
@@ -1813,7 +1993,7 @@ async function openCard($: EngineInterface, id: string | null): Promise<void> {
  * A press on a header tab. Settings is refused while the board cannot be read. Board, while the Board tab is the one showing,
  * closes the open card; from the Settings tab it shows the Board tab (a card opened before stays open, as the other kept view does).
  */
-async function chooseTab($: EngineInterface, tab: 'board' | 'settings'): Promise<void> {
+async function chooseTab($: EngineInterface, ctx: Ctx, tab: 'board' | 'settings'): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard) return
   if (tab === 'settings') {
@@ -1830,18 +2010,18 @@ async function chooseTab($: EngineInterface, tab: 'board' | 'settings'): Promise
   await update($, confirmRestoreA, () => false)
   await update($, confirmOriginalA, () => false)
   await update($, tabA, () => 'board')
-  if (wasBoard) await pickSelected($, null)
+  if (wasBoard) await pickSelected($, ctx, null)
 }
 
 /** The header's attention block: opens the first card that waits on the person; again, the next one, wrapping. */
-async function openWaiting($: EngineInterface): Promise<void> {
+async function openWaiting($: EngineInterface, ctx: Ctx): Promise<void> {
   const snap = await read($, snapshotA)
   if (snap === null || !snap.hasBoard) return
   const ids = waitingIds(snap)
   if (ids.length === 0) return
   const selected = await read($, selectedA)
   const at = selected === null ? -1 : ids.indexOf(selected)
-  await openCard($, ids[(at + 1) % ids.length] ?? null)
+  await openCard($, ctx, ids[(at + 1) % ids.length] ?? null)
 }
 
 /** The card's ID on the clipboard of the surface the press or the menu was drawn on. */
@@ -2002,7 +2182,7 @@ async function handleMessage($: EngineInterface, ctx: Ctx, surface: RenderSurfac
     return replyProps($)
   }
   if (data.type === 'select' && isIdOrNull(data.id)) {
-    await pickSelected($, data.id)
+    await pickSelected($, ctx, data.id)
     return replyProps($)
   }
   // The Client's `⋯` on a card: the Client draws the menu under the card itself, so the pane opens nothing and only answers with the props.
@@ -2041,7 +2221,7 @@ async function performComment($: EngineInterface, ctx: Ctx, id: string, raw: str
 
   ctx.busy.add(file)
   try {
-    const path = 'kanban/' + file
+    const path = kanbanPath(file)
     const before = await $.fs.stat(path)
     const text = await $.fs.read(path)
     const card = parseCard(text, file)
@@ -2088,7 +2268,7 @@ async function performRename($: EngineInterface, ctx: Ctx, id: string, raw: stri
 
   ctx.busy.add(file)
   try {
-    const path = 'kanban/' + file
+    const path = kanbanPath(file)
     const before = await $.fs.stat(path)
     const text = await $.fs.read(path)
     const card = parseCard(text, file)
@@ -2112,14 +2292,19 @@ async function performRename($: EngineInterface, ctx: Ctx, id: string, raw: stri
 
 /** The Rename field's own submit (Enter, or the `Save` the app draws beside it): writes, then closes the field. */
 async function renameTo($: EngineInterface, ctx: Ctx, id: string, raw: string): Promise<void> {
-  if (await performRename($, ctx, id, raw)) await update($, renamingA, () => ({ isOpen: false, title: '' }))
+  if (await performRename($, ctx, id, raw)) {
+    ctx.drafts.rename = ''
+    await update($, renamingA, () => ({ isOpen: false }))
+  }
 }
 
 /** `Rename` opens the field with the card's own title in it; `Cancel` closes it. */
-async function setRenaming($: EngineInterface, id: string, isOpen: boolean): Promise<void> {
+async function setRenaming($: EngineInterface, ctx: Ctx, id: string, isOpen: boolean): Promise<void> {
   const snap = await read($, snapshotA)
   const found = snap === null ? undefined : snap.cards.find((c) => c.id === id)
-  await update($, renamingA, () => ({ isOpen: isOpen && found !== undefined, title: isOpen && found !== undefined ? found.title : '' }))
+  const isShown = isOpen && found !== undefined
+  ctx.drafts.rename = isShown ? found.title : ''
+  await update($, renamingA, () => ({ isOpen: isShown }))
 }
 
 /** The Select pick on the Settings tab, or null when the key or the value is not one the tab offers. `value` is the word to write; `toast` says it. */
@@ -2165,8 +2350,8 @@ async function editSettings(
     $.ui.toast('board.md is being edited by Claude; try again in a moment.')
     return false
   }
-  const before = await $.fs.stat(BOARD_FILE)
-  const text = await $.fs.read(BOARD_FILE)
+  const before = await $.fs.stat(kanbanPath('board.md'))
+  const text = await $.fs.read(kanbanPath('board.md'))
   const edited = edit(text)
   if (!edited.ok) {
     $.ui.toast(edited.message)
@@ -2174,13 +2359,13 @@ async function editSettings(
     return false
   }
   if (edited.value !== text) {
-    const after = await $.fs.stat(BOARD_FILE)
+    const after = await $.fs.stat(kanbanPath('board.md'))
     if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
       $.ui.toast('board.md changed while it was edited; nothing was saved.')
       await refresh($, ctx)
       return false
     }
-    await $.fs.write(BOARD_FILE, edited.value)
+    await $.fs.write(kanbanPath('board.md'), edited.value)
   }
   await refresh($, ctx)
   const said = say(text, edited.value)
@@ -2188,15 +2373,33 @@ async function editSettings(
   return true
 }
 
-/** A Select pick in the settings tab: validate, write that one settings line of board.md, redraw, say so; for the manager model also run /model. A thinking pick never touches the running conversation. */
+/** A Select pick in the settings tab: validate, write that one settings line of board.md, redraw, say so. No pick changes the running chat's model or thinking. */
 async function applySetting($: EngineInterface, ctx: Ctx, key: SettingKey, raw: string): Promise<void> {
   const pick = settingPick(key, raw)
   if (pick === null) {
     $.ui.toast(`"${cleanText(raw, 30)}" is not a choice for ${key.replace(/_/g, ' ')}.`)
     return
   }
-  const wrote = await editSettings($, ctx, (text) => setBoardSetting(text, key, pick.value), () => pick.toast)
-  if (wrote && key === 'manager_model') void switchModel($, pick.value).catch(() => {})
+  await editSettings($, ctx, (text) => setBoardSetting(text, key, pick.value), () => pick.toast)
+}
+
+/** `Change to opus`: puts `/model opus` on the clipboard of the surface the press was drawn on and says where to paste it. It runs nothing: the chat's model is the person's to change. */
+async function copyModelCommand($: EngineInterface, surface: RenderSurface, wanted: string): Promise<void> {
+  const line = modelLine('', wanted)
+  let done: string
+  try {
+    const copied = await $.ui.copy({ text: `/model ${wanted}`, surface })
+    done = copied.isCopied ? line.copiedToast : line.notCopiedToast
+  } catch {
+    done = line.notCopiedToast
+  }
+  $.ui.toast(done)
+}
+
+/** `Keep sonnet`: the board's Manager model becomes the chat's model, the way picking it in the Settings tab does (same write, same toast, same refusal on a board that cannot be written). Runs no `/model`. The button is drawn only for one of the four choices; a stale press for another writes nothing. */
+async function keepChatModel($: EngineInterface, ctx: Ctx): Promise<void> {
+  const word = modelWord(await read($, chatModelA))
+  if (modelChoices('manager').some((c) => c.value === word)) await applySetting($, ctx, 'manager_model', word)
 }
 
 /** `Reset` on a row: removes that row's saved lines, so the shipped defaults apply to it again. A stale press with nothing saved writes and says nothing. */
@@ -2232,7 +2435,10 @@ async function applyRestoreOriginal($: EngineInterface, ctx: Ctx): Promise<void>
 
 /** The Comment box's own submit (Enter, or the `Comment` the app draws beside the field): writes the Log line, then empties the field. */
 async function commentOn($: EngineInterface, ctx: Ctx, id: string, raw: string): Promise<void> {
-  if (await performComment($, ctx, id, raw)) await update($, commentA, () => '')
+  if (await performComment($, ctx, id, raw)) {
+    ctx.drafts.comment = ''
+    await redrawDrafts($)
+  }
 }
 
 /** A pick in the card view (Move to, a flag box button): a move exactly as a drop would make it. */
@@ -2247,7 +2453,7 @@ function approveFromView($: EngineInterface, ctx: Ctx, id: string, from: string,
     const snap = await read($, snapshotA)
     const found = snap?.cards.find((c) => c.id === id)
     if (snap === null || found === undefined || laneOfCard(snap, found)?.label !== to) return
-    if ((await read($, selectedA)) === id) await pickSelected($, null)
+    if ((await read($, selectedA)) === id) await pickSelected($, ctx, null)
   })().catch((err: unknown) => noticeError($, err))
 }
 
@@ -2324,7 +2530,7 @@ async function openBoard($: EngineInterface, ctx: Ctx, focus: boolean): Promise<
   await refresh($, ctx)
   const opened = await $.ui.open({ id: PANE, title: 'Kanban', columns: PANE_COLUMNS, ...(focus ? { focus: true as const } : {}) })
   if (opened.isPlaced) await update($, paneShownA, () => true)
-  scheduleModelCheck($)
+  await syncChatModel($)
   return opened
 }
 
@@ -2386,12 +2592,18 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: 'Open the kanban board pane' })
     // Find is not remembered: it starts empty with each session.
+    stopFindPause(ctx)
+    ctx.drafts.find = ''
     await update($, findA, () => '')
     // A new session has no turn running.
     await update($, inTurnA, () => false)
-    // A `-p` run or the SDK has nobody at the prompt and nothing draws: no pane, no tick, and never a model switch.
+    // The board is found from the project root, not from wherever a chat's shell has since cd'd.
+    startRoot = typeof e.cwd === 'string' ? e.cwd : ''
+    await syncRoot($)
+    // A `-p` run or the SDK has nobody at the prompt and nothing draws: no pane, no tick, and no model read.
     ctx.isInteractive = e.isInteractive === true
     if (e.isInteractive) {
+      await syncChatModel($)
       await refresh($, ctx)
       ensureTicker($, ctx)
       const snap = await read($, snapshotA)
@@ -2401,9 +2613,14 @@ export const register: Register = (on) => {
           .open({ id: PANE, title: 'Kanban', columns: PANE_COLUMNS })
           .then((opened) => update($, paneShownA, () => opened.isPlaced))
           .catch(() => {})
-        scheduleModelCheck($)
       }
     }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The Find pause is a timer of this copy of the module: it ends with the session.
+  on('session.end', async ($, e, next) => {
+    stopFindPause(ctx)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -2421,14 +2638,17 @@ export const register: Register = (on) => {
     const queued = await read($, queuedA)
     const turnCard = await read($, turnCardA)
     const isInTurn = await read($, inTurnA)
+    const chatModel = await read($, chatModelA)
     const selected = await read($, selectedA)
-    const comment = await read($, commentA)
+    // Read so that a field changed by something other than typing redraws; the text itself is in ctx.drafts.
+    await read($, draftsA)
     const chosenTab = await read($, tabA)
     // Read so that the tick's minute bump redraws the pane: what it shows that reads the clock moves once a minute.
     await read($, minuteA)
     const nowMs = await $.clock.now()
     const showLog = await read($, showLogA)
     const showDetails = await read($, showDetailsA)
+    const showAllProblems = await read($, showAllProblemsA)
     const confirmDelete = await read($, confirmDeleteA)
     const retypePick = await read($, retypePickA)
     const renaming = await read($, renamingA)
@@ -2437,7 +2657,10 @@ export const register: Register = (on) => {
     const lanesView = await read($, lanesViewA)
     const boardView = withTabChanges(lanesView, await read($, tabChangesA))
     const add = await read($, addA)
+    const fault = await read($, faultA)
+    // The cards are filtered by the applied Find (findA); the field shows the draft, which may be a keystroke or two ahead.
     const find = await read($, findA)
+    const { drafts } = ctx
 
     if (e.surface === 'desktop' || e.surface === 'terminal') {
       const el = $.ui.resolve(e)
@@ -2451,7 +2674,8 @@ export const register: Register = (on) => {
           </Box>
         )
       }
-      const columns = e.props.bodyColumns
+      // A width that is not a finite number (the app sent none) would make the app refuse the whole drawing: the default width stands in.
+      const columns = typeof e.props.bodyColumns === 'number' && Number.isFinite(e.props.bodyColumns) ? e.props.bodyColumns : PANE_COLUMNS
       const s = snap.settings
       const tab = shownTab(snap, chosenTab)
       const open = tab === 'board' ? await openCardOf($, ctx, snap, selected, working, queued, turnCard, showLog, isInTurn) : null
@@ -2463,7 +2687,8 @@ export const register: Register = (on) => {
       const options = (values: readonly string[]) => values.map((value) => ({ value }))
       // The Settings tab: the values it shows (hooks/ui/settings.tsx draws them as flex rows).
       const settings = tab === 'settings' ? settingsValues(s) : null
-      const unreadable = unreadableLines(snap.bad)
+      const problems = problemGroups(snap.bad)
+      const hasLongList = problems.some((g) => g.entries.length > MAX_PROBLEM_ENTRIES)
       const box: StatusBox | null = view === null ? null : view.box
       // The Select shows the card's real lane as its value, so the value is always one of its options (a status no lane has is added first).
       const moveValues = view === null ? [] : view.moveTo.options.map((o) => o.label)
@@ -2481,28 +2706,34 @@ export const register: Register = (on) => {
       if (isFresh) ctx.isFocusDue = false
       return (
         <Box flexDirection="column">
-          {headerTree(el, { ...headerProps(snap, working, queued, turnCard, tab, selected), now: clockOf(nowMs) }, columns, {
+          {headerTree(el, { ...headerProps(snap, working, queued, turnCard, tab, selected, chatModel), now: clockOf(nowMs) }, columns, {
+            copyModel: () => {
+              void copyModelCommand($, e.surface, snap.settings.managerModel).catch((err: unknown) => noticeError($, err))
+            },
+            keepModel: () => {
+              void keepChatModel($, ctx).catch((err: unknown) => noticeError($, err))
+            },
             openWaiting: () => {
-              void openWaiting($).catch((err: unknown) => noticeError($, err))
+              void openWaiting($, ctx).catch((err: unknown) => noticeError($, err))
             },
             select: (id) => {
-              void openCard($, id).catch((err: unknown) => noticeError($, err))
+              void openCard($, ctx, id).catch((err: unknown) => noticeError($, err))
             },
             tab: (next) => {
-              void chooseTab($, next).catch((err: unknown) => noticeError($, err))
+              void chooseTab($, ctx, next).catch((err: unknown) => noticeError($, err))
             },
           })}
           {view === null &&
             tab === 'board' &&
-            toolbarTree(el, toolbarProps(snap, add, lanesView, columns, isFresh, find), {
+            toolbarTree(el, toolbarProps(snap, { ...add, title: drafts.add }, lanesView, columns, isFresh, drafts.find), {
               open: () => {
                 void openAdd($, ctx).catch((err: unknown) => noticeError($, err))
               },
               cancel: () => {
-                void closeAdd($).catch((err: unknown) => noticeError($, err))
+                void closeAdd($, ctx).catch((err: unknown) => noticeError($, err))
               },
               type: (value) => {
-                void typeAdd($, value).catch(() => {})
+                ctx.drafts.add = value
               },
               add: (value) => {
                 void submitAdd($, ctx, value).catch((err: unknown) => noticeError($, err))
@@ -2522,14 +2753,12 @@ export const register: Register = (on) => {
               expandAll: () => {
                 void foldAll($, true).catch((err: unknown) => noticeError($, err))
               },
-              setFind: (value) => {
-                void update($, findA, () => value).catch(() => {})
-              },
+              setFind: (value) => typeFind($, ctx, value),
               openFirst: () => {
-                void openFirstMatch($).catch((err: unknown) => noticeError($, err))
+                void openFirstMatch($, ctx).catch((err: unknown) => noticeError($, err))
               },
               clearFind: () => {
-                void update($, findA, () => '').catch(() => {})
+                void clearFind($, ctx).catch(() => {})
               },
             })}
           {snap.isReadOnly && (
@@ -2558,19 +2787,46 @@ export const register: Register = (on) => {
                   await update($, confirmOriginalA, () => isAsking)
                 })().catch(() => {})
               },
-            }, confirmRestore, defaultsOf(s), (s.savedDefaults ?? []).length > 0, confirmOriginal)}
-          {view === null && tab === 'board' && unreadable.length > 0 && (
+            }, confirmRestore, defaultsOf(s), (s.savedDefaults ?? []).length > 0, confirmOriginal, modelLine(chatModel, s.managerModel).settings)}
+          {view === null && tab === 'board' && problems.length > 0 && (
             <Box key="unreadable" flexDirection="column" flexShrink={1} minWidth={0}>
-              {unreadable.map((line, n) => (
-                <Box key={`unreadable-${n}`} flexShrink={1} minWidth={0} overflow="hidden">
-                  <Text dimColor wrap="truncate-end">
-                    {line}
+              {problems.map((g, n) => (
+                <Box key={`unreadable-${n}`} flexDirection="column" flexShrink={1} minWidth={0}>
+                  <Text color="warning" wrap="wrap">
+                    {g.sentence}
+                  </Text>
+                  <Text dimColor wrap="wrap">
+                    {problemList(g, showAllProblems)}
                   </Text>
                 </Box>
               ))}
+              {(hasLongList || showAllProblems) && (
+                <Box key="unreadable-all-box" flexShrink={0}>
+                  <Button
+                    key="unreadable-all"
+                    label={showAllProblems ? 'Show fewer' : 'Show all'}
+                    plain
+                    onPress={() => {
+                      void update($, showAllProblemsA, () => !showAllProblems).catch(() => {})
+                    }}
+                  />
+                </Box>
+              )}
             </Box>
           )}
-          {view === null && tab === 'board' && (
+          {view === null && tab === 'board' && fault !== null && (
+            <Box flexDirection="column">
+              <Text dimColor>{drawFaultLine(fault)}</Text>
+              <Button
+                key="retry-draw"
+                label="Retry"
+                onPress={() => {
+                  void update($, faultA, () => null).catch(() => {})
+                }}
+              />
+            </Box>
+          )}
+          {view === null && tab === 'board' && fault === null && (
             <Client key="board" module="./board.tsx" props={boardProps(snap, working, queued, turnCard, selected, boardView, nowMs, find, isInTurn)} width={columns} />
           )}
           {view !== null &&
@@ -2593,19 +2849,19 @@ export const register: Register = (on) => {
                 autoModel: autoWords.model,
                 autoThinking: autoWords.thinking,
                 columns,
-                comment,
+                comment: drafts.comment,
                 confirmDelete,
                 retypePick,
-                renaming,
+                renaming: { isOpen: renaming.isOpen, title: drafts.rename },
                 showDetails,
                 step,
               },
               {
                 select: (id) => {
-                  void pickSelected($, id).catch(() => {})
+                  void pickSelected($, ctx, id).catch(() => {})
                 },
                 step: (dir) => {
-                  void stepCard($, dir).catch((err: unknown) => noticeError($, err))
+                  void stepCard($, ctx, dir).catch((err: unknown) => noticeError($, err))
                 },
                 move: (id, from, to) => moveFromView($, ctx, id, from, to),
                 approve: (id, from, to) => approveFromView($, ctx, id, from, to),
@@ -2623,7 +2879,7 @@ export const register: Register = (on) => {
                   void update($, showLogA, () => true).catch(() => {})
                 },
                 typeComment: (value) => {
-                  void update($, commentA, () => value).catch(() => {})
+                  ctx.drafts.comment = value
                 },
                 comment: (id, value) => {
                   void commentOn($, ctx, id, value).catch((err: unknown) => noticeError($, err))
@@ -2647,13 +2903,13 @@ export const register: Register = (on) => {
                   void copyText($, e.surface, text, 'command').catch((err: unknown) => noticeError($, err))
                 },
                 setRenaming: (isOpen) => {
-                  void setRenaming($, view.id, isOpen).catch((err: unknown) => noticeError($, err))
+                  void setRenaming($, ctx, view.id, isOpen).catch((err: unknown) => noticeError($, err))
                 },
                 setDetails: (isOpen) => {
                   void update($, showDetailsA, () => isOpen).catch(() => {})
                 },
                 typeRename: (value) => {
-                  void update($, renamingA, () => ({ isOpen: true, title: value })).catch(() => {})
+                  ctx.drafts.rename = value
                 },
                 rename: (id, value) => {
                   void renameTo($, ctx, id, value).catch((err: unknown) => noticeError($, err))
@@ -2678,9 +2934,17 @@ export const register: Register = (on) => {
         ))}
       </Box>
     )
-  }).catch(($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return <Text dimColor>kanban: the board could not be drawn.</Text>
+  }).catch((_$, _e, next) => {
+    // Built with no call to the app ($.ui.resolve could fail the way the body did): a plain Text tree.
+    const why = next.error.message ?? (next.error.kind === 'timeout' ? 'the drawing took too long' : 'unknown error')
+    return { type: 'Text' as const, props: { dimColor: true }, children: [drawFaultLine(why)] }
+  })
+
+  // The app could not draw the board region (its module failed, or the tree was refused): keep why, and the redraw shows the line and Retry.
+  // Observe only; the redraw this causes asks for no other, so a fault that repeats right after Retry stays shown and nothing retries by itself.
+  on('ui.fault', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    await update($, faultA, () => e.reason).catch(() => {})
+    return next(e)
   })
 
   // The Board chip above the chat box: shown with a board, no survey holding the band and the pane not shown (hooks/openbutton.tsx).
@@ -2733,7 +2997,7 @@ export const register: Register = (on) => {
     if (e.tool === 'Write' && isCardFileName(name)) {
       try {
         const id = /^([A-Z]{1,10}-\d{4,})-/.exec(name)?.[1]
-        if (id !== undefined && !(await $.fs.exists('kanban/' + name))) {
+        if (id !== undefined && !(await $.fs.exists(kanbanPath(name)))) {
           const other = await fileHoldingId($, id, name)
           if (other !== null) {
             const counter = 'next_' + id.slice(0, id.indexOf('-')).toLowerCase()
@@ -2748,7 +3012,7 @@ export const register: Register = (on) => {
     let isNewBoard = false
     if (e.tool === 'Write' && name === 'board.md' && e.agentId === undefined && ctx.isInteractive) {
       try {
-        isNewBoard = !(await $.fs.exists('kanban/board.md'))
+        isNewBoard = !(await $.fs.exists(kanbanPath('board.md')))
       } catch {
         // cannot tell: no pane
       }
@@ -2823,6 +3087,7 @@ export const register: Register = (on) => {
     if (e.agentId === undefined) {
       if ((await read($, turnCardA)) !== null) await update($, turnCardA, () => null)
       if (await read($, inTurnA)) await update($, inTurnA, () => false)
+      await syncChatModel($)
       await refresh($, ctx)
     }
     return result

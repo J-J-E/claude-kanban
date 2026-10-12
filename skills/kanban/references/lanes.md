@@ -11,8 +11,8 @@ What each lane role is for, who may move cards in, and what Claude does when a c
 | Plan | `plan` | owner | A planning agent returns the plan; the manager reviews it and writes `## Plan` into the card (child cards if it runs past about 8 steps or spans repos), sets `PLAN READY`, moves the card to Needs You, stops. |
 | Auto | `auto` | owner, or Claude resuming | Run the card end to end: plan if none (a planning agent), branch, workers, review and commit each step, gate check, merge, then Done. |
 | Backlog | `backlog` | either | Nothing. No turn starts, and "what's next" does not list it. Ideas we may or may not do. A card being worked and dragged here stops (Pausing, below). |
-| Done | `done` | Claude, or owner | On an owner drop: Log it, report any uncommitted or unmerged work, edit nothing else. |
-| Discarded | `scrapped` | owner, or Claude when asked | Stop, Log it, reply with the branch and PR to close or delete. Delete nothing. |
+| Done | `done` | Claude, or owner | On an owner drop: Log it, report any uncommitted or unmerged work, clear `flag` in the same edit, edit nothing else. |
+| Discarded | `scrapped` | owner, or Claude when asked | Stop, Log it, clear `flag` in the same edit, reply with the branch and PR to close or delete. Delete nothing. |
 
 Only `needs-you` is enforced (code `claude-only`, format.md section 12). Everything else in "Who moves cards in" is convention. Claude moves cards only INTO lanes with role `needs-you`, `auto`, `done` or `scrapped`, never into an `intake`, `plan` or `backlog` lane; it moves a card into `scrapped` only when the person asks or a lane action says so. A finished plan goes Plan -> Needs You with `PLAN READY`; after the person approves it (a drag to Auto) Claude carries the card to Done and returns it to Needs You only for an issue: a `QUESTION:`, a `FAILED` or a `GATE:` held step.
 
@@ -47,7 +47,7 @@ Runs on a person's move into a `plan` lane, or a card created there from the pan
 A person's drop is refused by the pane, with a message and nothing written; in chat it is the Claude-only refusal. Claude moves cards here itself, with a Claude move:
 
 - `PLAN READY`: the Plan action.
-- `QUESTION`: set `flag: QUESTION: <the question>`, Claude-move, then Log the one question as the newest line, `question: <the question>`. Every question that stops work on a card (Plan or Auto flow, a held merge, a request that needs an answer first) goes this way and is also asked in chat in the same reply; a question is never asked in chat only.
+- `QUESTION`: set `flag: QUESTION: <the question>`, Claude-move, then Log the one question as the newest line, `question: <the question>`. A question about something Claude cannot run follows format.md section 5: the line carries the command, the shell, what it does and why the card needs it, and the chat reply repeats the command in a code block. Every question that stops work on a card (Plan or Auto flow, a held merge, a request that needs an answer first) goes this way and is also asked in chat in the same reply; a question is never asked in chat only.
 - `FAILED`: Auto step 5.
 
 The person answers with a comment or in chat, then drags the card on (Auto or Plan). A reply typed in chat that answers the card does both for him: it is appended to the Log as `<owner>: <his words>` and the card is moved Needs You -> Auto as his move, which runs the Auto flow (Gate approval for a `GATE` card); `no` or a change request on a `PLAN READY` or `GATE` card is a comment only and the card stays. Redoing a plan still takes his move to the Plan lane. The rules for which card and the exact texts are in SKILL.md, Requests in chat.
@@ -67,7 +67,7 @@ Stop check: before each dispatch, each commit and the merge, re-read the card. I
 5. Failures. Count failures per step. Failures 1 to 3: Log `retry n of 3: <what failed>` (n is the failure number) and re-dispatch with the failure text in the brief. When the same failure text has come up twice, before the next attempt dispatch one advisor agent (`model: <advisor_model>`, `effort: <advisor_thinking>` left out when it is `none`, description starting with the card ID, given the card, the plan, the failures and the diffs) and follow its direction; skip this when `advisor_model` is `none`. Failure 4, after `retry 3 of 3`: set `flag: FAILED`, Log what failed last, Claude-move to Needs You, stop.
 6. Gate check, before any merge. List the files changed on the branch against the default branch (`git diff --name-only <default>...<branch>`). If any condition under Gates holds, set `flag: GATE: <reason>`, Log it, Claude-move to the first `needs-you` lane (Needs You), stop. Name every cause in the reason, joined with `; `: `GATE: merge touches package.json, .env`, `GATE: merge changes 23 files`, `GATE: deploy`.
 7. Merge, when not gated.
-   - GitHub remote (`git remote get-url origin` succeeds and `gh auth status` succeeds): `git push -u origin <branch>`, then `gh pr create` with a title starting with the card's current ID (`BUG-0012 <card title>`), write `pr:` with the PR URL, then `gh pr merge <url> --squash --delete-branch`. If the merge is refused (required checks or review), set `flag: QUESTION: PR <url> not merged: <reason>`, Claude-move to Needs You, stop.
+   - GitHub remote (`git remote get-url origin` succeeds and `gh auth status` succeeds): `git push -u origin <branch>`, then `gh pr create` with a title starting with the card's current ID (`BUG-0012 <card title>`), write `pr:` with the PR URL, then `gh pr merge <url> --squash --delete-branch`. If the merge is refused (required checks or review), set `flag: QUESTION: PR <url> not merged: <reason>`, Log a `question:` line that also holds the exact merge command that was refused, in backticks, with the shell and what it does (format.md section 5), Claude-move to Needs You, stop.
    - Otherwise: `git switch <default>`, then `git merge --no-ff <branch>` with a message starting with the card ID.
    - Either way Log `merged <branch>`. Without git there is nothing to merge: skip step 7.
 8. Finish. Claude-move the card to Done, clear `flag`, and remove the card's own `model:` and `thinking:` lines in the same edit. Commit the board: on the default branch, `git add kanban` and commit with the message `<ID> board: done`, so the card files the pane and the actions edited are not left uncommitted. Reply in one line, e.g. `BUG-0012 done: merged bug-12-fix-the-morning-summary-date.` If the card has a `parent:` and every card with that parent is now Done, Claude-move the parent to Done and clear its `flag` too.
@@ -82,11 +82,11 @@ Runs on a person's move of a card whose `flag` starts with `GATE` from a `needs-
 
 ## Done, Pausing and Discarded
 
-Each adds one `Claude` Log line saying where things stand, edits nothing else, and replies in one line. A card with no `branch:` has no work to check.
+Each adds one `Claude` Log line saying where things stand, edits nothing else (a drop into Done or Discarded also clears `flag`, in the same edit as its Log line), and replies in one line. A card with no `branch:` has no work to check.
 
-- **Done** (a person's drop): check the card's `branch:` for uncommitted files outside `kanban/`, commits not on the default branch and a PR not merged. Log `closed by <owner>: <what is outstanding, or nothing outstanding>`.
+- **Done** (a person's drop): check the card's `branch:` for uncommitted files outside `kanban/`, commits not on the default branch and a PR not merged. Log `closed by <owner>: <what is outstanding, or nothing outstanding>`, and clear `flag`, whatever it held. When a flag was set, the Log line ends with `; cleared flag <the old text>`.
 - **Pausing** (a person drags a card being worked out of an `auto` lane into an `intake` or `backlog` lane): stop at the next safe point. Wait for a running worker to report and start none; commit nothing new, no work in progress. Log `stopped at step <n>`. Keep `flag` and `branch`. Then commit `kanban/` as `<ID> board: stopped`. A card dropped in an `intake` or `backlog` lane that was not being worked starts nothing.
-- **Discarded** (a person's drop, also from an `auto` lane): stop as for Pausing, commit no work in progress. Log `scrapped at step <n>; branch <branch>, PR <pr or none> left for <owner> to close`. Reply with the branch and PR for the person to close or delete. Delete nothing. Then commit `kanban/` as `<ID> board: scrapped`.
+- **Discarded** (a person's drop, also from an `auto` lane): stop as for Pausing, commit no work in progress. Log `scrapped at step <n>; branch <branch>, PR <pr or none> left for <owner> to close`, and clear `flag` the same way, ending the Log line with `; cleared flag <the old text>` when a flag was set. Reply with the branch and PR for the person to close or delete. Delete nothing. Then commit `kanban/` as `<ID> board: scrapped`.
 
 ## Gates
 
@@ -106,9 +106,11 @@ A drag out of Needs You approves the actions the flag names and nothing else.
 | Flag | Lane | Meaning |
 |---|---|---|
 | `PLAN READY` | Needs You | The plan is in the card and waits for approval. |
-| `QUESTION: <question>` | Needs You | Claude needs an answer before it can go on. |
+| `QUESTION: <question>` | Needs You | Claude needs an answer before it can go on. A command the owner must run is in the `question:` Log line, not the flag (format.md section 5). |
 | `FAILED` | Needs You | A step failed its fourth attempt (Auto step 5). |
 | `GATE: <reason>` | Needs You | The named action is held, e.g. `GATE: deploy`, `GATE: merge touches package.json`. |
+
+A person's drop of a flagged card into Done or Discarded clears its flag, whatever it held (Done, Pausing and Discarded, above).
 
 ## Roles older boards may list
 

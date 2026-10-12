@@ -6,7 +6,7 @@
 import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
-import { BOARD_PATH, cardPath, defaultFiles, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
+import { BOARD_PATH, cardPath, defaultFiles, mountPane, sevenLaneFiles, startSession, stubs, typeFind } from './fixtures.ts'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 type Node = { type: string; props: Record<string, unknown>; children?: (Node | string | null)[] }
@@ -35,9 +35,10 @@ function walk(n: Node | string | null | undefined, f: (n: Node) => void): void {
   for (const c of n.children ?? []) walk(c, f)
 }
 
-/** Types a title the way the field does: a change per edit. */
+/** Types a title the way the field does: a change per edit. The pane does not redraw for typing, so the drawing shows the text only once it is drawn again: the helper draws it. */
 async function typeTitle(ui: Pane, text: string): Promise<void> {
   await ui.input({ key: 'toolbar-title', text, kind: 'change' })
+  await ui.redraw()
 }
 
 /** Adds the typed title the way the field's own `Add` (the app draws it beside the field) and Enter do: a submit with the text in the field. */
@@ -432,11 +433,6 @@ for (const columns of [45, 60, 80, 108]) {
 
 // ---- Find (KB-0029) ----
 
-/** Types into the Find field the way the field does: a change per edit. */
-async function typeFind(ui: Pane, text: string): Promise<void> {
-  await ui.input({ key: 'toolbar-find', text, kind: 'change' })
-}
-
 function countText(root: Node | string | null | undefined): string | undefined {
   let found: string | undefined
   walk(root, (n) => {
@@ -462,8 +458,8 @@ test('the Find field sits in row 1 between New card and Sort, says Find a card, 
 })
 
 test('typing filters the board: the props carry only the matches, say a filter is on, and row 2 reads 2 of 4 match; Clear puts everything back', async ($, on) => {
-  const { ui } = await setup($, on)
-  await typeFind(ui, 'o')
+  const { w, ui } = await setup($, on)
+  await typeFind(ui, w, 'o')
   expect((await ui.find({ key: 'toolbar-find' }))?.props.value).toBe('o')
   let props = await boardProps(ui)
   // "o" is in Fix footer, Write docs, Old work (Ship it has none).
@@ -471,7 +467,7 @@ test('typing filters the board: the props carry only the matches, say a filter i
   expect(props.lanes.flatMap((l) => l.cards.map((c) => c.id))).toEqual(['KB-0002', 'KB-0001', 'KB-0004'])
   expect(props.lanes.every((l) => l.total === l.cards.length)).toBe(true)
   expect(countText((await ui.drawn()) as unknown as Node)).toBe('3 of 4 match')
-  await typeFind(ui, 'ship')
+  await typeFind(ui, w, 'ship')
   props = await boardProps(ui)
   expect(props.lanes.flatMap((l) => l.cards.map((c) => c.id))).toEqual(['KB-0003'])
   expect(countText((await ui.drawn()) as unknown as Node)).toBe('1 of 4 match')
@@ -486,8 +482,8 @@ test('typing filters the board: the props carry only the matches, say a filter i
 })
 
 test('nothing matches: every lane is empty, row 2 says No card matches "zzzz" with its own Clear, no fold button, and the props are still filtered (no empty-board hint)', async ($, on) => {
-  const { ui } = await setup($, on)
-  await typeFind(ui, 'zzzz')
+  const { w, ui } = await setup($, on)
+  await typeFind(ui, w, 'zzzz')
   const props = await boardProps(ui)
   expect(props.isFiltered).toBe(true)
   expect(props.lanes.every((l) => l.total === 0 && l.cards.length === 0)).toBe(true)
@@ -503,12 +499,12 @@ test('nothing matches: every lane is empty, row 2 says No card matches "zzzz" wi
 
 test('Enter in the Find field opens the first match in board order; no match opens nothing and says so in a toast', async ($, on) => {
   const { w, ui } = await setup($, on)
-  await typeFind(ui, 'zzzz')
+  await typeFind(ui, w, 'zzzz')
   await ui.input({ key: 'toolbar-find', text: 'zzzz', kind: 'submit' })
   expect(await ui.find({ key: 'toolbar' })).toBeDefined()
   expect(w.toasts.at(-1)).toBe('No card matches "zzzz".')
   // "o" matches KB-0002 (Needs You, which comes before Pending) first in board order.
-  await typeFind(ui, 'o')
+  await typeFind(ui, w, 'o')
   await ui.input({ key: 'toolbar-find', text: 'o', kind: 'submit' })
   expect(await ui.find({ key: 'toolbar' })).toBeUndefined()
   expect(await ui.find({ key: 'card-back' })).toBeDefined()
@@ -516,8 +512,8 @@ test('Enter in the Find field opens the first match in board order; no match ope
 })
 
 test('Find is empty when the session starts', async ($, on) => {
-  const { ui } = await setup($, on)
-  await typeFind(ui, 'ship')
+  const { w, ui } = await setup($, on)
+  await typeFind(ui, w, 'ship')
   await ui.unmount()
   await startSession($)
   const again = await mountPane($, 'desktop', 100)
@@ -526,8 +522,8 @@ test('Find is empty when the session starts', async ($, on) => {
 
 for (const columns of [40, 59, 60, 100]) {
   test(`at ${columns} cells the Find field ${columns < 60 ? 'has a row of its own' : 'shares row 1'}`, async ($, on) => {
-    const { ui } = await setup($, on, sevenLaneFiles(), columns)
-    await typeFind(ui, 'ship')
+    const { w, ui } = await setup($, on, sevenLaneFiles(), columns)
+    await typeFind(ui, w, 'ship')
     let row1: Node | undefined
     let own: Node | undefined
     walk((await ui.drawn()) as unknown as Node, (n) => {
@@ -563,8 +559,8 @@ test('row 2 ends in ONE plain native fold button, after the count and a growing 
 })
 
 test('the fold button is not drawn while Find is on, and comes back when it is cleared', async ($, on) => {
-  const { ui } = await setup($, on)
-  await typeFind(ui, 'ship')
+  const { w, ui } = await setup($, on)
+  await typeFind(ui, w, 'ship')
   expect(await ui.find({ key: 'toolbar-fold' })).toBeUndefined()
   await ui.press({ key: 'toolbar-find-clear' })
   expect(await ui.find({ key: 'toolbar-fold' })).toBeDefined()
@@ -601,10 +597,10 @@ test('the Client posting its own folds keeps the stamp, and a fold set by hand a
 })
 
 test('Collapse all keeps the opened + N more lists, and folds set while Find is on are kept for after', async ($, on) => {
-  const { ui } = await setup($, on)
+  const { w, ui } = await setup($, on)
   await ui.post({ type: 'view', fold: {}, more: { Auto: true } } as never, { in: 'board' })
   await ui.press({ key: 'toolbar-fold' })
-  await typeFind(ui, 'ship')
+  await typeFind(ui, w, 'ship')
   const view = (await boardProps(ui)).view
   expect(view?.more).toEqual({ Auto: true })
   expect(view?.fold.Auto?.isOpen).toBe(false)

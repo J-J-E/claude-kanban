@@ -519,5 +519,7 @@ test('a type the board does not have is refused with the exact text and nothing 
   expect(w.toasts).toEqual(['Unknown type "enhancement". Nothing was added.'])
   expect(w.writes).toEqual([])
   expect([...w.files.keys()].filter((p) => p.startsWith('kanban/ENH-') || p.startsWith('kanban/BUG-'))).toEqual([])
+  // Typing redraws nothing, so the field shows the kept text on the next drawing.
+  await ui.redraw()
   expect((await ui.find({ key: 'toolbar-title' }))?.props.value).toBe('Fix footer')
 })

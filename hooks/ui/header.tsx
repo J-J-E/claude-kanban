@@ -25,6 +25,10 @@ export type HeaderActions = {
   select: (id: string) => void
   /** A tab: shows it, or (the chosen Board tab with a card open) closes the card. */
   tab: (tab: 'board' | 'settings') => void
+  /** `Change to opus`: copies `/model opus`; runs nothing. */
+  copyModel: () => void
+  /** `Keep sonnet`: the board's Manager model becomes the chat's model (the Settings tab's own write); nothing runs. */
+  keepModel: () => void
 }
 
 /** A flexible spacer: the free room of a row. */
@@ -192,6 +196,49 @@ function claudeRows(el: Els, w: HeaderWords, act: HeaderActions) {
   return rows
 }
 
+/** The third row: which model the chat is on, dim when it is the Manager model or unknown; when not, normal text and the two buttons beside it (below 56 cells, on a row of their own). */
+function modelRows(el: Els, w: HeaderWords, act: HeaderActions) {
+  const { Box, Text, Button } = el
+  const m = w.model
+  if (m === null) return null
+  const line = (
+    <Box key="header-model-text" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+      <Text {...(m.isDim ? { dimColor: true } : {})} wrap="truncate-end">
+        {m.text}
+      </Text>
+    </Box>
+  )
+  if (m.kind !== 'differs') {
+    return (
+      <Box key="header-model-row" flexDirection="row">
+        {line}
+      </Box>
+    )
+  }
+  const buttons = (
+    <Box key="header-model-buttons" flexShrink={0} flexDirection="row" columnGap={2} marginLeft={m.isButtonsOwnRow ? 0 : 2}>
+      <Button key="header-model-copy" plain label={m.copyLabel} onPress={() => act.copyModel()} />
+      {m.keepLabel !== '' && <Button key="header-model-keep" plain label={m.keepLabel} onPress={() => act.keepModel()} />}
+    </Box>
+  )
+  if (m.isButtonsOwnRow) {
+    return [
+      <Box key="header-model-row" flexDirection="row">
+        {line}
+      </Box>,
+      <Box key="header-model-buttons-row" flexDirection="row">
+        {buttons}
+      </Box>,
+    ]
+  }
+  return (
+    <Box key="header-model-row" flexDirection="row">
+      {line}
+      {buttons}
+    </Box>
+  )
+}
+
 export function headerTree(el: Els, props: HeaderProps, columns: number, act: HeaderActions) {
   const { Box, Text } = el
   const w = headerWords(props, columns)
@@ -206,6 +253,7 @@ export function headerTree(el: Els, props: HeaderProps, columns: number, act: He
         </Box>
       )}
       {claudeRows(el, w, act)}
+      {modelRows(el, w, act)}
     </Box>
   )
 }

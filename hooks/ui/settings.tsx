@@ -179,6 +179,7 @@ export function settingsTree(
   defaults: Defaults = DEFAULTS,
   hasSaved = false,
   isAskingOriginal = false,
+  chatLine = '',
 ) {
   const { Box, Text, Button } = el
   const rows = settingsRows(values, defaults)
@@ -251,6 +252,7 @@ export function settingsTree(
       </Box>
       <Box key="settings-notes" flexDirection="column" marginTop={1}>
         {NOTES.map((note, n) => paragraph(el, `settings-note-${n}`, note, n === 0 ? 0 : 1))}
+        {chatLine !== '' && paragraph(el, 'settings-chat-model', chatLine, 1)}
       </Box>
     </Box>
   )

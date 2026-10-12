@@ -76,7 +76,12 @@ export type KanbanCard = {
 }
 
 /** One file the board could not use: unreadable, unparsable, an unknown lane, a duplicate ID. */
-export type KanbanBad = { file: string; reason: string }
+export type KanbanBad = {
+  file: string
+  reason: string
+  /** The problem's format.md section 12 code; `unreadable` for a file that could not be read at all. Absent in an old snapshot, and then read as `unreadable`. */
+  code?: string
+}
 
 /** Everything read from kanban/, as of the last poll that found a change. */
 export type KanbanSnapshot = {
@@ -131,11 +136,11 @@ declare module 'claude-code' {
       turnCard: string | null
       /** True from any main-session turn start to its turn.complete (a chat turn has no card): Claude is busy. */
       inTurn: boolean
+      /** The model the chat is really on, as the engine names it ('' = not known); the pane says it and never switches it. */
+      chatModel: string
       queued: KanbanQueued[]
       /** The card ID whose view takes the place of the lanes; null: the lanes. Cleared when the card goes. */
       selected: string | null
-      /** The text typed in the card view's comment box. Emptied when the card changes. */
-      comment: string
       /** The chosen tab of the header band; the Settings tab takes the lanes' place. */
       tab: 'board' | 'settings'
       /** Minutes since the epoch, bumped by the tick when the minute changes, so times that read the clock redraw. */
@@ -144,12 +149,16 @@ declare module 'claude-code' {
       showLog: boolean
       /** Whether the open card's Plan shows every step in full (Show details), else only the step in hand. Reset when the card changes. */
       showDetails: boolean
+      /** `Show all` is on: every list of card-file problems above the lanes is drawn in full. */
+      showAllProblems: boolean
+      /** Why the app could not draw the pane's board region (a ui.fault reason); the pane shows it with a Retry button. Null: nothing wrong. */
+      fault: string | null
       /** Whether the card view's last row asks `Delete KB-0015?` in place of the two buttons. Reset when the card changes. */
       confirmDelete: boolean
       /** The type name picked in the open card's Type list and not yet asked for ('' = none); the question row `Retype KB-0015 as enhancement?` shows while it differs from the card's own type. Reset when the card changes. */
       retypePick: string
-      /** The open card's Rename field: whether it is open and the title typed in it. Reset when the card changes. */
-      renaming: { isOpen: boolean; title: string }
+      /** Whether the open card's Rename field is open (the title typed in it is in the hooks module's own memory). Reset when the card changes. */
+      renaming: { isOpen: boolean }
       /** Whether the Settings tab's top row asks `Put every setting back to its default?` in place of Restore all defaults. Closed by Keep, Restore and any change of tab. */
       confirmRestore: boolean
       /** What he folded and opened on the lanes, kept so a card view that takes the lanes' place does not lose it. */
@@ -158,10 +167,12 @@ declare module 'claude-code' {
       confirmOriginal: boolean
       /** How many times the Settings tab was chosen: it is added to the view's stamp the Client is handed, so the Client drops what is open on it (the small card menu) even though its saved state outlives a remount. */
       tabChanges: number
-      /** The Find field's text. Cleared when the session starts. */
+      /** The Find text the cards are filtered by (the field's own text is in the hooks module's memory and reaches this a moment after typing stops). Cleared when the session starts. */
       find: string
-      /** The toolbar's New card row: whether it is open, the title typed, the lane picked ('' = the first intake lane) and the type picked, by name ('' = the board's first type). Cleared by Cancel. `type` is absent in a state saved before types. */
-      add: { isOpen: boolean; title: string; lane: string; type?: string }
+      /** The toolbar's New card row: whether it is open, the lane picked ('' = the first intake lane) and the type picked, by name ('' = the board's first type); the title typed is in the hooks module's memory. Cleared by Cancel. `type` is absent in a state saved before types. */
+      add: { isOpen: boolean; lane: string; type?: string }
+      /** A count of the redraws asked for a text field changed by something other than typing (the field emptied after Add or Comment, Clear in Find); the pane's drawing reads it. */
+      drafts: number
       /** Whether the Kanban pane is shown (set on each open, cleared on its close); null until known, then the engine's own list says. The Board chip above the chat box shows while it is false. */
       paneShown: boolean | null
     }

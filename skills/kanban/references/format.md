@@ -7,7 +7,7 @@ The one source of truth. `hooks/lib/*.ts` (hand-rolled parser) and `skills/kanba
 - `kanban/board.md`: settings and lanes.
 - `kanban/DECISIONS.md`: decision log.
 - `kanban/<ID>-<slug>.md`: one card, e.g. `kanban/BUG-0012-fix-the-morning-summary-date.md`. A card file is a top-level `kanban/*.md` whose name matches `^[A-Z]{1,10}-\d{4,}-.+\.md$`. A retype renames the file to the new ID and the same slug (`ENH-0007-fix-the-morning-summary-date.md`); nothing else renames a card file.
-- `kanban/` sits at the repo root. Nothing else is read: other files and all subfolders are ignored.
+- `kanban/` sits at the repo root. Nothing else is read: other files and all subfolders are ignored. The board is found from the folder the session was opened in, or from a parent folder that holds `kanban/board.md`, not from the shell's current folder.
 
 ## 2. Frontmatter subset grammar
 
@@ -39,7 +39,7 @@ Written in this order. Required: `id`, `status`. Every other field is written on
 | `order` | integer `^\d+$` | lane max + 1000 | either | Section 9. Absent or empty reads as 0. Pane writes it on a drop. |
 | `created` | date | today | skill or pane, at creation | Never changes. |
 | `updated` | date | = `created` | either | Set to today by every edit. Pane writes it on a drop. |
-| `flag` | free text | empty | skill | Shown as a badge: `PLAN READY`, `QUESTION: <question>`, `FAILED`, `GATE: <reason>`. |
+| `flag` | free text | empty | skill | Shown as a badge: `PLAN READY`, `QUESTION: <question>`, `FAILED`, `GATE: <reason>`. A flag holds only the short question; a command the owner must run goes in the Log line (section 5). Claude also clears it when the owner drops a card into a `done` or `scrapped` lane. |
 | `branch` | free text | empty | skill | Branch name. |
 | `pr` | free text | empty | skill | PR number or URL. |
 | `parent` | card ID | empty | skill | Parent card's ID on a child card. A retype of the parent repoints it. |
@@ -72,7 +72,7 @@ One line per event, appended after the last non-blank line of `## Log`, newest l
 - `started: <branch>` or `started: in place`: the first line of an Auto run or a gate approval; "what's next" reads `Claude: started`.
 - `step n done: <what>`: a step was reviewed and accepted.
 - `retry n of 3: <what failed>`: an Auto retry failed, e.g. `retry 2 of 3: tests failed`.
-- `question: <the question>`: Claude stopped to ask.
+- `question: <the question>`: Claude stopped to ask. When the question is about something Claude could not run and needs the owner to run, the line states, in order: what was attempted and why it could not run (the app's safety check, a denied permission, a missing sign-in, or the real cause); the exact command as one line in backticks (one command per pair of backticks, double backticks if the command holds one, absolute paths); the shell it is for; and what it does and removes and what the card needs it for. With no command to give, the line says what the owner must do. The pane gives a Log line with text in backticks a `Copy command` button. Example: ``question: PR <url> not merged: the app blocked the merge; run in PowerShell: `gh pr merge <url> --squash --delete-branch` (merges the pull request and deletes its branch); or say: merge it``
 - `approved: <flag text>`: the owner dragged a card flagged `GATE` out of Needs You; the text is the flag that was held.
 - `retyped from <old ID> to <new ID>`: the card's type changed, e.g. `retyped from BUG-0012 to ENH-0007`. Exactly this text: the old IDs of a card are read from these lines (section 7).
 - `spawned from <ID>`: on a card made from another card; `<ID>` is the source.
@@ -80,10 +80,10 @@ One line per event, appended after the last non-blank line of `## Log`, newest l
 - `suggests type <type>: <reason>`: Claude thinks the card has another type. It never retypes on its own.
 - `merged <branch>`: the branch was merged.
 - `waiting on <child IDs>`: a parent stopped because those child cards are not Done.
-- `closed by <owner>: <outstanding or nothing outstanding>`: the owner dropped a card into Done.
+- `closed by <owner>: <outstanding or nothing outstanding>`: the owner dropped a card into Done. It may end with `; cleared flag <text>` when the card held a flag.
 - `stopped at step <n>`: a person dragged a card being worked out of an `auto` lane into an `intake` or `backlog` lane, and the work stopped.
 - `parked at step <n>: <what is left>`: the card was parked (older boards).
-- `scrapped at step <n>; branch <branch>, PR <pr or none> left for <owner> to close`: the card was scrapped.
+- `scrapped at step <n>; branch <branch>, PR <pr or none> left for <owner> to close`: the card was scrapped. It may end with `; cleared flag <text>` when the card held a flag.
 - Anything else is a free comment.
 
 Timestamps come from the shell, never guessed: bash `date "+%Y-%m-%d %H:%M"`, PowerShell `Get-Date -Format "yyyy-MM-dd HH:mm"`. Appending a Log line also sets `updated` to its date.
@@ -98,7 +98,7 @@ Timestamps come from the shell, never guessed: bash `date "+%Y-%m-%d %H:%M"`, Po
 | `next_<letters>` | integer, 1 or more | `1` | One line per type, its letters in lowercase: `next_bug: 13`. The type's next number; section 7. |
 | `owner` | text | none (required) | The person's first name; `<who>` for their Log lines. |
 | `workers` | integer 1-5 | `2` | Max concurrent agents, planning agents included. |
-| `manager_model` | `haiku` `sonnet` `opus` `fable` | `opus` | |
+| `manager_model` | `haiku` `sonnet` `opus` `fable` | `opus` | The model the board suggests for the chat, not a requirement. The pane shows the chat's own model and never switches it; the person changes the chat's model in the model picker or with /model, or makes it the board's Manager model with `Keep`. |
 | `manager_thinking` | `low` `medium` `high` `xhigh` `max` `none` | `medium` | Saved and shown; the manager is the session itself, so it is told once, not set (SKILL.md). |
 | `planner_model` | `haiku` `sonnet` `opus` `fable` | `opus` | The model of the planning agents that write plans. |
 | `planner_thinking` | `low` `medium` `high` `xhigh` `max` `none` | `high` | The Agent tool's `effort` for a planning agent. |
@@ -200,12 +200,12 @@ Shared by the library and the skill's "Fix needed" line.
 | `bad-value` | A non-empty card value does not fit its type (`order` not an integer, `created`/`updated` not a date), or a value cannot be written. |
 | `missing-field` | `id` or `status` is absent, or the body has no `# Title`. |
 | `bad-id` | `id` does not match `^[A-Z]{1,10}-\d{4,}$`. |
-| `unknown-type` | A card's ID letters are no type on the board, or a retype names a type the board does not have. The card still shows, and the board is not read-only. |
+| `unknown-type` | A card's ID letters are no type on the board, or a retype names a type the board does not have. The card is read and still shows, and the board is not read-only. Fix: retype the cards to a type on the board; declaring the letters as a type in `board.md` (the `types:` list, plus a `next_<letters>` line) is the other way, for a board that wants to keep the old IDs. `list` prints the line `To fix unknown-type: retype each card to a type on this board (<the board's type names> here), e.g. "retype <an offending ID> as <a type name>".` after `Fix needed:`, with the type names in board order, the last after "or", an offending card's ID, and the board's last type name. |
 | `ambiguous-number` | A bare number names more than one card (section 7). Nothing changes; the candidates are listed. |
 | `being-worked` | A retype of a card that is in an `auto` lane or has an agent on it. Nothing changes. |
 | `id-name-mismatch` | The filename does not start with `<id>-`. |
-| `duplicate-id` | Two card files have the same `id`. |
-| `unknown-lane` | A card's `status`, or a move target, is not a label in `board.md`. |
+| `duplicate-id` | Two card files have the same `id`. Both are read but flagged. |
+| `unknown-lane` | A card's `status`, or a move target, is not a label in `board.md`. The card is read but flagged. |
 | `claude-only` | Anyone but Claude moves a card into a `needs-you` (or older `gated`) lane. |
 | `same-lane` | A move targets the lane the card is already in. |
 | `bad-lane` | A `lanes:` item does not fit `Label (role)`. |

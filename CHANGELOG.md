@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2
+
+What changed:
+
+- The lines above the lanes now say what is wrong per kind of problem, in full, in warning colour, with the next step and a `Show all` button, and for cards with ID letters that are no type the pane and `list` suggest a retype, with a skill procedure for Claude to retype them when you say yes.
+- A card you drop into Done or Discarded no longer keeps its flag: Claude clears it and Logs `cleared flag <text>`.
+- When Claude cannot run a command and needs you to, the card's Log line now shows the exact command in backticks with the shell, what it does and why, so `Copy command` copies it.
+- The board stays found when a chat's shell command changes folder (a Bash `cd` into `kanban\` used to make the pane show `This project has no board yet.`). The pane also finds a board when the chat is opened inside `kanban\` or below a folder that has one, and `set up the kanban board` no longer creates a board inside an existing one: it replies `Board already set up at <path> (N cards). /board opens it.`.
+- The board no longer switches your chat's model. The pane says which model the chat is on and, when it is not the one the board suggests, offers Change to opus and Keep sonnet; the model picker under the prompt box is yours.
+- Fast typing in the `New card` box, the comment field, the card title edit and the find field no longer drops, reorders or flashes letters.
+- The Kanban pane always draws the board or a visible error line, even when the app sends no usable width or a call fails.
+
 ## 0.2.1
 
 What changed:

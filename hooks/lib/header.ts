@@ -30,6 +30,8 @@ export type HeaderProps = {
   /** The clock now, `11:34`. With it the change reads as how long ago (`2 min ago`); without it, as the time (`changed 11:33`). */
   now?: string
   isReadOnly: boolean
+  /** The chat's own model against the board's Manager model (hooks/lib/modelline.ts); without it the header has no model row. */
+  model?: { kind: 'same' | 'differs' | 'unknown'; text: string; copyLabel: string; keepLabel: string }
 }
 
 export type HeaderTabWords = {
@@ -77,6 +79,8 @@ export type HeaderWords = {
   isClaudeOneRow: boolean
   /** Below 56 cells the workers and the waiting count take a row of their own under the step. */
   isCountsOwnRow: boolean
+  /** The third row: which model the chat is on. Dim text; when the models differ, normal text and the two buttons (the second only when the chat's model is a Manager model choice) (on a row of their own below 56 cells). Null without it. */
+  model: { kind: 'same' | 'differs' | 'unknown'; text: string; copyLabel: string; keepLabel: string; isDim: boolean; isButtonsOwnRow: boolean } | null
 }
 
 const KINDS_BESIDE_FROM = 76
@@ -173,5 +177,9 @@ export function headerWords(props: HeaderProps, columns: number): HeaderWords {
     isKindsBeside: W >= KINDS_BESIDE_FROM,
     isClaudeOneRow: W >= ONE_ROW_FROM,
     isCountsOwnRow: W < COUNTS_OWN_ROW_BELOW,
+    model:
+      props.model === undefined
+        ? null
+        : { ...props.model, isDim: props.model.kind !== 'differs', isButtonsOwnRow: W < COUNTS_OWN_ROW_BELOW },
   }
 }

@@ -114,7 +114,7 @@ export const HEAD_DEFAULT = 'Default'
 export const KEY_TITLE = 'What each thinking level costs'
 export const ADVISOR_THINKING_UNUSED = 'Advisor thinking: not used'
 export const NOTES: readonly string[] = [
-  "Manager runs this conversation. Planner writes each card's plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.",
+  "Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.",
   'One card can use its own model and thinking: open the card and choose Model and Thinking there. That replaces Planner and Worker for that card, and nothing else.',
   'Changes apply from the next turn. A running agent keeps what it started with.',
 ]

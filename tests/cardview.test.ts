@@ -419,8 +419,14 @@ describe('log', () => {
     const row = (text: string) => logView([{ date: '2026-10-08', time: '10:00', who: 'Claude', text }], false).lines[0]
 
     test('a command with quotes, paths, semicolons, brackets and colons comes out byte for byte', () => {
-      const cmd = "Set-Location 'C:\\work\\my-repo'; $r = [IO.Path]::Combine('A:\\x', \"y\"); git status"
+      const cmd = "Set-Location 'C:\\work\\my-repo'; $r = [IO.Path]::Combine('C:\\work\\x',\"y\"); git status"
       const r = row('the command, for PowerShell; it ends the run and removes nothing: `' + cmd + '`')
+      expect(r.commands).toEqual([cmd])
+    })
+
+    test('a question line holding a path and a quoted command gives exactly that command', () => {
+      const cmd = 'docker compose -f "C:\\work\\shop\\compose.yaml" up -d --force-recreate worker'
+      const r = row('question: the worker did not restart: the app blocked it; run in PowerShell: `' + cmd + '` (recreates the worker container); or say: skip it.')
       expect(r.commands).toEqual([cmd])
     })
 

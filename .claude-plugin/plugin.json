@@ -1,6 +1,6 @@
 {
   "name": "kanban",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A kanban board for Claude Code: cards are markdown files in kanban/, a skill runs the board, a pane in the desktop app lets you drag cards between lanes.",
   "author": { "name": "John Ehlen" },
   "types": "./types/index.d.ts",

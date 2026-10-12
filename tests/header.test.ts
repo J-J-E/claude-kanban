@@ -256,10 +256,18 @@ async function headerNode(ui: Pane): Promise<Node> {
   return found
 }
 
-/** The header as text, one string per row: the pieces of a row 1 space apart (the gaps are flex, not spaces). */
+const isModelRow = (n: Node | string | null): boolean => typeof n !== 'string' && n !== null && String(n.props.key).startsWith('header-model')
+
+/** The header as text, one string per row: the pieces of a row 1 space apart (the gaps are flex, not spaces). The rows about the chat's model are left out; `modelRows` has them. */
 async function rows(ui: Pane): Promise<string[]> {
   const h = await headerNode(ui)
-  return (h.children ?? []).map(textOf).filter((t) => t !== '')
+  return (h.children ?? []).filter((n) => !isModelRow(n)).map(textOf).filter((t) => t !== '')
+}
+
+/** Only the rows about the chat's own model, one string per row. */
+async function modelRows(ui: Pane): Promise<string[]> {
+  const h = await headerNode(ui)
+  return (h.children ?? []).filter(isModelRow).map(textOf).filter((t) => t !== '')
 }
 
 async function header(ui: Pane): Promise<string | undefined> {
@@ -480,5 +488,116 @@ describe('what a press does', () => {
     expect((await ui.findAll({ type: 'Select' })).map((s) => s.key)).toEqual(['toolbar-sort'])
     await ui.press({ key: 'header-attention' })
     expect(await header(ui)).toBe('KB-0002  in Needs You')
+  })
+})
+
+describe("the chat's own model", () => {
+  const SAME = ['This chat is on opus.']
+  const SONNET = ['This chat is on sonnet. This board suggests opus. Change to opus Keep sonnet']
+
+  test('on the suggested model: the dim line, no buttons', async ($, on) => {
+    const { ui } = await setup($, on)
+    expect(await modelRows(ui)).toEqual(SAME)
+    expect(await ui.find({ key: 'header-model-copy' })).toBeUndefined()
+    expect(await ui.find({ key: 'header-model-keep' })).toBeUndefined()
+  })
+
+  test("the chat's model cannot be read: not known yet, no buttons", async ($, on) => {
+    const w = stubs(on)
+    w.model = ''
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 64)
+    expect(await modelRows(ui)).toEqual(["This chat's model is not known yet."])
+    expect(await ui.find({ key: 'header-model-copy' })).toBeUndefined()
+  })
+
+  test('on another model: the sentence and both buttons; Change to opus copies /model opus and runs nothing', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'claude-sonnet-4'
+    const copied: string[] = []
+    on('ui.copy', ($, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true as const } }
+    })
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 100)
+    expect(await modelRows(ui)).toEqual(SONNET)
+    expect((await ui.find({ key: 'header-model-copy' }))?.props).toMatchObject({ plain: true, label: 'Change to opus' })
+    expect((await ui.find({ key: 'header-model-keep' }))?.props).toMatchObject({ plain: true, label: 'Keep sonnet' })
+    await ui.press({ key: 'header-model-copy' })
+    await w.clock.settle()
+    expect(copied).toEqual(['/model opus'])
+    expect(w.toasts).toEqual(['To change: paste /model opus in the chat (it is copied), or choose opus in the model picker under the prompt box.'])
+    expect(w.ran).toEqual([])
+    expect(w.writes).toEqual([])
+  })
+
+  test('a copy that fails says to type it', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'claude-sonnet-4'
+    on('ui.copy', () => ({ value: { isCopied: false as const, reason: 'no-clipboard' as const } }))
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 100)
+    await ui.press({ key: 'header-model-copy' })
+    await w.clock.settle()
+    expect(w.toasts).toEqual(['To change: type /model opus in the chat, or choose opus in the model picker under the prompt box.'])
+    expect(w.ran).toEqual([])
+  })
+
+  test('Keep sonnet sets the Manager model to the chat\'s, runs nothing, and the line turns to the match', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'claude-sonnet-4'
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 100)
+    await ui.press({ key: 'header-model-keep' })
+    await w.clock.settle()
+    expect(w.text(BOARD_PATH)).toContain('\nmanager_model: sonnet\n')
+    expect(w.toasts).toEqual(['Manager model set to sonnet.'])
+    expect(w.ran).toEqual([])
+    expect(await modelRows(ui)).toEqual(['This chat is on sonnet.'])
+    expect(await ui.find({ key: 'header-model-copy' })).toBeUndefined()
+    expect(await ui.find({ key: 'header-model-keep' })).toBeUndefined()
+  })
+
+  test('a chat model that is none of the four has Change to opus but no Keep button', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'custom-model-7'
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 100)
+    expect(await modelRows(ui)).toEqual(['This chat is on custom-model-7. This board suggests opus. Change to opus'])
+    expect(await ui.find({ key: 'header-model-copy' })).toBeDefined()
+    expect(await ui.find({ key: 'header-model-keep' })).toBeUndefined()
+  })
+
+  test('the line turns to the match text within 5 seconds once the chat follows, and after a turn', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'claude-sonnet-4'
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 100)
+    expect(await modelRows(ui)).toEqual(SONNET)
+    w.model = 'claude-opus-4'
+    await w.clock.advance(5000)
+    await w.clock.settle()
+    expect(await modelRows(ui)).toEqual(SAME)
+    w.model = 'claude-sonnet-4'
+    await $.turn.start({ text: 'hi', turnId: 't9' })
+    await $.turn.complete({ answer: 'ok', turnId: 't9' } as never)
+    await w.clock.settle()
+    expect(await modelRows(ui)).toEqual(SONNET)
+  })
+
+  test('below 56 cells the buttons take a row of their own', async ($, on) => {
+    const w = stubs(on)
+    w.model = 'claude-sonnet-4'
+    await startSession($)
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop', 40)
+    expect(await modelRows(ui)).toEqual(['This chat is on sonnet. This board suggests opus.', 'Change to opus Keep sonnet'])
   })
 })

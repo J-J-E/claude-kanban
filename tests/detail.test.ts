@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
 import { parseCard } from '../hooks/lib/cards.ts'
 import { BOARD_EXAMPLE, GATED_BOARD_EXAMPLE, INIT_BOARD_EXAMPLE } from './examples.ts'
-import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
+import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, sevenLaneFiles, startSession, stubs, typeFind } from './fixtures.ts'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 
@@ -628,6 +628,7 @@ test('a comment is one Log line by the owner, bumps updated, asks nothing and em
 
   // Typing keeps the text; Enter sends it.
   await ui.input({ key: 'card-comment', text: 'Half a thought', kind: 'change' })
+  await ui.redraw() // typing redraws nothing; the field shows its text when drawn again
   expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('Half a thought')
   await ui.input({ key: 'card-comment', text: 'Check the "footer"\nwidth   too' })
   const after = w.text(FOOTER)
@@ -697,6 +698,7 @@ test('a comment on a card Claude is editing is refused and kept in the field', a
   await ui.input({ key: 'card-comment', text: 'hello' })
   expect(w.toasts).toEqual(['KB-0001 is being edited by Claude; try again in a moment.'])
   expect(w.writes).toEqual([])
+  await ui.redraw()
   expect((await ui.find({ key: 'card-comment' }))?.props.value).toBe('hello')
   release()
   await edit
@@ -1465,6 +1467,7 @@ test('Rename opens a field with the title; Cancel closes it without writing', as
   expect(field?.props.submitLabel).toBe('Save')
   expect(await ui.find({ key: 'card-rename-open' })).toBeUndefined()
   await ui.input({ key: 'card-rename', text: 'Fix the foo', kind: 'change' })
+  await ui.redraw()
   expect((await ui.find({ key: 'card-rename' }))?.props.value).toBe('Fix the foo')
   await ui.press({ key: 'card-rename-cancel' })
   expect(await ui.find({ key: 'card-rename' })).toBeUndefined()
@@ -1536,6 +1539,7 @@ test('Rename: a title over 120 characters is refused with the limit, writes noth
   expect(w.toasts).toEqual(['A title can be at most 120 characters; this one is 121. Nothing was written.'])
   expect(w.writes).toEqual([])
   expect(w.text(FOOTER)).toBe(before)
+  await ui.redraw()
   expect((await ui.find({ key: 'card-rename' }))?.props.value).toBe('y'.repeat(121))
 
   await ui.input({ key: 'card-rename', text: 'y'.repeat(120) })
@@ -1634,9 +1638,9 @@ test('Previous and Next step through the cards as the board draws them, with the
 })
 
 test('with Find on, Previous and Next step through the matches only; a card Find hides has no stepper', async ($, on) => {
-  await boot($, on, sevenLaneFiles())
+  const w = await boot($, on, sevenLaneFiles())
   const ui = await mountPane($, 'desktop')
-  await ui.input({ key: 'toolbar-find', text: 'o', kind: 'change' })
+  await typeFind(ui, w, 'o')
   const matches = await drawnOrder(ui)
   expect(matches.length).toBe(3)
   await select(ui, matches[0])

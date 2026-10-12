@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
 import { dropLook } from '../hooks/lib/strings.ts'
 import { BOARD_EXAMPLE, INIT_BOARD_EXAMPLE } from './examples.ts'
-import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, ORIGIN_SPY, START, startSession, stubs } from './fixtures.ts'
+import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, ORIGIN_SPY, START, startSession, stubs, typeFind } from './fixtures.ts'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 
@@ -65,10 +65,14 @@ async function boardProps(ui: Pane): Promise<BoardProps> {
 }
 
 /** Where a card is on the board now: the name of the lane holding it, or undefined. */
-/** The dim lines above the lanes that name files that cannot be read, and the `and N more` after them. */
+/** The problem groups above the lanes, in drawing order: each warning sentence (starts with `▲ `) followed by its list text. */
 async function unreadableTexts(ui: Pane): Promise<string[]> {
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
-  return texts.filter((t) => t.startsWith("Can't read ") || /^and \d+ more$/.test(t))
+  const out: string[] = []
+  texts.forEach((t, n) => {
+    if (t.startsWith('▲ ')) out.push(t, texts[n + 1] ?? '')
+  })
+  return out
 }
 
 async function laneOf(ui: Pane, id: string): Promise<string | undefined> {
@@ -94,7 +98,7 @@ test('session-start', async ($, on) => {
   const w = await boot($, on)
   expect(w.registered).toEqual(['board'])
   expect(w.opened).toEqual([{ id: 'kanban', title: 'Kanban' }])
-  // The manager model is already opus: nothing to switch.
+  // The chat is already on the manager model; nothing is ever switched.
   await w.clock.advance(2000)
   expect(w.ran).toEqual([])
   expect(w.toasts).toEqual([])
@@ -104,16 +108,14 @@ test('session-start', async ($, on) => {
   expect(w.listed).toBeGreaterThan(listed)
 })
 
-test('session-start switches the session to the board manager model', async ($, on) => {
+test('session-start does not switch the session to the board manager model', async ($, on) => {
   const w = stubs(on)
   w.model = 'claude-sonnet-4'
   await startSession($)
   await w.clock.settle()
+  await w.clock.advance(5000)
   expect(w.ran).toEqual([])
-  await w.clock.advance(1500)
-  expect(w.ran).toEqual([{ command: 'model', args: 'opus' }])
-  // The stubbed /model changed nothing, so the person is told to run it.
-  expect(w.toasts).toEqual(['run /model opus yourself'])
+  expect(w.toasts).toEqual([])
 })
 
 test('command-run', async ($, on) => {
@@ -174,6 +176,63 @@ test('render on vscode and mobile is a plain list', async ($, on) => {
     expect(await ui.find({ type: 'Client' })).toBeUndefined()
     await ui.unmount()
   }
+})
+
+// BUG-0019: the pane draws the board or a visible line, never nothing.
+const NO_WIDTHS: [string, unknown][] = [
+  ['NaN', Number.NaN],
+  ['null', null],
+  ['undefined', undefined],
+  ['a string', '80'],
+]
+for (const [label, bad] of NO_WIDTHS) {
+  test(`a width from the app that is ${label} draws the board at the default width, not nothing`, async ($, on) => {
+    await boot($, on)
+    const props = { title: 'Kanban', isFocused: false, bodyColumns: bad, placement: 'dock', scroll: { offset: 0, bodyRows: 24 }, view: {} }
+    const ui = await $.ui.mount({
+      plugin: 'kanban',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'kanban',
+      props: props as never,
+      viewport: { columns: 100, rows: 24, isFullscreen: true },
+    })
+    expect(await ui.find({ key: 'header' })).toBeDefined()
+    const board = await ui.find({ type: 'Client', key: 'board' })
+    expect(board?.props.width).toBe(100)
+    await ui.unmount()
+  })
+}
+
+// The last-resort path builds its tree with no call to the app (no $.ui.resolve), so it cannot fail the way the body did; the kit cannot
+// make ui.resolve fail (a throwing hook is skipped), so that part is read off the source.
+test('an error in the drawing yields one plain line with the reason, not a bare sentence', async ($, on) => {
+  const state = watchState(on)
+  await boot($, on)
+  // A saved snapshot of the wrong shape: the body throws on it.
+  state.seed('snapshot', { hasBoard: true, cards: 'not a list', settings: null })
+  const ui = await mountPane($, 'desktop', 100, false)
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts).toHaveLength(1)
+  expect(texts[0]).toMatch(/^kanban: the board could not be drawn: snap.cards.find is not a function/)
+  await ui.unmount()
+})
+
+// The kit cannot raise ui.fault, so the saved reason it leaves (state key fault) is seeded: what the pane draws from it and what Retry does.
+test('a reason the app gave for a failed drawing shows as a line with Retry; Retry draws the board again', async ($, on) => {
+  const state = watchState(on)
+  await boot($, on)
+  const reason = 'Client "board" width must be a number or a string'
+  state.seed('fault', reason)
+  const ui = await mountPane($, 'desktop', 100, false)
+  expect(await ui.find({ type: 'Text', text: `kanban: the board could not be drawn: ${reason}` })).toBeDefined()
+  expect(await ui.find({ type: 'Client', key: 'board' })).toBeUndefined()
+  await ui.press({ key: 'retry-draw' })
+  expect(state.wrote.fault).toBeNull()
+  await redraw(ui)
+  expect(await ui.find({ key: 'retry-draw' })).toBeUndefined()
+  expect(await ui.find({ type: 'Client', key: 'board' })).toBeDefined()
+  await ui.unmount()
 })
 
 test('the header says what waits on him, what Claude is doing and when it changed', async ($, on) => {
@@ -448,14 +507,14 @@ test('Settings tab, fresh install (spec check 10): the defaults, no Reset, nothi
   expect(texts.join(' ')).toContain('Claude thinks longer with Max effort and can consume 3.5× or more usage than Medium.')
   expect(texts.join(' ')).toContain('The app gives no usage figure for the other levels.')
   expect(texts.join(' ')).toContain("Ultracode is the app's own multi-agent mode")
-  expect(texts.join(' ')).toContain('Manager runs this conversation.')
+  expect(texts.join(' ')).toContain('Manager is the model this board suggests for the conversation')
   expect(texts.join(' ')).toContain('Changes apply from the next turn.')
   // Nothing was written, nothing said.
   expect(w.writes).toEqual([])
   expect(w.toasts).toEqual([])
 })
 
-test('Settings tab: every Select writes its line and says so; /model runs only for the manager model', async ($, on) => {
+test('Settings tab: every Select writes its line and says so; /model never runs', async ($, on) => {
   const w = await boot($, on, freshFiles())
   const ui = await mountPane($, 'desktop', 80)
   await ui.press({ key: 'header-tab-settings' })
@@ -477,19 +536,14 @@ test('Settings tab: every Select writes its line and says so; /model runs only f
     expect((await ui.find({ key }))?.props.value).toBe(value)
   }
   expect(w.ran).toEqual([])
-  // Choosing the manager model also runs /model (the stub stays on opus, so the person is told); the manager's thinking never does.
+  // Choosing the manager model writes its line and says so; it runs nothing, and neither does the manager's thinking.
   w.toasts.length = 0
   await ui.select({ key: 'set-manager_model', value: 'sonnet' })
   expect(w.text(BOARD_PATH)).toContain('\nmanager_model: sonnet\n')
-  expect(w.ran).toEqual([{ command: 'model', args: 'sonnet' }])
-  expect(w.toasts).toEqual(['Manager model set to sonnet.', 'run /model sonnet yourself'])
-  w.model = 'claude-haiku-4'
-  w.toasts.length = 0
-  await ui.select({ key: 'set-manager_model', value: 'haiku' })
-  expect(w.ran[1]).toEqual({ command: 'model', args: 'haiku' })
-  expect(w.toasts).toEqual(['Manager model set to haiku.'])
+  expect(w.ran).toEqual([])
+  expect(w.toasts).toEqual(['Manager model set to sonnet.'])
   await ui.select({ key: 'set-manager_thinking', value: 'low' })
-  expect(w.ran).toHaveLength(2)
+  expect(w.ran).toEqual([])
   // A pick of the value already set writes nothing.
   const before = w.writes.length
   await ui.select({ key: 'set-workers', value: '3' })
@@ -1244,11 +1298,21 @@ test('cards that cannot be read are counted under the lanes', async ($, on) => {
   w.put(cardPath('KB-0005', 'broken'), 'this card has no frontmatter\n')
   await w.clock.advance(1000)
   await w.clock.settle()
-  expect(await unreadableTexts(ui)).toEqual([expect.stringMatching(/^Can't read KB-0005.*: ./)])
+  expect(await unreadableTexts(ui)).toEqual([
+    "▲ 1 card file can't be read, so its card is not on the board. Ask Claude to fix it.",
+    expect.stringMatching(/^KB-0005-broken\.md: ./),
+  ])
   w.put(cardPath('KB-0006', 'odd-lane'), cardText('KB-0006', 'Odd lane', 'Nowhere', 1000))
   await w.clock.advance(1000)
   await w.clock.settle()
-  expect((await unreadableTexts(ui)).length).toBe(2)
+  // A card whose status is no lane is read but the board does not draw it: the unknown-lane sentence comes before the unreadable one.
+  expect(await unreadableTexts(ui)).toEqual([
+    '▲ 1 card has a status that is no lane on this board, so the board does not show it. Ask Claude to move it to a lane.',
+    'KB-0006',
+    "▲ 1 card file can't be read, so its card is not on the board. Ask Claude to fix it.",
+    expect.stringMatching(/^KB-0005-broken\.md: ./),
+  ])
+  expect(await laneOf(ui, 'KB-0006')).toBeUndefined()
   // The board keeps working around them.
   expect(await laneOf(ui, 'KB-0001')).toBe('Inbox')
   await move(ui, 'KB-0001', 'Inbox', 'Auto')
@@ -1269,12 +1333,47 @@ test('more than three unreadable files: three are named, the rest counted', asyn
   for (const n of [5, 6, 7, 8, 9]) w.put(cardPath(`KB-000${n}`, 'broken'), 'this card has no frontmatter\n')
   await w.clock.advance(1000)
   await w.clock.settle()
-  const lines = await unreadableTexts(ui)
-  expect(lines).toHaveLength(4)
-  expect(lines.slice(0, 3).every((l) => l.startsWith("Can't read KB-000"))).toBe(true)
-  expect(lines[3]).toBe('and 2 more')
-  const box = await ui.find({ key: 'unreadable-0' })
-  expect(box?.props).toMatchObject({ flexShrink: 1, minWidth: 0, overflow: 'hidden' })
+  const sentence = "▲ 5 card files can't be read, so their cards are not on the board. Ask Claude to fix them."
+  const [shownSentence, list] = await unreadableTexts(ui)
+  expect(shownSentence).toBe(sentence)
+  expect(list.split('\n')).toHaveLength(4)
+  expect(list.split('\n').slice(0, 3).every((l) => /^KB-000\d-broken\.md: ./.test(l))).toBe(true)
+  expect(list.split('\n')[3]).toBe('and 2 more')
+  // The sentence is a warning, wrapped in full: never cut, never in a box that hides the overflow.
+  const text = await ui.find({ type: 'Text', text: sentence })
+  expect(text?.props.color).toBe('warning')
+  expect(text?.props.wrap).not.toBe('truncate-end')
+  expect((await ui.find({ key: 'unreadable-0' }))?.props.overflow).toBeUndefined()
+  // Show all lists every file; Show fewer returns to three.
+  expect((await ui.find({ key: 'unreadable-all' }))?.props.label).toBe('Show all')
+  await ui.press({ key: 'unreadable-all' })
+  const all = (await unreadableTexts(ui))[1].split('\n')
+  expect(all).toHaveLength(5)
+  expect(all.some((l) => l.startsWith('and '))).toBe(false)
+  expect((await ui.find({ key: 'unreadable-all' }))?.props.label).toBe('Show fewer')
+  await ui.press({ key: 'unreadable-all' })
+  expect((await unreadableTexts(ui))[1].split('\n')).toHaveLength(4)
+  expect((await ui.find({ key: 'unreadable-all' }))?.props.label).toBe('Show all')
+})
+
+test('a card with ID letters that are no type still shows, under a warning that says what to ask', async ($, on) => {
+  const w = await boot($, on)
+  const ui = await mountPane($, 'desktop')
+  w.put(cardPath('ZZ-0001', 'old-one'), cardText('ZZ-0001', 'Old one', 'Inbox', 1000))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(await unreadableTexts(ui)).toEqual([
+    '▲ 1 card has ID letters ZZ that are no type on this board. It still shows on the board. Ask Claude to retype the card.',
+    'ZZ-0001',
+  ])
+  expect(await laneOf(ui, 'ZZ-0001')).toBe('Inbox')
+  w.put(cardPath('ZZ-0002', 'old-two'), cardText('ZZ-0002', 'Old two', 'Inbox', 2000))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(await unreadableTexts(ui)).toEqual([
+    '▲ 2 cards have ID letters ZZ that are no type on this board. They still show on the board. Ask Claude to retype the cards.',
+    'ZZ-0001, ZZ-0002',
+  ])
 })
 
 test('a board.md that cannot be read puts a row on the pane and turns moves off', async ($, on) => {
@@ -1459,7 +1558,10 @@ test('two files with one ID cannot be moved', async ($, on) => {
   files[cardPath('KB-0001', 'copy-of-footer')] = cardText('KB-0001', 'Fix footer again', 'Inbox', 3000)
   const w = await boot($, on, files)
   const ui = await mountPane($, 'desktop')
-  expect((await unreadableTexts(ui))[0]).toContain("Can't read ")
+  expect(await unreadableTexts(ui)).toEqual([
+    '▲ 2 card files share an ID, and neither can be moved. Ask Claude to give one of them a new ID.',
+    'KB-0001-copy-of-footer.md, KB-0001-fix-footer.md',
+  ])
   await move(ui, 'KB-0001', 'Inbox', 'Auto')
   expect(w.writes).toEqual([])
   expect(w.sent).toEqual([])
@@ -2242,18 +2344,18 @@ test('the snapshot of a typed board carries the types, each card\'s type and cre
 })
 
 test('Find a card finds a card by its type name and by an old ID', async ($, on) => {
-  await boot($, on, typedFiles())
+  const w = await boot($, on, typedFiles())
   const ui = await mountPane($, 'desktop')
   const shown = async (): Promise<string[]> => (await boardProps(ui)).lanes.flatMap((l) => l.cards.map((c) => c.id)).sort()
-  await ui.input({ key: 'toolbar-find', text: 'chore', kind: 'change' })
+  await typeFind(ui, w, 'chore')
   expect(await shown()).toEqual(['CHORE-0001'])
   // `bug` finds the BUG card, and the card retyped from BUG-0003 (its old ID holds the letters).
-  await ui.input({ key: 'toolbar-find', text: 'bug', kind: 'change' })
+  await typeFind(ui, w, 'bug')
   expect(await shown()).toEqual(['BUG-0012', 'ENH-0007'])
-  await ui.input({ key: 'toolbar-find', text: 'enhancement', kind: 'change' })
+  await typeFind(ui, w, 'enhancement')
   expect(await shown()).toEqual(['ENH-0007'])
   // The old ID of the retyped card finds it, under its new ID.
-  await ui.input({ key: 'toolbar-find', text: 'BUG-0003', kind: 'change' })
+  await typeFind(ui, w, 'BUG-0003')
   expect(await shown()).toEqual(['ENH-0007'])
 })
 
@@ -2295,7 +2397,7 @@ test('an open card stays open under its new ID when its file is replaced by a re
 
 test('a snapshot saved before typed cards (no types, type, formerIds or createdAt) still draws, finds and sorts', async ($, on) => {
   const state = watchState(on)
-  await boot($, on, typedFiles())
+  const w = await boot($, on, typedFiles())
   const ui = await mountPane($, 'desktop')
   const snapshot = state.wrote.snapshot
   const { types: _types, ...settings } = snapshot.settings
@@ -2310,7 +2412,7 @@ test('a snapshot saved before typed cards (no types, type, formerIds or createdA
   await sortLanes(ui, 'oldest')
   expect((await boardProps(ui)).lanes.flatMap((l) => l.cards).length).toBe(4)
   // The library's default types stand in for the missing ones.
-  await ui.input({ key: 'toolbar-find', text: 'chore', kind: 'change' })
+  await typeFind(ui, w, 'chore')
   expect((await boardProps(ui)).lanes.flatMap((l) => l.cards.map((c) => c.id))).toEqual(['CHORE-0001'])
 })
 
@@ -2347,4 +2449,101 @@ test('a retype asked from the open card marks the card worked at turn.start; whe
   expect(state.wrote.queued).toEqual([])
   expect(await ui.find({ key: 'card' })).toBeDefined()
   expect((await ui.find({ key: 'card-header' }))?.text).toBe('ENH-0020 (was BUG-0012)  in Pending')
+})
+
+/** Starts a session with `cwd`, `root` being what `$.session.root()` answers, and returns the fs paths the pane used with a board showing. */
+async function pathsUsed(cwd: string, root: string | null) {
+  return async ($: Engine, on: Parameters<typeof stubs>[0]) => {
+    const w = stubs(on)
+    w.root = root
+    await $.session.start({ cwd, surface: 'desktop', isInteractive: true })
+    await w.clock.settle()
+    const ui = await mountPane($, 'desktop')
+    await w.clock.advance(3000)
+    await w.clock.settle()
+    expect((await boardProps(ui)).isReadOnly).toBe(false)
+    expect(w.sent).toEqual([])
+    return w.paths.map((p) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
+  }
+}
+
+test("the board is found under the project root, even when the session's cwd is already inside kanban/", async ($, on) => {
+  const paths = await (await pathsUsed('/opened/here/kanban', '/opened/here'))($, on)
+  expect(paths.length).toBeGreaterThan(0)
+  expect(paths.filter((p) => !/^\/opened\/here\/kanban(\/[^/]+)?$/.test(p))).toEqual([])
+})
+
+test('with no usable session root the cwd of session.start is used', async ($, on) => {
+  const paths = await (await pathsUsed('/opened/here', ''))($, on)
+  expect(paths.length).toBeGreaterThan(0)
+  expect(paths.filter((p) => !/^\/opened\/here\/kanban(\/[^/]+)?$/.test(p))).toEqual([])
+})
+
+test('with neither a root nor a cwd the pane keeps the relative kanban/ paths', async ($, on) => {
+  const paths = await (await pathsUsed('', ''))($, on)
+  expect(paths.length).toBeGreaterThan(0)
+  expect(paths.some((p) => p.includes('opened'))).toBe(false)
+})
+
+/** The default board and cards as files of `dir` (`/a/kanban`), keyed by full path so another folder's board is another file. */
+function filesIn(dir: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(defaultFiles()).map(([k, v]) => [dir + '/' + k.slice('kanban/'.length), v]))
+}
+
+/** Starts a session at `root` over fake files keyed by full path; returns the world and the mounted pane. */
+async function startAt(
+  $: Engine,
+  on: Parameters<typeof stubs>[0],
+  root: string,
+  files: Record<string, string>,
+  hasBoard = true,
+) {
+  const w = stubs(on, files)
+  w.isExact = true
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await w.clock.settle()
+  const ui = await mountPane($, 'desktop', 100, hasBoard)
+  await w.clock.advance(3000)
+  await w.clock.settle()
+  return { w, ui }
+}
+
+const SETUP_PROMPT = 'Kanban: set up a board here with the kanban skill.'
+
+test("a chat opened in a subfolder finds the board in a parent folder's kanban/", async ($, on) => {
+  const { w, ui } = await startAt($, on, '/a/b/c', filesIn('/a/kanban'))
+  expect(await ui.find({ type: 'Text', text: 'This project has no board yet.' })).toBeUndefined()
+  expect((await boardProps(ui)).isReadOnly).toBe(false)
+  expect(w.reads).toContain('/a/kanban/KB-0001-fix-footer.md')
+  expect(w.sent.map((s) => s.text)).not.toContain(SETUP_PROMPT)
+})
+
+test('a card move with the board in a parent folder writes the parent\'s file', async ($, on) => {
+  const { w, ui } = await startAt($, on, '/a/b/c', filesIn('/a/kanban'))
+  await move(ui, 'KB-0001', 'Inbox', 'Auto')
+  expect(w.writes).toContain('/a/kanban/KB-0001-fix-footer.md')
+  expect(w.writes.filter((p) => !p.startsWith('/a/kanban/'))).toEqual([])
+})
+
+test('a chat opened in the board folder itself finds board.md there', async ($, on) => {
+  const { w, ui } = await startAt($, on, '/a/kanban', filesIn('/a/kanban'))
+  expect(await ui.find({ type: 'Text', text: 'This project has no board yet.' })).toBeUndefined()
+  expect((await boardProps(ui)).isReadOnly).toBe(false)
+  expect(w.sent.map((s) => s.text)).not.toContain(SETUP_PROMPT)
+})
+
+test("the root's own kanban/board.md wins over a parent's board", async ($, on) => {
+  const own = filesIn('/a/b/kanban')
+  own['/a/b/kanban/KB-0001-fix-footer.md'] = cardText('KB-0001', 'Own footer', 'Inbox', 1000)
+  const { w, ui } = await startAt($, on, '/a/b', { ...filesIn('/a/kanban'), ...own })
+  expect((await boardProps(ui)).isReadOnly).toBe(false)
+  expect(w.reads).toContain('/a/b/kanban/KB-0001-fix-footer.md')
+  expect(w.reads).not.toContain('/a/kanban/KB-0001-fix-footer.md')
+})
+
+test('with no board in the root or any parent folder the pane offers to set one up', async ($, on) => {
+  const { w, ui } = await startAt($, on, '/a/b/c', {}, false)
+  expect((await ui.find({ type: 'Text', text: 'This project has no board yet.' }))?.type).toBe('Text')
+  await ui.press({ key: 'setup' })
+  expect(w.sent.map((s) => s.text)).toEqual([SETUP_PROMPT])
 })
