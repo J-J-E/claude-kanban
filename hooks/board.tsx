@@ -23,7 +23,7 @@ import type { ClientElements, ClientModule, ClientPointerEvent, ClientSurface, R
 import { flagReason } from './lib/flags.ts'
 import { DRAG_CELLS, MARK_PENDING, boardLabels, cellWidth, clip, menuOf, titleOf, withPending } from './lib/layout.ts'
 import type { BoardCard, BoardFold, BoardLane, BoardPost, BoardProps, BoardState } from './lib/layout.ts'
-import { CHANGED_COL_W, LABEL_COL_W, MENU_ZONE_W, PADDING, dropAt, ghostOf, hitAt, panelLayout, placeSlotAt } from './lib/lanes.ts'
+import { CHANGED_COL_W, LABEL_COL_W, MENU_ZONE_W, PADDING, cardAt, dropAt, ghostOf, hitAt, panelLayout, placeSlotAt } from './lib/lanes.ts'
 import type { CardTile, LanePanel, PanelLayout, PanelProps, PlaceSlot } from './lib/lanes.ts'
 import { sortKeyOf } from './lib/sort.ts'
 import { barGlyphs, statusWords } from './lib/status.ts'
@@ -37,6 +37,7 @@ import {
   WORKING_MARK,
   dropLook,
   emptyBoardRows,
+  mergeVerdict,
   needsYouWords,
   placeVerdict,
   verdictFor,
@@ -208,6 +209,8 @@ type Parts = {
   held: { card: BoardCard; fromRole: string | null } | null
   /** Where the card in hand would sit, when the lane under the pointer takes it in `Your order` (spec 14.5), else null. */
   slot: PlaceSlot | null
+  /** The other card the pointer is on while a card is in the hand (a release there asks to merge, spec 14.5), else null. */
+  merge: { lane: string; id: string } | null
   /** True while a card is in the hand: no hover reveal is drawn (spec 7.4). */
   isBusy: boolean
   /** The top left of the Box the parts are drawn in: a panel's own corner (its children are placed from it), or the region's. */
@@ -242,8 +245,9 @@ function drawActivity(p: Parts, panel: LanePanel, under: boolean): RenderElement
   if (look !== undefined) {
     const colour = look.colour
     const quiet = (look.kind === 'same' && !under) || look.kind === 'place'
-    const style = quiet ? { dimColor: true } : look.kind === 'refuse' ? { color: 'warning', dimColor: true } : { bold: true, ...only('color', colour) }
-    const sentence = look.kind === 'place' && p.slot !== null && p.slot.lane === panel.name ? placeVerdict(p.slot.after, p.slot.before) : look.text
+    const merging = p.merge !== null && p.merge.lane === panel.name
+    const style = merging ? { bold: true, color: 'claude' } : quiet ? { dimColor: true } : look.kind === 'refuse' ? { color: 'warning', dimColor: true } : { bold: true, ...only('color', colour) }
+    const sentence = merging && p.merge !== null ? mergeVerdict(p.merge.id) : look.kind === 'place' && p.slot !== null && p.slot.lane === panel.name ? placeVerdict(p.slot.after, p.slot.before) : look.text
     return (
       <Box height={1} marginLeft={2} flexGrow={1} flexShrink={100} minWidth={0} overflow="hidden" justifyContent="flex-end">
         <Text wrap="truncate-end" {...style}>
@@ -716,6 +720,9 @@ function draw(props: BoardProps, surface: Surface, state: BoardState): RenderEle
   // The slot shows where the card would sit when the lane under the pointer takes it (spec 14.5): not a lane that refuses it, nor the lane it sits in when nothing can be placed there.
   const under = d !== null && d.target !== null && looks !== null ? looks.get(d.target) : undefined
   const slot = dragged && d !== null && under !== undefined && under.kind !== 'refuse' && under.kind !== 'same' ? placeSlotAt(lay, effective as PanelProps, d.x, d.y, d.id) : null
+  // Over another card (not the one in hand) a release asks to merge, so the lane's line says so and there is no slot (spec 14.5).
+  const over = dragged && d !== null ? cardAt(lay, d.x, d.y) : null
+  const merge = over !== null && d !== null && over.id !== d.id ? { lane: over.lane, id: over.id } : null
   const p: Parts = {
     el: surface.elements,
     state,
@@ -728,6 +735,7 @@ function draw(props: BoardProps, surface: Surface, state: BoardState): RenderEle
     looks,
     held,
     slot,
+    merge,
     isBusy: dragged,
     origin: { x: 0, y: 0 },
   }
@@ -874,6 +882,14 @@ function onUpDrag(e: ClientPointerEvent, props: BoardProps, surface: Surface, s:
   const now = laneNameOf(effective, d.id)
   if (target === null || now === undefined) {
     // Let go off every lane (or the card is gone): nothing happens and nothing is said.
+    put(surface, cleared)
+    return
+  }
+  // Let go on a card's own rows: on another card it asks to merge into it (posted, nothing shown in flight, nothing moves); on the card in hand
+  // itself, which is where it already is, nothing happens.
+  const over = cardAt(lay, e.x, e.y)
+  if (over !== null) {
+    if (over.id !== d.id) send(surface, { type: 'merge', id: d.id, onto: over.id, rev: props.rev })
     put(surface, cleared)
     return
   }

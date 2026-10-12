@@ -1172,7 +1172,7 @@ async function modelLine(ui: Pane): Promise<string | undefined> {
   return (await ui.find({ key: 'card-model-line' }))?.text
 }
 
-test('the open card has Type, Lane, Model and Thinking in one row; Auto first, the line under them says Settings decide', async ($, on) => {
+test('the open card has Lane, Model, Thinking and Type in one row of three groups; Auto first, the line in the Model group says Settings decide', async ($, on) => {
   const w = await boot($, on)
   const ui = await mountPane($, 'desktop')
   await select(ui, 'KB-0001')
@@ -1190,8 +1190,8 @@ test('the open card has Type, Lane, Model and Thinking in one row; Auto first, t
   expect(model?.props.value).toBe('Auto')
   expect(thinking?.props.value).toBe('Auto')
   expect(await modelLine(ui)).toBe(AUTO_LINE)
-  // Only the four Selects stand beside the comment field (KB-0064: Type comes before Lane), and reading wrote nothing.
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
+  // Only the four Selects stand beside the comment field (ENH-0056: Lane, Model, Thinking, then Type), and reading wrote nothing.
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type'])
   expect(w.writes).toEqual([])
   expect(w.toasts).toEqual([])
 })
@@ -1428,7 +1428,7 @@ test('an older board with Manual and Parked lanes shows no Do it step by step or
 })
 
 for (const columns of [40, 59, 60, 89, 90, 100]) {
-  test(`at ${columns} cells the four Selects stand ${columns < 60 ? 'one under the other' : columns < 90 ? 'two and two' : 'in a row'}, each sized by flex`, async ($, on) => {
+  test(`at ${columns} cells the three groups of Selects stand ${columns < 60 ? 'one under the other' : columns < 90 ? 'Lane and Type in a row, Model and Thinking under them' : 'in a row'}, each sized by flex`, async ($, on) => {
     const { w, ui } = await bootSeven(on, $, sevenLaneFiles(), columns)
     await select(ui, 'KB-0001')
     expect((await ui.find({ key: 'card-selects-row' }))?.props.flexDirection).toBe(columns < 90 ? 'column' : 'row')
@@ -1674,11 +1674,11 @@ async function pickType(ui: Pane, name: string): Promise<void> {
   await ui.select({ key: 'card-type', value: name })
 }
 
-test("the Type list comes before Lane, lists the board's types with the card's own selected; a card with no type shows No type as its value only", async ($, on) => {
+test("the Type list comes after Thinking, lists the board's types with the card's own selected; a card with no type shows No type as its value only", async ($, on) => {
   const w = await boot($, on, typedSeven())
   const ui = await mountPane($, 'desktop')
   await select(ui, 'BUG-0012')
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type'])
   const type = await ui.find({ key: 'card-type' })
   expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['bug', 'enhancement', 'chore'])
   expect(type?.props.value).toBe('bug')
@@ -1869,21 +1869,83 @@ test("the dim line shows Claude's suggestion while it is newer than the newest r
   expect(await ui.find({ key: 'card-suggestion' })).toBeUndefined()
 })
 
+/** The keys under a drawn node, in drawing order. */
+function keysUnder(n: unknown, out: string[] = []): string[] {
+  if (typeof n !== 'object' || n === null) return out
+  const node = n as { props?: { key?: string }; children?: unknown[] }
+  if (node.props?.key !== undefined) out.push(String(node.props.key))
+  for (const c of node.children ?? []) keysUnder(c, out)
+  return out
+}
+
+/** The group keys, the top-row key and the retype question, in drawing order. */
+async function groupOrder(ui: Pane): Promise<string[]> {
+  return keysUnder(await ui.drawn()).filter((k) => /^card-(group-(lane|claude|type)|selects-top|retype-ask)$/.test(k))
+}
+
+// ENH-0056: the lists stand in three headed groups, Lane, Model and Thinking, Type.
 const SHAPES = [
-  { columns: 108, direction: 'row', pairs: false },
-  { columns: 80, direction: 'column', pairs: true },
-  { columns: 50, direction: 'column', pairs: false },
+  { columns: 108, direction: 'row', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type'] },
+  { columns: 80, direction: 'column', top: true, order: ['card-selects-top', 'card-group-lane', 'card-group-type', 'card-group-claude'], labels: ['Lane', 'Type', 'Model', 'Thinking'] },
+  { columns: 50, direction: 'column', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type'] },
 ]
 for (const s of SHAPES) {
-  test('at ' + s.columns + ' cells the four lists stand ' + (s.pairs ? 'two rows of two' : s.direction === 'row' ? 'in one row' : 'one under the other'), async ($, on) => {
+  test('at ' + s.columns + ' cells the three groups stand ' + (s.top ? 'Lane and Type in a row with Model and Thinking under them' : s.direction === 'row' ? 'in one row' : 'one under the other'), async ($, on) => {
     const w = await boot($, on, typedSeven())
     const ui = await mountPane($, 'desktop', s.columns)
     await select(ui, 'BUG-0012')
     expect((await ui.find({ key: 'card-selects-row' }))?.props.flexDirection).toBe(s.direction)
-    expect((await ui.find({ key: 'card-selects-pair-1' })) !== undefined).toBe(s.pairs)
-    expect((await ui.find({ key: 'card-selects-pair-2' })) !== undefined).toBe(s.pairs)
-    if (s.pairs) expect((await ui.find({ key: 'card-selects-pair-1' }))?.props.flexDirection).toBe('row')
-    expect((await ui.findAll({ type: 'Select' })).map((x) => x.props.label)).toEqual(['Type', 'Lane', 'Model', 'Thinking'])
+    expect((await ui.find({ key: 'card-selects-top' })) !== undefined).toBe(s.top)
+    if (s.top) expect((await ui.find({ key: 'card-selects-top' }))?.props.flexDirection).toBe('row')
+    expect(await groupOrder(ui)).toEqual(s.order)
+    expect((await ui.findAll({ type: 'Select' })).map((x) => x.props.label)).toEqual(s.labels)
+    // Model and Thinking stand side by side inside their group, one per row only when narrow.
+    expect((await ui.find({ key: 'card-claude-lists' }))?.props.flexDirection).toBe(s.columns < 60 ? 'column' : 'row')
+    expect((await ui.find({ key: 'card-selects-pair-1' })) === undefined).toBe(true)
+    // The helper line is inside the Model and Thinking group.
+    expect(keysUnder(await ui.find({ key: 'card-group-claude' }))).toEqual(expect.arrayContaining(['card-model-box', 'card-thinking-box', 'card-model-line']))
+    expect(w.writes).toEqual([])
+  })
+
+  test('at ' + s.columns + ' cells the retype question stands directly under the Type group', async ($, on) => {
+    const w = await boot($, on, typedSeven())
+    const ui = await mountPane($, 'desktop', s.columns)
+    await select(ui, 'BUG-0012')
+    await pickType(ui, 'enhancement')
+    const order = await groupOrder(ui)
+    const at = order.indexOf('card-retype-ask')
+    expect(at).toBeGreaterThan(-1)
+    // Nothing but the Type group comes between the Type group and its question; the Model group follows only at the middle width.
+    expect(order[at - 1]).toBe('card-group-type')
+    expect(order.filter((k) => k === 'card-retype-ask').length).toBe(1)
     expect(w.writes).toEqual([])
   })
 }
+
+test('the three groups carry their headings in bold, Lane in a bright outline and the other two in a dim one, no colour added', async ($, on) => {
+  const w = await boot($, on, typedSeven())
+  const ui = await mountPane($, 'desktop', 108)
+  await select(ui, 'BUG-0012')
+  const groups = [
+    { key: 'card-group-lane', heading: 'Lane (move it)', dim: false },
+    { key: 'card-group-claude', heading: 'Claude runs it with', dim: true },
+    { key: 'card-group-type', heading: 'Card type', dim: true },
+  ]
+  for (const g of groups) {
+    const node = await ui.find({ key: g.key })
+    const [head, outline] = (node?.children ?? []) as { children?: unknown[]; props: Record<string, unknown> }[]
+    expect(head?.children?.join('')).toBe(g.heading)
+    expect(head?.props.bold).toBe(true)
+    expect(head?.props.color).toBeUndefined()
+    expect(outline?.props.borderStyle).toBe('round')
+    expect(Boolean(outline?.props.borderDimColor)).toBe(g.dim)
+    expect(outline?.props.borderColor).toBeUndefined()
+  }
+  // Lane first, then the Model group, then Type; Rename and Copy ID stay under the title, above the groups.
+  const keys = keysUnder(await ui.drawn())
+  expect(keys.indexOf('card-tools')).toBeLessThan(keys.indexOf('card-group-lane'))
+  expect(keys.indexOf('card-group-lane')).toBeLessThan(keys.indexOf('card-group-claude'))
+  expect(keys.indexOf('card-group-claude')).toBeLessThan(keys.indexOf('card-group-type'))
+  expect(keysUnder(await ui.find({ key: 'card-tools' }))).toEqual(expect.arrayContaining(['card-rename-open', 'card-copy']))
+  expect(w.writes).toEqual([])
+})

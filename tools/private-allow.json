@@ -1,0 +1,44 @@
+[
+  {
+    "file": "README.md",
+    "class": "path",
+    "pattern": "[A-Z]:[\\\\/]{1,2}path[\\\\/]{1,2}to[\\\\/]",
+    "reason": "The install steps show a path to/ folder as a placeholder for the reader's own clone and project folder, not a folder on any real PC."
+  },
+  {
+    "file": "tests/*.test.ts",
+    "class": "path",
+    "pattern": "[A-Z]:[\\\\/]{1,2}(?:project|work|scratch|Temp)[\\\\/]",
+    "reason": "Invented Windows folders (project, work, scratch, Temp) used as test input for path handling; none exists on a real PC."
+  },
+  {
+    "file": "tests/pane.test.ts",
+    "class": "path",
+    "pattern": "/a/(?:b|kanban)/",
+    "reason": "Fake Git-Bash style folders in the test that checks the board is found from a folder inside or beside a project; the files are in-memory fakes."
+  },
+  {
+    "file": "tests/fixtures.ts",
+    "class": "path",
+    "pattern": "\/a\/kanban\/",
+    "reason": "A comment naming the in-memory fake file used by the test fixtures."
+  },
+  {
+    "file": "LICENSE",
+    "class": "name",
+    "pattern": "Copyright \\(c\\) \\d{4} John Ehlen",
+    "reason": "The author's name belongs in the licence text of a public project."
+  },
+  {
+    "file": ".claude-plugin/*.json",
+    "class": "name",
+    "pattern": "\"name\": \"John Ehlen\"",
+    "reason": "The author's name is part of the plugin and marketplace manifests and is published on purpose."
+  },
+  {
+    "file": "{README.md,CHANGELOG.md,TESTING.md,tests/obsidian-compat.test.ts}",
+    "class": "name",
+    "pattern": "J-J-E/claude-kanban",
+    "reason": "The address of the public repo (install command, issues link, example pull request URL); the repo is public."
+  }
+]

@@ -327,11 +327,97 @@ test('a drop on the lane the card is in posts the move with its place; it shows 
   // Placed above KB-0001 it is drawn there, dim, with `Moving…` until the board answers.
   expect(text(h.render())).toContain('Moving…')
   h.setProps(props({ rev: 6 }))
-  // Dropped back on its own tiles: the gap under KB-0001 is where it already is, so it is not a move in flight.
+  // Dropped back in the gap under KB-0001, where it already is: not a move in flight.
   const l6 = lay(props({ rev: 6 }))
-  drag(h, { x: t.x + 2, y: t.y }, { x: 30, y: tile(l6, 'KB-0001').rect.y })
+  drag(h, { x: t.x + 2, y: t.y }, { x: 30, y: tile(l6, 'KB-0001').rect.y + tile(l6, 'KB-0001').rows })
   expect(h.posts[1]).toEqual({ type: 'move', id: 'KB-0002', from: 'Inbox', to: 'Inbox', rev: 6, before: null })
   expect(text(h.render())).not.toContain('Moving…')
+})
+
+test('a release on the rows of another card asks to merge: a merge post, no place, nothing in flight', async () => {
+  const p = props()
+  const h = await board(p)
+  const l = lay(p)
+  const from = tile(l, 'KB-0003').rect
+  const onto = tile(l, 'KB-0001').rect
+  // From another lane, on any row of the card (its `⋯` zone too).
+  drag(h, { x: from.x + 2, y: from.y }, { x: onto.x + 5, y: onto.y })
+  expect(h.posts).toEqual([{ type: 'merge', id: 'KB-0003', onto: 'KB-0001', rev: 5 }])
+  expect(text(h.render())).not.toContain('Moving…')
+  expect(placed(h.tree, 'tile-KB-0003').top).toBe(from.y)
+  expect(ghostOf(h.tree)).toBeUndefined()
+  // Within its own lane, and onto a card of a lane only Claude fills.
+  const two = tile(l, 'KB-0002').rect
+  drag(h, { x: two.x + 2, y: two.y }, { x: onto.x + 2, y: onto.y })
+  expect(h.posts[1]).toEqual({ type: 'merge', id: 'KB-0002', onto: 'KB-0001', rev: 5 })
+  const question = tile(l, 'KB-0005').rect
+  drag(h, { x: onto.x + 2, y: onto.y }, { x: question.x + 40, y: question.y })
+  expect(h.posts[2]).toEqual({ type: 'merge', id: 'KB-0001', onto: 'KB-0005', rev: 5 })
+  expect(h.posts).toHaveLength(3)
+  // A lane sorted by title still has cards to merge onto.
+  const ps: BoardProps = { ...p, lanes: p.lanes.map((x) => (x.name === 'Inbox' ? { ...x, sort: 'title' } : x)) }
+  const s = await board(ps)
+  const ls = lay(ps)
+  const a = tile(ls, 'KB-0003').rect
+  const b = tile(ls, 'KB-0002').rect
+  drag(s, { x: a.x + 2, y: a.y }, { x: b.x + 2, y: b.y })
+  expect(s.posts).toEqual([{ type: 'merge', id: 'KB-0003', onto: 'KB-0002', rev: 5 }])
+})
+
+test('a release in the gap between cards, on the title bar or under the last card still places the card', async () => {
+  const p = props()
+  const l = lay(p)
+  const from = tile(l, 'KB-0003').rect
+  const one = tile(l, 'KB-0001')
+  const two = tile(l, 'KB-0002')
+  // Each release on a board of its own: a place in flight would move the card the next drag takes hold of.
+  const places: [number, string | null][] = [
+    [one.rect.y + one.rows, 'KB-0002'],
+    [laneY(l, 'Inbox'), 'KB-0001'],
+    [two.rect.y + two.rows, null],
+  ]
+  for (const [y, before] of places) {
+    const h = await board(p)
+    drag(h, { x: from.x + 2, y: from.y }, { x: 20, y })
+    expect(h.posts).toEqual([{ type: 'move', id: 'KB-0003', from: 'Auto', to: 'Inbox', rev: 5, before }])
+  }
+})
+
+test('a release on the card in hand itself does nothing: no post, nothing in flight', async () => {
+  const p = props()
+  const h = await board(p)
+  const l = lay(p)
+  const t = tile(l, 'KB-0002').rect
+  drag(h, { x: t.x + 2, y: t.y }, { x: t.x + 12, y: t.y })
+  expect(h.posts).toEqual([])
+  expect(text(h.render())).not.toContain('Moving…')
+  expect(ghostOf(h.tree)).toBeUndefined()
+  expect(placed(h.tree, 'tile-KB-0002').top).toBe(t.y)
+})
+
+test('the landing line over another card reads Merge into <ID>, with no place slot; over a gap it does not', async () => {
+  const p = props()
+  const h = await board(p)
+  const l = lay(p)
+  const from = tile(l, 'KB-0003').rect
+  const onto = tile(l, 'KB-0001')
+  drag(h, { x: from.x + 2, y: from.y }, { x: 20, y: onto.rect.y }, false)
+  expect(text(titleBar(h.tree, 'Inbox'))).toContain('Merge into KB-0001')
+  expect(byKey(h.tree, 'slot')).toBeUndefined()
+  // Over a card of a lane only Claude fills, the line is the card's too.
+  const question = tile(l, 'KB-0005').rect
+  h.event({ type: 'move', x: 20, y: question.y, button: 'left' })
+  expect(text(titleBar(h.tree, 'Needs You'))).toContain('Merge into KB-0005')
+  expect(text(titleBar(h.tree, 'Inbox'))).not.toContain('Merge into')
+  // Over the gap under the card: a place, and the line is the lane's own.
+  h.event({ type: 'move', x: 20, y: onto.rect.y + onto.rows, button: 'left' })
+  expect(text(titleBar(h.tree, 'Inbox'))).not.toContain('Merge into')
+  expect(byKey(h.tree, 'slot')).toBeDefined()
+  // Over the card in hand itself: nothing to merge into.
+  h.event({ type: 'move', x: from.x + 4, y: from.y, button: 'left' })
+  expect(text(titleBar(h.tree, 'Auto'))).not.toContain('Merge into')
+  h.event({ type: 'up', x: 500, y: 500, button: 'left' })
+  expect(h.posts).toEqual([])
 })
 
 test('the whole panel is a drop zone, its gap rows included: a drop on the gap under a card is a drop on the lane', async () => {

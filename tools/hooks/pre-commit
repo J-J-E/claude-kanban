@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs the private-text check on what is staged. Turn on with: git config core.hooksPath tools/hooks
+root=$(git rev-parse --show-toplevel) || exit 2
+cd "$root" || exit 2
+node tools/private-check.mjs --staged
+exit $?

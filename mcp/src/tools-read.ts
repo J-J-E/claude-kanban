@@ -146,7 +146,7 @@ export function registerReadTools(server: McpServer, kanbanDir: () => string | u
     'card_get',
     {
       description: 'The whole file of one card (frontmatter, body, Plan and Log).',
-      inputSchema: { id: z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID is followed to the card that holds it now.') },
+      inputSchema: { id: z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype or a merge) is followed to the card that holds it now.') },
     },
     ({ id }) => {
       const dir = kanbanDir()

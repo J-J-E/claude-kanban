@@ -6,15 +6,14 @@ import { fail, ok, parseFrontmatter, removeKey } from './frontmatter.ts'
 
 // ---------------------------------------------------------------- the table of defaults (spec 18.1)
 
-export type Role = 'manager' | 'planner' | 'worker' | 'advisor'
+export type Role = 'manager' | 'planner' | 'worker'
 /** Where a Reset points: the Workers row or one role (both its lines). */
 export type SettingsTarget = 'workers' | Role
 
-export const ROLES: readonly Role[] = ['manager', 'planner', 'worker', 'advisor']
-export const ROLE_NAMES: { readonly [r in Role]: string } = { manager: 'Manager', planner: 'Planner', worker: 'Worker', advisor: 'Advisor' }
+export const ROLES: readonly Role[] = ['manager', 'planner', 'worker']
+export const ROLE_NAMES: { readonly [r in Role]: string } = { manager: 'Manager', planner: 'Planner', worker: 'Worker' }
 
 export const MODELS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
-export const ADVISOR_MODELS: readonly string[] = ['none', ...MODELS]
 export const THINKING_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 /** The word on a thinking line that means "send no level". The tab calls it `Not set`. */
 export const NOT_SET = 'none'
@@ -34,11 +33,10 @@ export const DEFAULTS: Defaults = {
     manager: { model: 'opus', thinking: 'medium' },
     planner: { model: 'opus', thinking: 'high' },
     worker: { model: 'sonnet', thinking: 'medium' },
-    advisor: { model: 'fable', thinking: 'high' },
   },
 }
 
-/** The board.md key of a role's model or thinking line: `planner_model`, `advisor_thinking`. */
+/** The board.md key of a role's model or thinking line: `planner_model`, `worker_thinking`. */
 export function settingKey(role: Role, field: 'model' | 'thinking'): string {
   return `${role}_${field}`
 }
@@ -91,8 +89,8 @@ export function thinkingChoices(model: string): Choice[] {
   })
 }
 
-export function modelChoices(role: Role): Choice[] {
-  return (role === 'advisor' ? ADVISOR_MODELS : MODELS).map((value) => ({ value, label: value }))
+export function modelChoices(): Choice[] {
+  return MODELS.map((value) => ({ value, label: value }))
 }
 
 export function workersChoices(): Choice[] {
@@ -112,11 +110,11 @@ export const HEAD_MODEL = 'Model'
 export const HEAD_THINKING = 'Thinking'
 export const HEAD_DEFAULT = 'Default'
 export const KEY_TITLE = 'What each thinking level costs'
-export const ADVISOR_THINKING_UNUSED = 'Advisor thinking: not used'
 export const NOTES: readonly string[] = [
-  "Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.",
+  "Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan.",
   'One card can use its own model and thinking: open the card and choose Model and Thinking there. That replaces Planner and Worker for that card, and nothing else.',
   'Changes apply from the next turn. A running agent keeps what it started with.',
+  "The Claude app has its own advisor, a stronger model it may consult in any chat, including the agents this board starts. It is set in your Claude settings (/advisor), not here. If it is on it uses your plan's limits (a Fable advisor can use a lot), and this board cannot see or change it. To turn it off, run /advisor off.",
 ]
 
 export function workersToast(n: number | string): string {
@@ -153,8 +151,6 @@ export type SettingsValues = {
   plannerThinking: string
   workerModel: string
   workerThinking: string
-  advisorModel: string
-  advisorThinking: string
 }
 
 export type WorkersRow = { target: 'workers'; label: string; value: number; defaultValue: number; defaultText: string; differs: boolean }
@@ -178,14 +174,12 @@ function roleValues(v: SettingsValues, role: Role): { model: string; thinking: s
       return { model: v.managerModel, thinking: v.managerThinking }
     case 'planner':
       return { model: v.plannerModel, thinking: v.plannerThinking }
-    case 'worker':
-      return { model: v.workerModel, thinking: v.workerThinking }
     default:
-      return { model: v.advisorModel, thinking: v.advisorThinking }
+      return { model: v.workerModel, thinking: v.workerThinking }
   }
 }
 
-/** The five rows in the tab's order, each with its default and whether it differs. A saved value equal to the default does not differ. */
+/** The four rows in the tab's order, each with its default and whether it differs. A saved value equal to the default does not differ. */
 export function settingsRows(v: SettingsValues, defaults: Defaults = DEFAULTS): SettingsRow[] {
   const rows: SettingsRow[] = [
     {

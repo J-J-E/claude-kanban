@@ -42,6 +42,7 @@ What the pane shows about work in progress:
 - A card whose turn is queued says `○ Waiting to start`.
 - A lane's bar says `● 1 working` or `2 need you` on its right.
 - The header says `Claude is on <ID>` (or `Claude is idle`) and, when something waits on you, `◆ 3 need you`. Press it to open the first waiting card.
+- The last row of the header says which model your chat is on, for example `This chat is on opus.` The board never switches the chat's model (section 4, Settings).
 
 ## 3. Start from the demo project
 
@@ -74,14 +75,14 @@ If `kanban:kanban` or `kanban:setup` is missing, quit the desktop app and reopen
 
 ## 4. Set up the board
 
-Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up at <folder>/kanban/board.md (3 cards). /board opens it.`.
+Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up at <path of board.md> (3 cards). /board opens it.`
 
 On the hand-made repo, type: `/kanban:setup`. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
 ```
 Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong.
 ```
 
-If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up at hello-board/kanban/board.md (0 cards). /board opens it.`.
+If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up at <path of board.md> (0 cards). /board opens it.` and creates nothing. That holds from a subfolder or from inside `kanban/` too: a board is never made inside another.
 
 `kanban/board.md` as the setup writes it:
 ```
@@ -98,10 +99,9 @@ lanes:
 ---
 # Board notes
 
-Free text.
 ```
 
-`lanes:` is the board order; the word in brackets is the lane's role. A setting you change in the pane adds one line above `lanes:`. The file has no `types:` list yet, so the board has the three default types: bug (`BUG`), enhancement (`ENH`) and chore (`CHORE`). Adding a card writes a counter line for its type, the type's letters in lowercase, such as `next_bug: 2` after the first bug; no line means the type's next number is 1. To add a type of your own, add a list above `lanes:`, with all the types you want, since the list replaces the defaults:
+`lanes:` is the board order; the word in brackets is the lane's role. A setting you change in the pane adds one line just before the closing `---`. The file has no `types:` list yet, so the board has the three default types: bug (`BUG`), enhancement (`ENH`) and chore (`CHORE`). Adding a card writes a counter line for its type, the type's letters in lowercase, such as `next_bug: 2` after the first bug; no line means the type's next number is 1. To add a type of your own, add a `types:` list (for example above `lanes:`) with all the types you want, since the list replaces the defaults:
 ```
 types:
   - bug (BUG)
@@ -111,26 +111,32 @@ types:
 ```
 The demo board shows the counters: `next_enh: 3` and `next_chore: 2`, because it already holds `ENH-0001`, `ENH-0002` and `CHORE-0001`.
 
-The pane shows the header (`Claude is idle`, the `Board` and `Settings` tabs, when it last changed), the toolbar and the lanes (picture: `docs/design/real-pane-board-with-menu.png`):
+The pane shows the header (`Claude is idle`, the `Board` and `Settings` tabs, when it last changed, and a last row that says which model the chat is on), the toolbar and the lanes (picture: `docs/design/real-pane-board-with-menu.png`):
 
-![The board pane with a card's menu open](docs/design/real-pane-board-with-menu.png)
+![The board pane: cards in several lanes, one waiting on you](docs/design/real-pane-board-with-menu.png)
 
 - `New card`: opens a `What needs doing?` field with a `Type` list (the board's types; the card gets that type's letters and that type's next number) and a `Lane` list (pick where the card goes), `Add` and `Cancel`. Enter also adds. The pane writes the card file itself. If the lane is one Claude acts on (Plan or Auto), a Claude turn starts for it; in Pending nothing runs.
 - `Find a card`: type to show only the cards that match; `Clear` empties it. If nothing matches the pane says `No card matches "zzzz"` with another `Clear` (picture: `docs/design/real-pane-find-none.png`). Enter opens the first match.
 - `Sort`: `Your order`, `Newest first`, `Oldest first`, `Recently changed`, `Title A to Z`, `Label A to Z`, `Needs you first`. A sort changes no card file. You can only drop a card between two others while it is `Your order`.
 - `Collapse all` / `Expand all`: folds or opens every lane (picture: `docs/design/real-pane-all-folded.png`). A line like `3 cards` counts what is shown.
-- Each card is a flat row: its ID, its title and a `⋯` button. Press the row to open the card. Press the `⋯` to show a small menu under the card: `Open card`, `Copy ID` and `Delete card…` (which asks `Delete it` or `Keep it`).
+- Each card is a flat row: its ID, its title and a `⋯` button. Press the row to open the card. Press the `⋯` to show a small menu under the card: `Open card`, `Copy ID` and `Delete card…` (which asks `Delete it` or `Keep it`; `Delete it` asks Claude to delete the card, with the toast `Claude is deleting <ID>.`, and Claude replies `<ID> deleted.`).
+- Drag a card and let go on another card's rows, not on a lane's title bar or the gap between cards: the card does not move. The top of the board tab asks `Merge <ID> "<title>" into <ID> "<title>"? <ID> is deleted and its text moves into <ID>.` with `Merge` and `Keep both`. `Keep both` drops the question and changes nothing. `Merge` asks Claude (section 7, Merge). While the card is held, the lane under it says `Merge into <ID>`. A card in Auto cannot be merged: the toast is `<ID> is being worked. Move it out of Auto or wait, then merge. Nothing was changed.` (picture: `docs/design/real-pane-merge-question.png`)
 
-The Settings tab (picture: `docs/design/real-pane-settings.png`) has `Workers at once`, and a `Model` and a `Thinking` list for each of four roles (Manager, Planner, Worker, Advisor), each with its default and a `Reset` button.
+![A card dropped on another card: the pane asks whether to merge](docs/design/real-pane-merge-question.png)
+
+When a card file has a problem, a warning line above the lanes says what, in full, and what to do next: one line per kind of problem, with the first three cards or files and a `Show all` button (then `Show fewer`) for the rest. A card whose ID letters are no type on the board reads `▲ 1 card has ID letters KB that are no type on this board. It still shows on the board. Ask Claude to retype the card.` with its ID under it; section 7 shows the retype. If the pane cannot draw the board at all, it shows one line, `kanban: the board could not be drawn: <reason>`, and a `Retry` button, never a blank pane (picture: `docs/design/real-pane-problem-line.png`).
+
+![A problem line above the lanes](docs/design/real-pane-problem-line.png)
+
+The Settings tab (picture: `docs/design/real-pane-settings.png`) has `Workers at once`, and a `Model` and a `Thinking` list for each of three roles (Manager, Planner, Worker), each with its default and a `Reset` button. There is no Advisor row.
 
 ![The Settings tab](docs/design/real-pane-settings.png)
 
-Each Thinking list marks the level the app recommends for the role's model; changing a role's model does not change its thinking. `Restore all defaults` asks `Restore` or `Keep`. `Save as defaults` makes the current settings this board's own defaults at once (`Saved as your defaults.`): each row's default, its `Reset` and `Restore all defaults` then use them, and no other board changes. `Restore original defaults` (shown only when the board has saved defaults) asks `Remove your saved defaults and put every setting back to the original?` with `Restore` or `Keep`. The shipped defaults are Workers 2; Manager opus, medium; Planner opus, high; Worker sonnet, medium; Advisor fable, high. The controls write to `board.md`:
+Each Thinking list marks the level the app recommends for the role's model; changing a role's model does not change its thinking. `Restore all defaults` asks `Restore` or `Keep`. `Save as defaults` makes the current settings this board's own defaults at once (`Saved as your defaults.`): each row's default, its `Reset` and `Restore all defaults` then use them, and no other board changes. `Restore original defaults` (shown only when the board has saved defaults) asks `Remove your saved defaults and put every setting back to the original?` with `Restore` or `Keep`. The shipped defaults are Workers 2; Manager opus, medium; Planner opus, high; Worker sonnet, medium. Under the settings, notes explain the three roles and then say that the Claude app has its own advisor, set in your Claude settings with `/advisor` and not here: if it is on it uses your plan's limits, the board cannot see or change it, and `/advisor off` turns it off. The controls write to `board.md`:
 - `workers`: how many agents the manager runs at once, planning agents and step workers together. Default 2.
 - `manager_model`: the model the board suggests for your chat. Default opus, medium. The board never switches the chat's model: the header says which model the chat is on and offers `Change to opus` (copies `/model opus`) and `Keep sonnet` (makes the chat's model the board's Manager model).
 - `planner_model`: what the planning agents run on. They write the plans; the manager reviews each plan and writes it into the card. Default opus, high.
 - `worker_model`: what each worker runs on. Default sonnet, medium.
-- `advisor_model`: consulted when the same failure happens twice. Default fable, high.
 
 ## 5. Plan a card and let Claude run it
 
@@ -164,11 +170,12 @@ A plan can end with a "To settle when you approve" list: questions with the answ
 
 **Run it.** Not happy with the plan? Type `comment on <ID>: ...`, then drag the card back to Plan. Happy? Drag the card from Needs You to Auto. Claude does the Auto flow:
 1. Clears `PLAN READY`, makes the branch `<letters>-<n>-<slug>` (for the hello world enhancement, `enh-1-hello-world-app`) from your default branch (`main` if there is no `origin/HEAD`), writes it in `branch:`.
-2. Starts one worker per plan step. The card shows `●` and the status line says `1 of 1 worker running`.
+2. Starts one worker per plan step. The card shows `● Working`, the header says `Claude is on <ID>` and, with `Workers at once` above 1, `1 of 2 workers`.
 3. Reviews each worker's diff, then commits that step on the branch.
-4. Checks the changed files for a gate (section 6). An ordinary source file and its test hit none.
-5. Merges. With no GitHub remote it is a local merge into the default branch. With a GitHub remote and a signed-in `gh` it opens a pull request and squash-merges it.
-6. Moves the card to Done and commits the board.
+4. Verifies: the checks the plan names pass on the branch with your default branch merged in, and the manager reads the whole diff. It Logs `reviewed: <n> files, <checks> pass, nothing outside the plan`.
+5. Checks the changed files for a gate (section 6). An ordinary source file and its test hit none.
+6. Merges. With no GitHub remote it is a local merge into the default branch. With a GitHub remote and a signed-in `gh` it opens a pull request and squash-merges it.
+7. Moves the card to Done and commits the board.
 
 Expect the normal permission prompts for Edit, Write and Bash. The `Kanban:` message arrives as your own words, so nothing is pre-approved. Approve them.
 
@@ -181,6 +188,7 @@ The card's Log when it finished has this shape:
 - <date> <time> Claude: started: <letters>-<n>-<slug>
 - <date> <time> Claude: step 1 done: <what>
 - <date> <time> Claude: step 2 done: <what>
+- <date> <time> Claude: reviewed: <n> files, <checks> pass, nothing outside the plan
 - <date> <time> Claude: merged <letters>-<n>-<slug>
 - <date> <time> Claude: moved Auto -> Done
 ```
@@ -210,13 +218,14 @@ Drag it from Pending straight to Auto. Auto writes its own plan first (a card wi
 - <date> <time> Claude: started: <letters>-<n>-<slug>
 - <date> <time> Claude: step 1 done: <what>
 - <date> <time> Claude: step 2 done: <what>
+- <date> <time> Claude: reviewed: <n> files, <checks> pass, nothing outside the plan
 - <date> <time> Claude: GATE: merge touches <manifest file>
 - <date> <time> Claude: moved Auto -> Needs You
 ```
 
 If your card did not gate, its plan did not change a manifest file; read the Log and the branch's changed files (`git diff --name-only <default branch>...<branch>`) and see the list below.
 
-Other gates: auth, login, secret or deploy paths, `.env*`, workflows, a `Dockerfile`, more than 15 files, a deploy or a destructive step (full list: "Gates" in `skills/kanban/references/lanes.md`).
+Other gates: auth, login, secret or deploy paths, `.env*`, workflows, a `Dockerfile`, a dependency file, a deploy or a destructive step, and a hit from the project's private-text check, which holds the card with `GATE: private text` (full list: "Gates" in `skills/kanban/references/lanes.md`). Anything else Claude merges on its own once the checks pass; the number of files changed holds nothing. A check only the live pane can show (a look, a drag) never holds the card either: Claude merges, Logs `not verified in the live app: <what> (TESTING <step>)`, writes the step into `TESTING.md` as NOT VERIFIED and names it in its reply.
 
 **What your drag does.** Drag the card from Needs You to Auto. That approves the one held action and nothing else. Claude Logs `started: <letters>-<n>-<slug>`, then `approved: GATE: merge touches <manifest file>`. It clears the flag and merges the branch into your default branch. It Logs `merged <letters>-<n>-<slug>`, moves the card to Done and commits the board as `<ID> board: done`. Dropping a card into Needs You yourself does not work: that lane says `Claude's lane. You can't drop here.`
 
@@ -240,6 +249,8 @@ Done (1)
 Discarded (0)
 ```
 
+If a card file has a problem, the list ends with one `Fix needed:` line that names it by code (`unknown-lane`, `duplicate-id`, `unknown-type`) and nothing is fixed. For `unknown-type` a second line follows: `To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype KB-0001 as chore".`
+
 - **What's next.** `what's next`. Three headings, each item as `ID title [flag]`; an empty one says `none`:
 ```
 Queued for Claude
@@ -260,14 +271,16 @@ Untriaged
 If you give no reason, Claude asks once. To change a decision, say so; a new line ends `Supersedes D1.` and the old line stays.
 
 - **Add a card of a type, or from another card.** `add a bug: the footer overlaps the text` makes the next bug, `BUG-0001` on a board with none, and replies `BUG-0001 added to Pending: <title>`. If you name no type Claude asks once `Bug, enhancement or chore?`. `add an enhancement from bug 1: let the footer collapse` makes `ENH-0003` on the demo board and adds the Log line `spawned from BUG-0001` to it and `spawned ENH-0003: <title>` to `BUG-0001`. Neither card becomes the other's parent.
-- **Retype.** `retype bug 1 as enhancement`. The card takes the next enhancement number, the file is renamed (`BUG-0001-<slug>.md` becomes `ENH-0004-<slug>.md`, same slug), and Claude replies `BUG-0001 is now ENH-0004.` The Log gets `retyped from BUG-0001 to ENH-0004`. The card's `branch:`, its pull request and the mentions of `BUG-0001` in other cards keep the old ID, and a child card's `parent:` is changed to the new ID. Claude retypes only when you ask. A card in Auto, or one an agent is on, is refused: `BUG-0001 is being worked. Move it out of Auto or wait, then retype. Nothing was changed.` A type the board does not have is refused: `Unknown type "epic". Types on this board: bug, enhancement, chore. Nothing was changed.` In the pane, use the `Type` list of the open card (section 8); it asks Claude to do this.
+- **Retype.** `retype bug 1 as enhancement`. The card takes the next enhancement number, the file is renamed (`BUG-0001-<slug>.md` becomes `ENH-0004-<slug>.md`, same slug), and Claude replies `BUG-0001 is now ENH-0004.` The Log gets `retyped from BUG-0001 to ENH-0004`. The card's `branch:`, its pull request and the mentions of `BUG-0001` in other cards keep the old ID, and a child card's `parent:` is changed to the new ID. Claude retypes only when you ask. A card in Auto, or one an agent is on, is refused: `BUG-0001 is being worked. Move it out of Auto or wait, then retype. Nothing was changed.` A type the board does not have is refused: `Unknown type "epic". Types on this board: bug, enhancement, chore. Nothing was changed.` In the pane, use the `Type` list of the open card (section 8); it asks Claude to do this. For cards whose ID letters are no type on the board (the pane's warning line, section 4), say `retype KB-0001 as chore`, or say yes when Claude offers it after `list the board`: Claude picks a type from what each card is (a defect is a bug, a new ability an enhancement, upkeep or docs a chore), retypes each one and replies one line per card, `KB-0001 is now CHORE-0011.`
+- **Merge.** `merge bug 2 into bug 1`, or drop one card on another in the pane (section 4). The first card goes into the second, which keeps its ID, lane and place. Claude adds the first card's text to the second under `## Merged from <ID>: <title>`, joins the labels, adds the Log line `merged <ID> "<title>" into <ID>`, deletes the first card's file and replies `BUG-0002 merged into BUG-0001.` Nothing else changes, and no counter goes back. The merged card's old ID finds the survivor, as after a retype. Refused, with nothing changed: `<ID> cannot be merged into itself. Nothing was changed.`, `<ID> is being worked. Move it out of Auto or wait, then merge. Nothing was changed.`, `<ID> is the parent of <ID>, so they cannot be merged. Nothing was changed.`, `<ID> has work on <branch or pr> and cannot be merged. Nothing was changed.` and `<ID> has child cards: <IDs>. Delete or re-parent them first. Nothing was changed.`
+- **Delete.** `delete bug 2`, for a duplicate or junk card (work worth keeping goes to Discarded instead). Claude deletes the file and replies `BUG-0002 deleted.` Its number is not handed out again. A card with a branch or pull request is refused: `BUG-0002 has work on <branch or pr>. Move it to Discarded, or say "delete bug 2 anyway".`
 - **An old ID is followed.** After the retype, `comment on bug 1: still waiting` reaches `ENH-0004` and replies `Comment added to ENH-0004 (was BUG-0001).` `BUG-0001` is never handed out again.
 - **A bare number.** `move 1 to Backlog` works only when one card has the number 1. With `BUG-0001` and `ENH-0001` on the board Claude replies `More than one card is numbered 1: BUG-0001, ENH-0001. Say which, for example "bug 1". Nothing was changed.` and changes nothing.
 - **Backlog.** `move enhancement 2 to Backlog`. Claude replies `ENH-0002 moved Pending -> Backlog.` and does nothing else. The card waits there, and `what's next` does not list it.
 - **Pausing.** `move enhancement 2 to Pending` (or Backlog) while Auto is running it. Claude stops at the next safe point, commits no work in progress, Logs `stopped at step <n>`, keeps the flag and branch, and commits the board as `ENH-0002 board: stopped`.
-- **Discarded.** `move enhancement 2 to Discarded`. Claude stops, Logs `scrapped at step <n>; branch <branch>, PR <pr or none> left for you to close`, and replies with the branch and PR for you to delete. It deletes nothing.
+- **Discarded.** `move enhancement 2 to Discarded`. Claude stops, Logs `scrapped at step <n>; branch <branch>, PR <pr or none> left for you to close`, clears the card's flag the same way a drop on Done does (the Log line then ends `; cleared flag <the old text>`), commits the board as `ENH-0002 board: scrapped` and replies with the branch and PR for you to delete. It deletes nothing.
 
-**Ask in chat.** With the pane open, the chat is the board's manager. Type a request that changes the project:
+**Ask in chat.** In a project with a board, the chat is the board's manager: the pane quietly attaches a short note to what you type (not to slash commands). Type a request that changes the project:
 ```
 fix the date format in the summary
 ```
@@ -277,15 +290,18 @@ When a card waits in Needs You, answer it in chat. With one card waiting, type `
 
 ## 8. The open card
 
-Press a card (or choose `Open card` in the menu under its `⋯`) and the pane shows that card alone:
+Press a card (or choose `Open card` in the menu under its `⋯`) and the pane shows that card alone (picture: `docs/design/real-pane-open-card.png`):
+
+![The open card with its three groups](docs/design/real-pane-open-card.png)
+
 - Top row: `◂ Board` goes back to the lanes. `◂ Prev`, a count like `4 of 32`, and `Next ▸` step through the cards in board order.
 - The title, with `Rename` (opens a `Card title` field with `Save` and `Cancel`) and `Copy ID` (puts the ID on the clipboard and shows `Copied <ID>.`).
-- The Log: press a line's date to copy the whole line (the words are plain text that wraps; pressing them does nothing). Expect `Copied the Log line.`, and Ctrl+V pastes the date, time, name and words, for example `2026-10-11 02:09 John: created in Auto`. Under a line that holds text between backticks is a `Copy command` button for each such stretch: expect `Copied the command.`, and Ctrl+V pastes only the command, exactly as written. Beside the `Log` heading, `Copy entire log` copies every line, also the ones hidden until `Show the whole log`, one per row, oldest first: expect `Copied the entire log.` A card with no Log lines has no `Copy entire log`. These write nothing and send nothing to Claude.
+- The Log: press a line's date to copy the whole line (the words are plain text that wraps; pressing them does nothing). Expect `Copied the Log line.`, and Ctrl+V pastes the date, time, name and words, for example `2026-10-11 02:09 John: created in Auto`. Under a line that holds text between backticks is a `Copy command` button for each such stretch: expect `Copied the command.`, and Ctrl+V pastes only the command, exactly as written (`Copy command 1`, `Copy command 2` when a line holds several). Beside the `Log` heading, `Copy entire log` copies every line, also the ones hidden until `Show the whole log`, one per row, oldest first: expect `Copied the entire log.` A card with no Log lines has no `Copy entire log`. These write nothing and send nothing to Claude.
 - A status box when Claude is on the card: `Working`, the step, the bar of blocks and `5 of 7 steps done`, the last Log line, the branch and pull request.
 - A card that waits on you has one button in its status box: `Approve and run` (a plan), `Approve and continue` (a held step) or `Retry in Auto` (a failed card). It moves the card to Auto and returns to the lanes; if the press is refused the card stays open and a toast says why.
-- `Type`, `Lane`, `Model` and `Thinking`. `Type` shows the card's type (`No type` for a card whose ID letters the board does not list). Picking another type writes nothing: the pane asks `Retype BUG-0012 as enhancement? Its ID will change.` with `Retype` and `Cancel`, and `Retype` asks Claude, which renames the card (section 7). The header then reads `ENH-0007 (was BUG-0012)`. `Lane` moves the card, with the same effect as a drag. `Model` and `Thinking` set a model and thinking level for this card alone; they replace the Planner and Worker settings for that card and nothing else. `Auto` means the Settings values apply.
+- `Lane`, `Model`, `Thinking` and `Type`, in three groups, each under a bold heading and inside its own outline: `Lane (move it)` (bright outline), `Claude runs it with` (`Model` and `Thinking`, dim outline) and `Card type` (`Type`, dim outline). In a wide pane the three sit side by side, in a narrow one one under another, in that order; in between, `Lane (move it)` and `Card type` share a row and `Claude runs it with` follows. `Lane` moves the card, with the same effect as a drag. `Type` shows the card's type (`No type` for a card whose ID letters the board does not list). Picking another type writes nothing: the pane asks `Retype BUG-0012 as enhancement? Its ID will change.` directly under the `Card type` group, with `Retype` and `Cancel`, and `Retype` asks Claude, which renames the card (section 7). The header then reads `ENH-0007 (was BUG-0012)`. `Model` and `Thinking` set a model and thinking level for this card alone; they replace the Planner and Worker settings for that card and nothing else. `Auto` means the Settings values apply.
 - `Plan`: one line per step, marked done, current or to do. `Show details` draws every step in full; `Hide details` puts it back.
-- `Description`, then `Log`: a `Write a comment for Claude` field with a `Comment` button, and the Log lines, newest first.
+- `Description`, then `Log`: a `Write a comment for Claude` field (`Type your answer` when the card waits on a question) with a `Comment` button, and the Log lines, newest first.
 - `Delete card…` at the bottom asks `Delete <ID>? This removes the card and its log.` with `Delete it` and `Keep it`.
 
 ## 9. Watch the board in Obsidian
@@ -303,7 +319,7 @@ If your vault is somewhere else, link the project's `kanban/` folder into it (a 
 
 ## 10. The MCP server
 
-The plugin also starts an MCP server, so any agent (Claude, Gemini CLI) can list, add and move cards without the pane. It edits only the card files and starts no work. Tools, the Gemini setup block and the end-to-end check are in `README.md`, section "MCP server". In a session, `/mcp` shows `kanban` connected.
+The plugin also starts an MCP server, so any agent (Claude, Gemini CLI) can list, add and move cards without the pane. It edits only the card files and starts no work. Tools (`board_list`, `whats_next`, `card_get`, `lanes`, `types`, `card_add`, `card_move`, `card_retype`, `card_merge`, `card_comment`, `decision_add`) and the Gemini setup block are in `README.md`, section "MCP server (optional)"; the end-to-end check is `TESTING.md` step 26. In a session, `/mcp` shows `kanban` connected.
 
 ## 11. Where everything lives
 
@@ -318,16 +334,16 @@ The plugin, `<path-to-your-clone>`:
 ```
 .claude-plugin/   plugin.json, marketplace.json
 skills/kanban/    SKILL.md; references/format.md (the file format); references/lanes.md (lane rules, gates)
-hooks/            register.tsx (/board, settings, refresh), board.tsx (the lanes and the drag), ui/ (header, toolbar, open card, Settings), lib/ (card parser)
+hooks/            register.tsx (/board, settings, refresh), board.tsx (the lanes and the drag), ui/ (header, toolbar, open card, Settings), lib/ (card parser and the pane's words)
 mcp/              the MCP server
-tools/            make-demo.mjs (the demo project), capture-pane.ps1 (a screenshot of the pane)
+tools/            make-demo.mjs and demo-files.mjs (the demo project), capture-pane.ps1 (a screenshot of the pane), private-check.mjs (the private-text check), publish.mjs
 docs/             obsidian.md, design/ (the pictures)
 tests/            what `claude plugin test` runs
 ```
 
 Change the board by editing `kanban/board.md` in any editor, or use the Settings tab. The full rules are in `skills/kanban/references/format.md`.
 - Types: `types:` lists them as `name (LETTERS)`, and each has a counter line `next_<letters in lowercase>`. Do not edit a counter down or change a card's ID letters by hand; ask Claude to retype the card.
-- Settings: `workers` is 1 to 5. Models are `haiku`, `sonnet`, `opus`, `fable`; `advisor_model` can also be `none`. `planner_model` is never `none`.
+- Settings: `workers` is 1 to 5. Models are `haiku`, `sonnet`, `opus`, `fable`. `planner_model` is never `none`. An `advisor_model` line left in an older `board.md` is ignored and kept.
 - Add a lane: a new line under `lanes:` as `Label (role)`. A label is one or two words, letters and digits only. The roles are `intake`, `plan`, `needs-you`, `auto`, `backlog`, `done`, `scrapped` (an older board may also have `manual`, `parked` or `gated`; see `skills/kanban/references/lanes.md`). Behaviour follows the role, not the label.
 - Rename a lane: ask Claude. Do not change a label by hand, or the cards' `status:` lines no longer match. Claude edits every card in that lane.
 

@@ -577,11 +577,24 @@ export type PlaceSlot = {
 }
 
 /**
+ * The card whose rows (its tile, the `⋯` zone included) hold the cell `(x, y)`, or null: a gap row, a title bar, the space under
+ * the last card, a card's open menu and everything off the lanes are not a card. A release on a card is a merge (spec 14.5), not a
+ * place, whatever the lane's sort and whoever fills it; the caller judges it (the card in hand itself, a card in Auto).
+ */
+export function cardAt(l: PanelLayout, x: number, y: number): { lane: string; index: number; id: string } | null {
+  for (const p of l.panels) {
+    if (!p.isOpen || !inRect(p.rect, x, y)) continue
+    const tile = p.cards.find((c) => inRect(c.rect, x, y))
+    if (tile !== undefined) return { lane: p.name, index: p.index, id: tile.id }
+  }
+  return null
+}
+
+/**
  * The slot for a pointer at `(x, y)`, or null: over no panel, over a lane sorted by anything but `Your order` (only that sort lets
- * a card be placed, spec 13), or when the card it would go before is not in the props (a lane of more than 30 cards, at its last
- * drawn gap). The desktop reports whole cells, so "the top or bottom half" of a card cannot be told; the rule is:
- * the pointer on a gap row is that gap; on a 1-row card, the gap under it; on a 2-row card, row 1 is the gap above and row 2 the
- * gap below; on the title bar, or the gap under it, the first place; below the last card, the last drawn gap.
+ * a card be placed, spec 13), on a card's own rows (that is a merge, cardAt), or when the card it would go before is not in the props
+ * (a lane of more than 30 cards, at its last drawn gap). The rule is: the pointer on the one-row gap between two cards is that gap; on
+ * the title bar, or the gap under it, the first place; below the last card, the last drawn gap.
  * `exclude` is the ID of the card in hand: it is never a neighbour, so the gaps on either side of it name the same two cards.
  */
 export function placeSlotAt(l: PanelLayout, props: PanelProps, x: number, y: number, exclude: string | null = null): PlaceSlot | null {
@@ -598,10 +611,7 @@ export function placeSlotAt(l: PanelLayout, props: PanelProps, x: number, y: num
       gap = i
       break
     }
-    if (y < tile.rect.y + tile.rows) {
-      gap = tile.rows === 2 && y === tile.rect.y ? i : i + 1
-      break
-    }
+    if (y < tile.rect.y + tile.rows) return null
   }
   const row =
     gap > 0

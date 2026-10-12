@@ -4,3 +4,7 @@ node_modules/
 .claude/launch.json
 mcp/node_modules/
 .obsidian/
+.env*
+*.pem
+*.key
+.claude/settings.local.json

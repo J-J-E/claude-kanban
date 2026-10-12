@@ -279,6 +279,11 @@ export function placeVerdict(after: string | null, before: string | null): strin
   return 'Drop to put it between ' + after + ' and ' + before
 }
 
+/** What the lane's verdict says while the card in hand is over another card: a release there asks to merge into it (spec 14.5). */
+export function mergeVerdict(id: string): string {
+  return 'Merge into ' + id
+}
+
 /** The pill verdict of a lane only Claude fills while a card is in hand. */
 export const VERDICT_REFUSE = 'Claude only'
 
@@ -325,3 +330,11 @@ export function managerNote(owner: string, waiting: readonly NoteCard[]): string
   note += `\nWaiting on ${who}: ${named.join('; ')}` + (more > 0 ? ` and ${more} more` : '')
   return note
 }
+
+/** The question row at the top of the board tab once a card is dropped on another (spec 14.7); the titles are already cut by the caller. */
+export function mergeQuestion(draggedId: string, draggedTitle: string, survivorId: string, survivorTitle: string): string {
+  return `Merge ${draggedId} "${draggedTitle}" into ${survivorId} "${survivorTitle}"? ${draggedId} is deleted and its text moves into ${survivorId}.`
+}
+/** The button that asks Claude to merge, and the one that drops the question. */
+export const MERGE_YES = 'Merge'
+export const MERGE_NO = 'Keep both'

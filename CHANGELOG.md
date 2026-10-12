@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3
+
+What changed:
+
+- Drop a card on another card to merge them: the pane asks first, the card you dropped on keeps its place, and the other card's text and ID are folded into it. The same merge is available in chat (`merge bug 12 into bug 8`) and to other agents as the MCP tool `card_merge`.
+- The manager merges verified work itself: a file count no longer holds a merge, and a check only the live pane can show is recorded in TESTING.md and named in the reply instead of parking the card in Needs You.
+- The board's own Advisor model setting is gone; it was never the Claude app's advisor. Settings now says that the app's advisor is separate, may be on, and how to turn it off.
+- In the open card the lists now read Lane, Model, Thinking, Type, in three headed, outlined groups so each is easy to find.
+- A private-text check (node tools/private-check.mjs) stops secrets, personal data, local paths and private names before a commit, a merge and a publish; a hit holds the card with GATE: private text.
+- In chat, "delete bug 12" removes a duplicate or junk card; a card with a branch, a pull request or child cards is refused.
+
 ## 0.2.2
 
 What changed:

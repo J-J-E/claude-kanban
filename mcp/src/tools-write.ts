@@ -1,13 +1,13 @@
-// The five write tools: card_add, card_move, card_comment, card_retype and decision_add. They call the file layer (store.ts)
+// The six write tools: card_add, card_move, card_comment, card_retype, card_merge and decision_add. They call the file layer (store.ts)
 // and return its text. Every one but decision_add takes the caller's name for the Log. The server only edits files; it never starts work.
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { addCard, commentOn, decide, moveCardTo, refuse, retypeCard } from './store.ts'
+import { addCard, commentOn, decide, mergeCards, moveCardTo, refuse, retypeCard } from './store.ts'
 import type { Outcome } from './store.ts'
 import { reply } from './tools-read.ts'
 
 const who = z.string().describe('Your name, as it should appear in the card\'s Log (for example "Gemini").')
-const cardId = z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype) is followed to the card that holds it now.')
+const cardId = z.string().describe('Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype or a merge) is followed to the card that holds it now.')
 const typeName = z.string().describe('A type name or its letters, as in the types tool (for example "bug" or "ENH")')
 
 export function registerWriteTools(server: McpServer, kanbanDir: () => string | undefined, noBoard: string): void {
@@ -57,6 +57,19 @@ export function registerWriteTools(server: McpServer, kanbanDir: () => string | 
       inputSchema: { id: cardId, type: typeName, who },
     },
     (a) => run((dir) => retypeCard(dir, a)),
+  )
+  server.registerTool(
+    'card_merge',
+    {
+      description:
+        'Merge card "id" into card "onto": "onto" keeps its ID, lane and place and gains the other card\'s text under "## Merged from <ID>: <title>", the union of the labels and one Log line; the other card\'s file is deleted and its ID keeps working (it finds "onto"). Refused when either card is in an auto lane, when "id" has a branch, a pull request or child cards, or when one card is the other\'s parent.',
+      inputSchema: {
+        id: cardId.describe('The card that goes away: BUG-0012, bug 12 or 12'),
+        onto: cardId.describe('The card that stays and takes its text: BUG-0008, bug 8 or 8'),
+        who,
+      },
+    },
+    (a) => run((dir) => mergeCards(dir, a)),
   )
   server.registerTool(
     'decision_add',

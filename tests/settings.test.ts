@@ -33,44 +33,42 @@ import {
   workersToast,
 } from '../hooks/lib/settings.ts'
 import type { Defaults, SettingsValues } from '../hooks/lib/settings.ts'
-import { parseBoard, setBoardSetting } from '../hooks/lib/board.ts'
-import { BOARD_EXAMPLE, BOM, INIT_BOARD_EXAMPLE, OLD_LANES_BOARD_EXAMPLE, codeOf, crlf, must } from './examples.ts'
+import { clearSavedDefaults, parseBoard, saveDefaults, setBoardSetting } from '../hooks/lib/board.ts'
+import { BOARD_EXAMPLE, BOM, INIT_BOARD_EXAMPLE, OLD_LANES_BOARD_EXAMPLE, codeOf, crlf, lines, must } from './examples.ts'
 
 /** A fresh install: nothing saved, so every value is its default. */
 const fresh = (): SettingsValues => must(parseBoard(INIT_BOARD_EXAMPLE))
 const withValues = (o: Partial<SettingsValues>): SettingsValues => ({ ...fresh(), ...o })
 
 describe('the table of defaults (spec 18.1)', () => {
-  test('Workers 2; Manager opus medium; Planner opus high; Worker sonnet medium; Advisor fable high', () => {
+  test('Workers 2; Manager opus medium; Planner opus high; Worker sonnet medium', () => {
     expect(DEFAULTS.workers).toBe(2)
     expect(DEFAULTS.roles).toEqual({
       manager: { model: 'opus', thinking: 'medium' },
       planner: { model: 'opus', thinking: 'high' },
       worker: { model: 'sonnet', thinking: 'medium' },
-      advisor: { model: 'fable', thinking: 'high' },
     })
   })
 
-  test('the saved keys are the nine settings lines, in the tab order', () => {
+  test('the saved keys are the seven settings lines, in the tab order', () => {
     expect(SAVED_KEYS).toEqual([
       'workers',
       'manager_model', 'manager_thinking', 'planner_model', 'planner_thinking',
-      'worker_model', 'worker_thinking', 'advisor_model', 'advisor_thinking',
+      'worker_model', 'worker_thinking',
     ])
   })
 
   test('a board with no settings lines reads every default', () => {
     const b = fresh()
     expect(b.workers).toBe(2)
-    expect([b.managerModel, b.plannerModel, b.workerModel, b.advisorModel]).toEqual(['opus', 'opus', 'sonnet', 'fable'])
-    expect([b.managerThinking, b.plannerThinking, b.workerThinking, b.advisorThinking]).toEqual(['medium', 'high', 'medium', 'high'])
+    expect([b.managerModel, b.plannerModel, b.workerModel]).toEqual(['opus', 'opus', 'sonnet'])
+    expect([b.managerThinking, b.plannerThinking, b.workerThinking]).toEqual(['medium', 'high', 'medium'])
   })
 
-  test('default texts: `opus, medium`, `opus, high`, `fable, high`', () => {
+  test('default texts: `opus, medium`, `opus, high`, `sonnet, medium`', () => {
     expect(defaultRoleText('manager')).toBe('opus, medium thinking')
     expect(defaultRoleText('planner')).toBe('opus, high thinking')
     expect(defaultRoleText('worker')).toBe('sonnet, medium thinking')
-    expect(defaultRoleText('advisor')).toBe('fable, high thinking')
   })
 })
 
@@ -94,27 +92,29 @@ describe('choices and words', () => {
     expect(thinkingFromChoice('')).toBeUndefined()
   })
 
-  test('model options: four words, and none for the advisor only', () => {
-    expect(modelChoices('planner').map((c) => c.value)).toEqual(['haiku', 'sonnet', 'opus', 'fable'])
-    expect(modelChoices('advisor').map((c) => c.value)).toEqual(['none', 'haiku', 'sonnet', 'opus', 'fable'])
+  test('model options: the same four for every role', () => {
+    expect(modelChoices().map((c) => c.value)).toEqual(['haiku', 'sonnet', 'opus', 'fable'])
     expect(workersChoices().map((c) => c.value)).toEqual(['1', '2', '3', '4', '5'])
   })
 
   test('toasts are the strings of spec section 4', () => {
     expect(workersToast(3)).toBe('Workers at once set to 3.')
     expect(modelToast('manager', 'opus')).toBe('Manager model set to opus.')
-    expect(modelToast('advisor', 'none')).toBe('Advisor model set to none.')
     expect(thinkingToast('worker', 'high')).toBe('Worker thinking set to high.')
     expect(thinkingToast('planner', 'xhigh')).toBe('Planner thinking set to extra.')
-    expect(thinkingToast('advisor', 'none')).toBe('Advisor thinking set to Not set.')
+    expect(thinkingToast('worker', 'none')).toBe('Worker thinking set to Not set.')
     expect(RESTORE_TOAST).toBe('All settings are back to their defaults.')
   })
 
   test('the notes are those of spec section 4, and the card note says to open the card', () => {
-    expect(NOTES).toHaveLength(3)
+    expect(NOTES).toHaveLength(4)
     expect(NOTES[1]).toContain('open the card and choose Model and Thinking there')
     expect(NOTES.join(' ')).not.toContain('right-click')
     expect(NOTES[2]).toBe('Changes apply from the next turn. A running agent keeps what it started with.')
+    expect(NOTES[3]).toBe(
+      "The Claude app has its own advisor, a stronger model it may consult in any chat, including the agents this board starts. It is set in your Claude settings (/advisor), not here. If it is on it uses your plan's limits (a Fable advisor can use a lot), and this board cannot see or change it. To turn it off, run /advisor off.",
+    )
+    expect(NOTES.slice(0, 3).join(' ')).not.toContain('Advisor')
   })
 })
 
@@ -166,7 +166,7 @@ describe('thinking choices per model, and the usage words', () => {
 describe('rows and Reset', () => {
   test('a fresh install: nothing differs, no Reset, Everything is at its default', () => {
     const rows = settingsRows(fresh())
-    expect(rows.map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker', 'advisor'])
+    expect(rows.map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker'])
     expect(rows.every((r) => !r.differs)).toBe(true)
   })
 
@@ -195,7 +195,7 @@ describe('rows and Reset', () => {
     expect(r({ plannerModel: 'haiku' }, 2)).toBe('Planner model is back to opus.')
     expect(r({ plannerModel: 'haiku', plannerThinking: 'max' }, 2)).toBe('Planner is back to opus, high thinking.')
     expect(r({ workers: 3 }, 0)).toBe('Workers at once is back to 2.')
-    expect(r({ advisorThinking: 'low' }, 4)).toBe('Advisor thinking is back to high.')
+    expect(r({ workerThinking: 'low' }, 3)).toBe('Worker thinking is back to medium.')
   })
 })
 
@@ -206,15 +206,14 @@ describe('a board\'s saved defaults', () => {
       manager: { model: 'haiku', thinking: 'low' },
       planner: { model: 'opus', thinking: 'none' },
       worker: { model: 'sonnet', thinking: 'medium' },
-      advisor: { model: 'none', thinking: 'high' },
     },
   }
 
   test('the default keys are default_ + each saved key, in order', () => {
     expect(DEFAULT_KEYS).toEqual(SAVED_KEYS.map((k) => 'default_' + k))
     expect(DEFAULT_KEYS[0]).toBe('default_workers')
-    expect(DEFAULT_KEYS[8]).toBe('default_advisor_thinking')
-    expect(DEFAULT_KEYS).toHaveLength(9)
+    expect(DEFAULT_KEYS[6]).toBe('default_worker_thinking')
+    expect(DEFAULT_KEYS).toHaveLength(7)
   })
 
   test('the built-in table satisfies the Defaults type', () => {
@@ -247,7 +246,7 @@ describe('a board\'s saved defaults', () => {
   test('values equal to the saved defaults do not differ', () => {
     const v = withValues({
       workers: 4, managerModel: 'haiku', managerThinking: 'low', plannerModel: 'opus', plannerThinking: 'none',
-      workerModel: 'sonnet', workerThinking: 'medium', advisorModel: 'none', advisorThinking: 'high',
+      workerModel: 'sonnet', workerThinking: 'medium',
     })
     expect(settingsRows(v, saved).some((r) => r.differs)).toBe(false)
     expect(settingsRows(v).some((r) => r.differs)).toBe(true)
@@ -265,7 +264,7 @@ describe('a board\'s saved defaults', () => {
 
 describe('saved lines: which are saved, clear one, clear all', () => {
   test('savedKeys lists only settings lines, in file order', () => {
-    expect(must(savedKeys(BOARD_EXAMPLE))).toEqual(['workers', 'manager_model', 'planner_model', 'worker_model', 'advisor_model', 'planner_thinking'])
+    expect(must(savedKeys(BOARD_EXAMPLE))).toEqual(['workers', 'manager_model', 'planner_model', 'worker_model', 'planner_thinking'])
     expect(must(savedKeys(INIT_BOARD_EXAMPLE))).toEqual([])
     expect(codeOf(savedKeys('nope'))).toBe('no-frontmatter')
   })
@@ -305,7 +304,7 @@ describe('saved lines: which are saved, clear one, clear all', () => {
   })
 
   test('setting a line and clearing it round-trips', () => {
-    for (const [key, value] of [['workers', '4'], ['advisor_model', 'none'], ['manager_thinking', 'none'], ['worker_thinking', 'xhigh']]) {
+    for (const [key, value] of [['workers', '4'], ['worker_model', 'haiku'], ['manager_thinking', 'none'], ['worker_thinking', 'xhigh']]) {
       const t = must(setBoardSetting(INIT_BOARD_EXAMPLE, key, value))
       expect(t).not.toBe(INIT_BOARD_EXAMPLE)
       expect(must(clearSettings(t, [key]))).toBe(INIT_BOARD_EXAMPLE)
@@ -327,5 +326,33 @@ describe('the file reads and writes through the board', () => {
     const b = must(parseBoard(t))
     expect(b.managerThinking).toBe('none')
     expect(must(parseBoard(INIT_BOARD_EXAMPLE)).managerThinking).toBe('medium')
+  })
+})
+
+describe('an older board.md that still has advisor lines', () => {
+  const OLD = ['advisor_model: fable', 'advisor_thinking: high', 'default_advisor_model: opus']
+  const withOld = (...extra: string[]) => lines('---', 'owner: John', ...OLD, ...extra, 'lanes:', '  - Inbox (intake)', '---', '# Notes', '', 'Free text.')
+  const oldLines = (text: string) => text.split('\n').filter((l) => /advisor/.test(l))
+
+  test('loads with no problem and shows no Advisor row', () => {
+    const b = must(parseBoard(withOld()))
+    expect(b.defaults).toEqual(DEFAULTS)
+    expect(b.savedDefaults).toEqual([])
+    expect(settingsRows(b).map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker'])
+    expect(settingsRows(b).some((r) => r.differs)).toBe(false)
+    expect(must(savedKeys(withOld('workers: 3')))).toEqual(['workers'])
+  })
+
+  test('keeps the three lines byte for byte after a change, a Reset, Restore all, Save as defaults and Restore original', () => {
+    const text = withOld('workers: 3', 'planner_thinking: max')
+    const changed = must(setBoardSetting(text, 'worker_model', 'haiku'))
+    expect(oldLines(changed)).toEqual(OLD)
+    expect(oldLines(must(clearTarget(changed, 'worker')))).toEqual(OLD)
+    expect(must(clearTarget(text, 'workers'))).toBe(text.replace('workers: 3\n', ''))
+    expect(must(clearAllSettings(changed))).toBe(withOld())
+    const saved = must(saveDefaults(changed))
+    expect(oldLines(saved)).toEqual(OLD)
+    expect(saved).toBe(withOld().replace('---\n# Notes', 'default_workers: 3\ndefault_planner_thinking: max\ndefault_worker_model: haiku\n---\n# Notes'))
+    expect(must(clearSavedDefaults(saved))).toBe(withOld())
   })
 })

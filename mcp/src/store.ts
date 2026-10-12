@@ -1,7 +1,7 @@
-// The file layer: finds kanban/, reads the board and cards, and makes the five writes (add, move, comment, retype, decide)
+// The file layer: finds kanban/, reads the board and cards, and makes the six writes (add, move, comment, retype, merge, decide)
 // through the same library the pane uses (../../hooks/lib). Every write re-checks the file's time first and refuses
 // when the file changed since it was read. Nothing here throws for a refused request: it returns { ok: false }.
-import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, parse, resolve } from 'node:path'
 import {
   appendDecision,
@@ -17,7 +17,7 @@ import {
   unknownTypeMessage,
 } from '../../hooks/lib/board.ts'
 import type { Board, CardFile, Lane, Problem } from '../../hooks/lib/board.ts'
-import { appendLog, cardFileName, newCardText, nextOrder, retypeCardText, setParent } from '../../hooks/lib/cards.ts'
+import { appendLog, cardFileName, mergeCardText, mergeRefusal, newCardText, nextOrder, retypeCardText, setParent } from '../../hooks/lib/cards.ts'
 import { allocateId, resolveRef, retypedFileName } from '../../hooks/lib/ids.ts'
 import type { Card, Stamp } from '../../hooks/lib/types.ts'
 
@@ -353,7 +353,47 @@ export function retypeCard(dir: string, input: RetypeInput, now: Date = new Date
   return { ok: true, message, id: newId, was: found.id }
 }
 
-export type DecideInput = { title: string; decision: string; reason: string; supersedes?: number }
+export type MergeInput = { id: string; onto: string; who: string }
+
+/**
+ * Merge card `id` into card `onto` (the merge verb, format.md sections 7 and 11): the survivor keeps its ID, lane and place and
+ * gains the other card's text, labels and one Log line; the other card's file is deleted. Nothing is reserved: no number is
+ * allocated. The order is the crash-safety: write the survivor first, then delete the dragged file. A crash between the two
+ * leaves both files, the survivor already holding the text and the Log line, so nothing is lost; the dragged file is then
+ * deleted by hand (merging again would add the section twice). The other order would lose the text on a crash.
+ */
+export function mergeCards(dir: string, input: MergeInput, now: Date = new Date()): Outcome<{ id: string; was: string }> {
+  const who = cleanWho(input.who)
+  if (typeof who !== 'string') return who
+  const loaded = loadBoard(dir)
+  if (!loaded.ok) return loaded
+  const d = findCardFile(loaded.state, input.id)
+  if (!d.ok) return d
+  const s = findCardFile(loaded.state, input.onto)
+  if (!s.ok) return s
+  const dragged = d.found
+  const survivor = s.found
+  const cards = loadCards(loaded.state).cards
+  const draggedCard = cards.find((c) => c.id === dragged.id)
+  const survivorCard = cards.find((c) => c.id === survivor.id)
+  if (draggedCard === undefined || survivorCard === undefined) {
+    return refuse(`${draggedCard === undefined ? dragged.id : survivor.id} cannot be read (see board_list). Nothing was changed.`)
+  }
+  const refused = mergeRefusal(draggedCard, survivorCard, cards, loaded.state.board)
+  if (refused !== undefined) return refuse(refused)
+  const text = mergeCardText(survivor.text, dragged.text, stampOf(now), who)
+  if (!text.ok) return refuse(`${text.message} Nothing was changed.`)
+  // the dragged file must be the one that was read, or its text would be deleted unmerged
+  if (!existsSync(dragged.path) || statSync(dragged.path).mtimeMs !== dragged.mtime) {
+    return refuse(`${dragged.name} changed while this was being made. Nothing was changed; try again.`)
+  }
+  const written = writeChecked(survivor.path, text.value, survivor.mtime)
+  if (written) return written
+  unlinkSync(dragged.path)
+  return { ok: true, message: `${nameOf(dragged)} merged into ${nameOf(survivor)}.`, id: survivor.id, was: dragged.id }
+}
+
+export type DecideInput ={ title: string; decision: string; reason: string; supersedes?: number }
 
 export function decide(dir: string, input: DecideInput, now: Date = new Date()): Outcome<{ n: number }> {
   const loaded = loadBoard(dir)

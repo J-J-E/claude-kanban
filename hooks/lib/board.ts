@@ -17,7 +17,7 @@ import {
   splitLines,
   stripBom,
 } from './frontmatter.ts'
-import { ADVISOR_MODELS, DEFAULT_KEYS, DEFAULTS, MODELS, SAVED_KEYS, THINKING_VALUES, WORKERS_MAX, WORKERS_MIN } from './settings.ts'
+import { DEFAULT_KEYS, DEFAULTS, MODELS, SAVED_KEYS, THINKING_VALUES, WORKERS_MAX, WORKERS_MIN } from './settings.ts'
 import type { Defaults } from './settings.ts'
 import { appendLog, compareIds, ID_PATTERN, isCardFileName, isDate, parseCard, setOrder, setStatus } from './cards.ts'
 
@@ -66,12 +66,10 @@ export type Board = {
   managerModel: string
   plannerModel: string
   workerModel: string
-  advisorModel: string
   /** Thinking per role: low, medium, high, xhigh or max; `none` is Not set (send no level). An absent line is the role's default. */
   managerThinking: string
   plannerThinking: string
   workerThinking: string
-  advisorThinking: string
   /** The board's effective defaults: each saved `default_` value, or the built-in one where none is saved. */
   defaults: Defaults
   /** Which `default_` keys have a line in board.md, in DEFAULT_KEYS order. */
@@ -100,12 +98,9 @@ function settingProblem(key: string, value: string): string | undefined {
     case 'worker_model':
     case 'planner_model':
       return MODELS.indexOf(value) !== -1 ? undefined : `"${key}" must be one of ${MODELS.join(', ')}.`
-    case 'advisor_model':
-      return ADVISOR_MODELS.indexOf(value) !== -1 ? undefined : `"advisor_model" must be one of ${MODELS.join(', ')}, none.`
     case 'manager_thinking':
     case 'planner_thinking':
     case 'worker_thinking':
-    case 'advisor_thinking':
       return THINKING_VALUES.indexOf(value) !== -1
         ? undefined
         : `"${key}" must be one of ${THINKING_VALUES.slice(1).join(', ')}, none (none is Not set).`
@@ -120,7 +115,7 @@ export function parseBoard(text: string): Result<Board> {
   const parsed = parseFrontmatter(text)
   if (!parsed.ok) return parsed
   const fm = parsed.value
-  // The built-in value of each of the nine settings, by key.
+  // The built-in value of each of the seven settings, by key. Any other key (an older `advisor_model` line, say) is not read.
   const raw: Record<string, string> = {
     owner: '',
     ...builtInValues(),
@@ -200,11 +195,9 @@ export function parseBoard(text: string): Result<Board> {
     managerModel: raw.manager_model,
     plannerModel: raw.planner_model,
     workerModel: raw.worker_model,
-    advisorModel: raw.advisor_model,
     managerThinking: raw.manager_thinking,
     plannerThinking: raw.planner_thinking,
     workerThinking: raw.worker_thinking,
-    advisorThinking: raw.advisor_thinking,
     defaults,
     savedDefaults,
     lanes,
@@ -260,22 +253,20 @@ function readTypes(fm: Frontmatter): Result<TicketType[]> {
   return ok(types)
 }
 
-/** The built-in value of each of the nine settings, as the text of a board.md line. */
+/** The built-in value of each of the seven settings, as the text of a board.md line. */
 function builtInValues(): Record<string, string> {
   return {
     workers: String(DEFAULTS.workers),
     manager_model: DEFAULTS.roles.manager.model,
     planner_model: DEFAULTS.roles.planner.model,
     worker_model: DEFAULTS.roles.worker.model,
-    advisor_model: DEFAULTS.roles.advisor.model,
     manager_thinking: DEFAULTS.roles.manager.thinking,
     planner_thinking: DEFAULTS.roles.planner.thinking,
     worker_thinking: DEFAULTS.roles.worker.thinking,
-    advisor_thinking: DEFAULTS.roles.advisor.thinking,
   }
 }
 
-/** A Defaults from the nine setting values by key. */
+/** A Defaults from the seven setting values by key. */
 function defaultsFrom(v: Record<string, string>): Defaults {
   return {
     workers: Number(v.workers),
@@ -283,23 +274,20 @@ function defaultsFrom(v: Record<string, string>): Defaults {
       manager: { model: v.manager_model, thinking: v.manager_thinking },
       planner: { model: v.planner_model, thinking: v.planner_thinking },
       worker: { model: v.worker_model, thinking: v.worker_thinking },
-      advisor: { model: v.advisor_model, thinking: v.advisor_thinking },
     },
   }
 }
 
-/** The nine settings' current values by key, as parseBoard reads them. */
+/** The seven settings' current values by key, as parseBoard reads them. */
 function currentValues(b: Board): Record<string, string> {
   return {
     workers: String(b.workers),
     manager_model: b.managerModel,
     planner_model: b.plannerModel,
     worker_model: b.workerModel,
-    advisor_model: b.advisorModel,
     manager_thinking: b.managerThinking,
     planner_thinking: b.plannerThinking,
     worker_thinking: b.workerThinking,
-    advisor_thinking: b.advisorThinking,
   }
 }
 
@@ -354,9 +342,9 @@ export function setCounter(text: string, prefix: string, n: number): Result<stri
 }
 
 /**
- * Save the nine settings' current values as the board's defaults: a value that differs from the built-in goes
+ * Save the seven settings' current values as the board's defaults: a value that differs from the built-in goes
  * in its `default_` line (added before the closing ---, or replaced in place), one that equals it removes that
- * line, then the nine setting lines are removed. The board reads the same values; every other byte is kept.
+ * line, then the seven setting lines are removed. Any other key, such as an older `advisor_model`, is left alone. The board reads the same values; every other byte is kept.
  */
 export function saveDefaults(text: string): Result<string> {
   const parsed = parseBoard(text)

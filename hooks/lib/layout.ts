@@ -86,11 +86,13 @@ export type BoardProps = {
 
 /** What the Client posts to the hooks module: a valid drop (`move`; also a drop on the lane the card is in and a drop on a
  * lane only Claude fills, which the hooks module answers with a toast and writes nothing for; `before` is the ID of the card
- * the place slot was above, null for the end, absent for the end too), a click on a card (`select`, id null to clear), a press
+ * the place slot was above, null for the end, absent for the end too), a release on another card (`merge`: `id` is the card in hand,
+ * `onto` the card it was let go on; the hooks module asks before anything is written), a click on a card (`select`, id null to clear), a press
  * on a card's `⋯` (`menu`: the Client draws that card's small menu itself; the hooks module only answers with the props), a row of that
  * menu (`action`: copy the card's ID or delete the card), or what he folded and opened (`view`), for the hooks module to keep. */
 export type BoardPost =
   | { type: 'move'; id: string; from: string; to: string; rev: number; before?: string | null }
+  | { type: 'merge'; id: string; onto: string; rev: number }
   | { type: 'select'; id: string | null; rev: number }
   | { type: 'menu'; id: string; rev: number }
   | { type: 'action'; id: string; action: 'copy' | 'delete'; rev: number }

@@ -20,12 +20,10 @@ export type KanbanSettings = {
   managerModel: string
   plannerModel: string
   workerModel: string
-  advisorModel: string
   /** Thinking per role: low, medium, high, xhigh, max, or `none` (Not set). Absent in a snapshot saved before the Settings tab: read as the role's default. */
   managerThinking?: string
   plannerThinking?: string
   workerThinking?: string
-  advisorThinking?: string
   /** Which settings lines board.md holds (a line equal to its default counts), so Reset and Restore know what to remove. Absent in an old snapshot: read as none. */
   saved?: string[]
   /** The board's effective defaults (its saved `default_` lines, else the built-in): what Reset and the Default text mean. Absent in an old snapshot: read as the built-in defaults. */
@@ -105,8 +103,8 @@ export type KanbanSnapshot = {
 export type KanbanQueued = {
   /** The card the prompt is about. */
   id: string
-  /** 'move': a card dropped in a lane; 'create': a card made in a lane that has an action; 'delete': asked to be deleted; 'retype': asked to be given another type (a new ID). */
-  kind: 'move' | 'create' | 'delete' | 'retype'
+  /** 'move': a card dropped in a lane; 'create': a card made in a lane that has an action; 'delete': asked to be deleted; 'retype': asked to be given another type (a new ID); 'merge': asked to be merged into another card (this is the card that goes away). */
+  kind: 'move' | 'create' | 'delete' | 'retype' | 'merge'
   /** The prompt text, to match turn.start against. */
   text: string
   /** Milliseconds since the epoch. */
@@ -155,6 +153,8 @@ declare module 'claude-code' {
       fault: string | null
       /** Whether the card view's last row asks `Delete KB-0015?` in place of the two buttons. Reset when the card changes. */
       confirmDelete: boolean
+      /** The pair a drop on another card asked to merge (`id` goes away into `onto`); the board tab asks about it until Merge or Keep both. Dropped when either card is gone or the tab changes. Null: no question. */
+      mergeAsk: { id: string; onto: string } | null
       /** The type name picked in the open card's Type list and not yet asked for ('' = none); the question row `Retype KB-0015 as enhancement?` shows while it differs from the card's own type. Reset when the card changes. */
       retypePick: string
       /** Whether the open card's Rename field is open (the title typed in it is in the hooks module's own memory). Reset when the card changes. */

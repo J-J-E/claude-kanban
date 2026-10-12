@@ -122,3 +122,37 @@ test('a request the app fails changes nothing else', async ($, on) => {
 test('a request the app cannot place changes nothing else', async ($, on) => {
   await failedRequestChangesNothing($, on, 'unplaced')
 })
+
+// BUG-0016: the question a drop on another card raises acts on one press, and its buttons keep their keys across the pane's redraws.
+test('the merge question: one press of Keep both or Merge acts, and the buttons hold their keys across redraws', async ($, on) => {
+  const w = stubs(on, defaultFiles())
+  await startSession($)
+  await w.clock.settle()
+  const ui = await mountPane($, 'desktop')
+  const props = async () => ((await ui.find({ type: 'Client', key: 'board' }))?.props as { props: { rev: number } }).props
+  const drop = async () => ui.post({ type: 'merge', id: 'KB-0001', onto: 'KB-0002', rev: (await props()).rev } as never, { in: 'board' })
+  const keys = async (): Promise<string[]> => (await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => String(b.key))
+
+  await drop()
+  const first = await keys()
+  expect(first.filter((k) => k === 'merge-yes' || k === 'merge-no')).toEqual(['merge-yes', 'merge-no'])
+  for (let s = 0; s < 70; s++) {
+    if (s === 10) w.agents = [{ id: 'a1', description: 'KB-0003 ship it', type: 'general-purpose', status: 'running' }]
+    if (s === 40) w.agents = []
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(await keys()).toEqual(first)
+  }
+  expect(w.sent).toEqual([])
+  await ui.press({ key: 'merge-no' })
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.sent).toEqual([])
+  expect(w.writes).toEqual([])
+
+  await drop()
+  await ui.press({ key: 'merge-yes' })
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.sent.map((s) => s.text)).toEqual(['Kanban: John asked to merge KB-0001 "Fix footer" into KB-0002 "Write docs". Merge the cards with the kanban skill.'])
+  expect(w.toasts).toEqual(['Claude is merging KB-0001 into KB-0002.'])
+  expect(w.writes).toEqual([])
+})

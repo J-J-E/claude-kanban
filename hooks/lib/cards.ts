@@ -13,6 +13,7 @@ import {
   ok,
   parseFrontmatter,
   removeKey,
+  setList,
   setScalar,
   splitLines,
   stripBom,
@@ -327,6 +328,115 @@ export function retypeCardText(text: string, newId: string, stamp: Stamp, who: s
   const withId = setScalar(text, 'id', newId)
   if (!withId.ok) return withId
   return appendLog(withId.value, { date: stamp.date, time: stamp.time, who, text: `retyped from ${card.value.id} to ${newId}` })
+}
+
+// ---------------------------------------------------------------- merging two cards (sections 5, 7, 11)
+
+/** The Log line a merge writes on the surviving card; formerIdsOf reads the old ID back from it. */
+export function mergedLogText(draggedId: string, draggedTitle: string, survivorId: string): string {
+  return `merged ${draggedId} "${draggedTitle}" into ${survivorId}`
+}
+
+/**
+ * Why two cards cannot be merged, as the one-line text the pane, the skill and the MCP tool all print; undefined when they
+ * can. `dragged` is the card that goes away, `survivor` the one dropped on. `cards` is every card (for the child check);
+ * `working` holds IDs an agent is on right now (the pane knows them; the file layer cannot). Nothing is changed in any case.
+ */
+export function mergeRefusal(
+  dragged: Pick<Card, 'id' | 'status' | 'branch' | 'pr' | 'parent'>,
+  survivor: Pick<Card, 'id' | 'status' | 'parent'>,
+  cards: readonly Pick<Card, 'id' | 'parent'>[],
+  board: { lanes: readonly { label: string; role: string }[] },
+  working: readonly string[] = [],
+): string | undefined {
+  if (dragged.id === survivor.id) return `${dragged.id} cannot be merged into itself. Nothing was changed.`
+  const inAuto = (status: string): boolean => {
+    const key = status.trim().toLowerCase()
+    return board.lanes.some((l) => l.role === 'auto' && l.label.toLowerCase() === key)
+  }
+  for (const card of [dragged, survivor]) {
+    if (inAuto(card.status) || working.includes(card.id)) {
+      return `${card.id} is being worked. Move it out of Auto or wait, then merge. Nothing was changed.`
+    }
+  }
+  if (dragged.parent === survivor.id || survivor.parent === dragged.id) {
+    const [parent, child] = dragged.parent === survivor.id ? [survivor.id, dragged.id] : [dragged.id, survivor.id]
+    return `${parent} is the parent of ${child}, so they cannot be merged. Nothing was changed.`
+  }
+  const work = dragged.branch !== '' ? dragged.branch : dragged.pr
+  if (work !== '') return `${dragged.id} has work on ${work} and cannot be merged. Nothing was changed.`
+  const children = cards.filter((c) => c.parent === dragged.id).map((c) => c.id)
+  if (children.length > 0) return `${dragged.id} has child cards: ${children.join(', ')}. Delete or re-parent them first. Nothing was changed.`
+  return undefined
+}
+
+/** The dragged card's text for the survivor: everything after its `# ` title and before its `## Log`, each `## ` heading made `### `. */
+function mergedBody(draggedText: string): Result<string[]> {
+  const fm = parseFrontmatter(draggedText)
+  if (!fm.ok) return fm
+  const lines = splitLines(fm.value.body).lines
+  let i = 0
+  while (i < lines.length && lines[i].trim() === '') i++
+  i++ // the title line
+  const out: string[] = []
+  let inLog = false
+  for (; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.startsWith('## ')) inLog = line === '## Log'
+    if (inLog) continue
+    out.push(line.startsWith('## ') ? '#' + line : line)
+  }
+  while (out.length > 0 && out[0].trim() === '') out.shift()
+  while (out.length > 0 && out[out.length - 1].trim() === '') out.pop()
+  return ok(out)
+}
+
+/**
+ * The surviving card's new text for a merge of `draggedText` into `survivorText` (format.md section 11). The survivor gains
+ * a section `## Merged from <old ID>: <old title>` holding the dragged card's body, open questions and plan (its `## `
+ * headings turned into `### `, so the section stays one), put just before `## Plan` or `## Log`, whichever comes first, or
+ * at the end of the file when it has neither; its `labels` become the union (the survivor's first); `updated` is set and one
+ * Log line `merged <old ID> "<old title>" into <ID>` is appended. Nothing else changes. The dragged card's own Log is not
+ * copied. Refusals (Auto, work, children) are mergeRefusal's; the caller deletes the dragged file.
+ */
+export function mergeCardText(survivorText: string, draggedText: string, stamp: Stamp, who: string): Result<string> {
+  const survivor = parseCard(survivorText)
+  if (!survivor.ok) return survivor
+  const dragged = parseCard(draggedText)
+  if (!dragged.ok) return dragged
+  if (survivor.value.id === dragged.value.id) return fail('bad-value', `A card cannot be merged into itself (${survivor.value.id}).`)
+  const body = mergedBody(draggedText)
+  if (!body.ok) return body
+
+  const fm = parseFrontmatter(survivorText)
+  if (!fm.ok) return fm
+  const { bom, rest } = stripBom(survivorText)
+  const sp = splitLines(rest)
+  const eol = fm.value.eol
+  let at = sp.lines.length
+  for (let i = fm.value.closeLine; i < sp.lines.length; i++) {
+    if (sp.lines[i] === '## Plan' || sp.lines[i] === '## Log') {
+      at = i
+      break
+    }
+  }
+  const section = ['## Merged from ' + dragged.value.id + ': ' + dragged.value.title, ...body.value]
+  // one blank line before the heading, and one after the section unless the file ends with it
+  if (at > 0 && sp.lines[at - 1].trim() !== '') section.unshift('')
+  if (at < sp.lines.length) section.push('')
+  insertLines(sp, at, section, eol)
+  const withSection = (bom ? BOM : '') + joinLines(sp)
+
+  const labels = [...survivor.value.labels]
+  for (const label of dragged.value.labels) if (!labels.includes(label)) labels.push(label)
+  const withLabels = setList(withSection, 'labels', labels)
+  if (!withLabels.ok) return withLabels
+  return appendLog(withLabels.value, {
+    date: stamp.date,
+    time: stamp.time,
+    who,
+    text: mergedLogText(dragged.value.id, dragged.value.title, survivor.value.id),
+  })
 }
 
 /** The card's two own fields (spec 18.4): written only when set, removed on Auto, never touched by a move. */

@@ -259,6 +259,23 @@ export function setScalar(text: string, key: string, value: string): Result<stri
 }
 
 /**
+ * Set a list key as an inline list: replace its lines (an inline list, a block list with its items, or an empty `key:`) in
+ * place, or add the line before the closing ---. The same items in the same written form return the same string.
+ */
+export function setList(text: string, key: string, items: readonly string[]): Result<string> {
+  const fm = parseFrontmatter(text)
+  if (!fm.ok) return fm
+  const line = formatListLine(key, items)
+  if (!line.ok) return line
+  const entry = findEntry(fm.value, key)
+  if (entry !== undefined) {
+    if (entry.kind === 'scalar' && entry.scalar !== '') return fail('type-mismatch', `"${key}" is a single value; it cannot be set to a list.`, entry.line)
+    if (entry.kind !== 'scalar' && entry.items.length === items.length && entry.items.every((v, i) => v === items[i])) return ok(text)
+  }
+  return ok(applyLines(fm.value, splitLines(stripBom(text).rest), entry, [line.value]))
+}
+
+/**
  * Remove a key: its `key:` line and, for a block list, its item lines. Every other byte is kept, the BOM and the
  * file's line endings included. An absent key returns the same string.
  */

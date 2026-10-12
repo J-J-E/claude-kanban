@@ -17,8 +17,6 @@ const SELECT_KEYS = [
   'set-planner_thinking',
   'set-worker_model',
   'set-worker_thinking',
-  'set-advisor_model',
-  'set-advisor_thinking',
 ]
 
 async function boot($: Engine, on: Parameters<typeof stubs>[0], saved = '') {
@@ -46,13 +44,13 @@ async function buttons(ui: Pane): Promise<string[]> {
   return (await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => String(b.key))
 }
 
-test('all nine Selects are there with their values, at every width', async ($, on) => {
+test('all seven Selects are there with their values, at every width', async ($, on) => {
   await boot($, on)
   for (const columns of [45, 60, 80, 108]) {
     const ui = await open($, columns)
     const selects = await ui.findAll({ type: 'Select' })
     expect(selects.map((s) => s.key)).toEqual(SELECT_KEYS)
-    expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium', 'fable', 'high'])
+    expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
     const labels = (selects[4]?.props.options as { value: string; label?: string }[]).map((o) => o.label)
     expect(labels).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
     await ui.unmount()
@@ -72,14 +70,14 @@ test('no outline, no filled bar, and no numeric width on a Box that holds a Sele
 test('a role is one row: its name is centred on its dropdowns', async ($, on) => {
   await boot($, on)
   const ui = await open($)
-  for (const role of ['manager', 'planner', 'worker', 'advisor']) {
+  for (const role of ['manager', 'planner', 'worker']) {
     const line = await ui.find({ key: 'settings-role-line-' + role })
     expect(line?.props.flexDirection).toBe('row')
     expect(line?.props.alignItems).toBe('center')
     expect(await ui.find({ key: 'settings-name-' + role })).toBeDefined()
   }
   const text = await flat(ui)
-  for (const word of ['Workers at once', 'Manager', 'Planner', 'Worker', 'Advisor', 'Model', 'Thinking']) expect(text).toContain(word)
+  for (const word of ['Workers at once', 'Manager', 'Planner', 'Worker', 'Model', 'Thinking']) expect(text).toContain(word)
 })
 
 test('a default row shows no default and no Reset, and the status says everything is at its default', async ($, on) => {
@@ -130,12 +128,19 @@ test('the three usage lines and the notes are there', async ($, on) => {
   expect(text).not.toContain('%')
 })
 
-test('the Advisor with no model draws no thinking Select and says it is not used', async ($, on) => {
-  await boot($, on, 'advisor_model: none\n')
+test('the tab says the Claude app has its own advisor, and a board.md that still has advisor lines shows no Advisor row and no error', async ($, on) => {
+  const w = await boot($, on, 'advisor_model: fable\nadvisor_thinking: high\n')
   const ui = await open($)
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.key)).not.toContain('set-advisor_thinking')
-  expect(await flat(ui)).toContain('Advisor thinking: not used')
-  expect(await buttons(ui)).toEqual(['restore-all', 'save-defaults', 'reset-advisor'])
+  const keys = (await ui.findAll({ type: 'Select' })).map((s) => String(s.key))
+  expect(keys).toEqual(SELECT_KEYS)
+  const text = await flat(ui)
+  expect(text).not.toContain('Advisor')
+  expect(text).toContain("The Claude app has its own advisor, a stronger model it may consult in any chat, including the agents this board starts. It is set in your Claude settings (/advisor), not here. If it is on it uses your plan's limits (a Fable advisor can use a lot), and this board cannot see or change it. To turn it off, run /advisor off.")
+  expect(text).toContain('Everything is at its default')
+  expect(await buttons(ui)).toEqual([])
+  expect(w.toasts).toEqual([])
+  await ui.select({ key: 'set-workers', value: '4' })
+  expect(w.text(BOARD_PATH)).toContain('\nadvisor_model: fable\nadvisor_thinking: high\n')
 })
 
 test('pressing Reset and selecting a value write what they did', async ($, on) => {
@@ -152,7 +157,7 @@ test('pressing Reset and selecting a value write what they did', async ($, on) =
   expect(w.toasts).toEqual(['Planner thinking is back to high.'])
   expect(await buttons(ui)).toEqual([])
   await ui.select({ key: 'set-workers', value: '4' })
-  await ui.select({ key: 'set-advisor_model', value: 'haiku' })
+  await ui.select({ key: 'set-worker_model', value: 'haiku' })
   w.toasts.length = 0
   await ui.press({ key: 'restore-all' })
   await ui.press({ key: 'restore-yes' })
@@ -296,7 +301,7 @@ test('all three top-row controls are there at every width, and the row wraps ins
 test('the Settings tab says which model the chat is on, after the notes', async ($, on) => {
   const w = await boot($, on)
   let ui = await open($)
-  expect(await flat(ui)).toContain('Advisor gives a second opinion on risky steps.')
+  expect(await flat(ui)).toContain('Worker does each step of a plan.')
   expect((await ui.find({ key: 'settings-chat-model' }))?.text).toBe('This chat is on opus.')
   await ui.unmount()
   // Another model: the line says the board suggests, never changes, and how the person does.
@@ -315,5 +320,5 @@ test('the Settings tab says which model the chat is on, after the notes', async 
   await w.clock.settle()
   ui = await open($)
   expect(await ui.find({ key: 'settings-chat-model' })).toBeUndefined()
-  expect(NOTES[0]).toBe("Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan. Advisor gives a second opinion on risky steps.")
+  expect(NOTES[0]).toBe("Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan.")
 })

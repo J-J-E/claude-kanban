@@ -15,12 +15,15 @@ import {
   clearCardField,
   setCardField,
   retypeCardText,
+  mergeCardText,
+  mergeRefusal,
   setOrder,
   setParent,
   setStatus,
   setTitle,
   slugify,
 } from '../hooks/lib/cards.ts'
+import { formerIdsOf } from '../hooks/lib/ids.ts'
 import { BOM, CARD_EXAMPLE, NOW, codeOf, crlf, lines, must } from './examples.ts'
 
 const FIRST_LOG = { date: '2026-10-08', time: '09:10', who: 'John', text: 'moved Inbox -> Auto' }
@@ -629,5 +632,179 @@ describe('setParent', () => {
   })
   test('refuses what is not an ID', () => {
     expect(codeOf(setParent(CARD_EXAMPLE, 'kb-47'))).toBe('bad-value')
+  })
+})
+
+describe('mergeCardText', () => {
+  const survivor = lines(
+    '---',
+    'id: BUG-0008',
+    'status: Plan',
+    'order: 3000',
+    'created: 2026-10-07',
+    'updated: 2026-10-07',
+    'flag: PLAN READY',
+    'branch:',
+    'pr:',
+    'parent:',
+    'labels: [ui, claude]',
+    'model: opus',
+    '---',
+    '# Date bug',
+    '',
+    'The date is wrong.',
+    '',
+    '## Open questions',
+    '- Which date?',
+    '',
+    '## Plan',
+    '1. Fix it.',
+    '',
+    '## Log',
+    '- 2026-10-07 08:00 John: created in Pending',
+  )
+  const dragged = lines(
+    '---',
+    'id: BUG-0012',
+    'status: Pending',
+    'order: 1000',
+    'created: 2026-10-08',
+    'updated: 2026-10-08',
+    'flag:',
+    'branch:',
+    'pr:',
+    'parent:',
+    'labels: [claude, docs]',
+    '---',
+    '# Fix date',
+    '',
+    'Same date, other screen.',
+    '',
+    '## Open questions',
+    '- Since when?',
+    '',
+    '## Plan',
+    '1. Look.',
+    '',
+    '## Log',
+    '- 2026-10-08 09:00 John: created in Pending',
+  )
+  const merged = lines(
+    '---',
+    'id: BUG-0008',
+    'status: Plan',
+    'order: 3000',
+    'created: 2026-10-07',
+    'updated: 2026-10-09',
+    'flag: PLAN READY',
+    'branch:',
+    'pr:',
+    'parent:',
+    'labels: [ui, claude, docs]',
+    'model: opus',
+    '---',
+    '# Date bug',
+    '',
+    'The date is wrong.',
+    '',
+    '## Open questions',
+    '- Which date?',
+    '',
+    '## Merged from BUG-0012: Fix date',
+    'Same date, other screen.',
+    '',
+    '### Open questions',
+    '- Since when?',
+    '',
+    '### Plan',
+    '1. Look.',
+    '',
+    '## Plan',
+    '1. Fix it.',
+    '',
+    '## Log',
+    '- 2026-10-07 08:00 John: created in Pending',
+    '- 2026-10-09 14:05 John: merged BUG-0012 "Fix date" into BUG-0008',
+  )
+
+  test('adds the section before ## Plan, unions the labels, sets updated and appends one Log line', () => {
+    expect(must(mergeCardText(survivor, dragged, NOW, 'John'))).toBe(merged)
+  })
+  test('the result parses; the survivor keeps its id, lane, flag and model, and the old ID is former', () => {
+    const card = must(parseCard(must(mergeCardText(survivor, dragged, NOW, 'John'))))
+    expect(card.id).toBe('BUG-0008')
+    expect(card.status).toBe('Plan')
+    expect(card.flag).toBe('PLAN READY')
+    expect(card.model).toBe('opus')
+    expect(card.labels).toEqual(['ui', 'claude', 'docs'])
+    expect(card.formerIds).toEqual(['BUG-0012'])
+    expect(formerIdsOf(card.log)).toEqual(['BUG-0012'])
+  })
+  test('CRLF and a BOM are kept', () => {
+    expect(must(mergeCardText(BOM + crlf(survivor), crlf(dragged), NOW, 'John'))).toBe(BOM + crlf(merged))
+  })
+  test('with no Plan the section goes before ## Log; with neither it goes at the end of the body', () => {
+    const noPlan = survivor.replace('## Plan\n1. Fix it.\n\n', '')
+    const out = must(mergeCardText(noPlan, dragged, NOW, 'John'))
+    expect(out.indexOf('## Merged from BUG-0012: Fix date')).toBeLessThan(out.indexOf('## Log'))
+    expect(out).toContain('- Which date?\n\n## Merged from')
+    const bare = survivor.split('## Plan')[0].trimEnd() + '\n'
+    const end = must(mergeCardText(bare, dragged, NOW, 'John'))
+    expect(end).toContain('- Which date?\n\n## Merged from BUG-0012: Fix date\nSame date')
+    expect(end.indexOf('## Merged from')).toBeLessThan(end.indexOf('## Log'))
+  })
+  test('a second merge adds a second section after the first', () => {
+    const once = must(mergeCardText(survivor, dragged, NOW, 'John'))
+    const other = dragged.replace(/BUG-0012/g, 'BUG-0013').replace('# Fix date', '# Other')
+    const twice = must(mergeCardText(once, other, NOW, 'John'))
+    expect(twice.indexOf('## Merged from BUG-0012')).toBeLessThan(twice.indexOf('## Merged from BUG-0013'))
+    expect(must(parseCard(twice)).formerIds).toEqual(['BUG-0012', 'BUG-0013'])
+  })
+  test('a dragged card with no text still leaves its heading and the Log line', () => {
+    const empty = lines(...dragged.split('\n').slice(0, 12), '# Fix date', '', '## Log', '- 2026-10-08 09:00 John: created in Pending')
+    const out = must(mergeCardText(survivor, empty, NOW, 'John'))
+    expect(out).toContain('## Merged from BUG-0012: Fix date\n\n## Plan')
+    expect(out).toContain('merged BUG-0012 "Fix date" into BUG-0008')
+  })
+  test('refuses the same card and a card that does not parse', () => {
+    expect(codeOf(mergeCardText(survivor, survivor, NOW, 'John'))).toBe('bad-value')
+    expect(codeOf(mergeCardText(survivor, 'not a card', NOW, 'John'))).toBe('no-frontmatter')
+    expect(codeOf(mergeCardText('not a card', dragged, NOW, 'John'))).toBe('no-frontmatter')
+  })
+})
+
+describe('mergeRefusal', () => {
+  const board = { lanes: [{ label: 'Pending', role: 'intake' }, { label: 'Auto', role: 'auto' }, { label: 'Done', role: 'done' }] }
+  const card = (id: string, extra: object = {}) => ({ id, status: 'Pending', branch: '', pr: '', parent: '', ...extra })
+  const ask = (dragged: ReturnType<typeof card>, survivor: ReturnType<typeof card>, cards = [dragged, survivor], working: string[] = []) =>
+    mergeRefusal(dragged, survivor, cards, board, working)
+
+  test('two plain cards can be merged, whatever their lanes or types', () => {
+    expect(ask(card('BUG-0012'), card('BUG-0008'))).toBeUndefined()
+    expect(ask(card('BUG-0012', { status: 'Done' }), card('ENH-0003'))).toBeUndefined()
+  })
+  test('a card is not merged into itself', () => {
+    expect(ask(card('BUG-0012'), card('BUG-0012'))).toBe('BUG-0012 cannot be merged into itself. Nothing was changed.')
+  })
+  test('either card in an auto lane, or with an agent on it, is being worked', () => {
+    const msg = (id: string) => `${id} is being worked. Move it out of Auto or wait, then merge. Nothing was changed.`
+    expect(ask(card('BUG-0012', { status: 'Auto' }), card('BUG-0008'))).toBe(msg('BUG-0012'))
+    expect(ask(card('BUG-0012'), card('BUG-0008', { status: 'auto' }))).toBe(msg('BUG-0008'))
+    expect(ask(card('BUG-0012'), card('BUG-0008'), undefined, ['BUG-0008'])).toBe(msg('BUG-0008'))
+  })
+  test('the dragged card with a branch or a pull request has work', () => {
+    expect(ask(card('BUG-0012', { branch: 'bug-12-x' }), card('BUG-0008'))).toBe('BUG-0012 has work on bug-12-x and cannot be merged. Nothing was changed.')
+    expect(ask(card('BUG-0012', { pr: '#7' }), card('BUG-0008'))).toBe('BUG-0012 has work on #7 and cannot be merged. Nothing was changed.')
+    expect(ask(card('BUG-0012'), card('BUG-0008', { branch: 'bug-8-y' }))).toBeUndefined()
+  })
+  test('the dragged card with child cards is refused, listing them', () => {
+    const dragged = card('BUG-0012')
+    const kids = [card('BUG-0013', { parent: 'BUG-0012' }), card('BUG-0014', { parent: 'BUG-0012' })]
+    expect(ask(dragged, card('BUG-0008'), [dragged, ...kids])).toBe('BUG-0012 has child cards: BUG-0013, BUG-0014. Delete or re-parent them first. Nothing was changed.')
+  })
+  test('a card and its parent are not merged, either way round', () => {
+    const msg = 'BUG-0008 is the parent of BUG-0012, so they cannot be merged. Nothing was changed.'
+    expect(ask(card('BUG-0012', { parent: 'BUG-0008' }), card('BUG-0008'))).toBe(msg)
+    expect(ask(card('BUG-0008'), card('BUG-0012', { parent: 'BUG-0008' }))).toBe(msg)
   })
 })

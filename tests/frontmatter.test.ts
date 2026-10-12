@@ -245,7 +245,7 @@ describe('removeKey', () => {
 
   test('keeps CRLF and the BOM, whole output compared', () => {
     const original = BOM + crlf(BOARD_EXAMPLE)
-    expect(must(removeKey(original, 'advisor_model'))).toBe(BOM + crlf(BOARD_EXAMPLE.replace('advisor_model: fable\n', '')))
+    expect(must(removeKey(original, 'worker_model'))).toBe(BOM + crlf(BOARD_EXAMPLE.replace('worker_model: sonnet\n', '')))
   })
 
   test('an absent key returns the same string', () => {

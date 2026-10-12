@@ -1,5 +1,5 @@
 // End to end over stdio, as any MCP client sees it: start dist/server.js against a temporary board, add a typed card, move it,
-// retype it, comment by its old ID, then check the files. Run: node mcp/test/e2e.mjs   (build first: npm --prefix mcp run build). Exits 0 on a pass.
+// retype it, merge a second card into it, comment by an old ID, then check the files. Run: node mcp/test/e2e.mjs   (build first: npm --prefix mcp run build). Exits 0 on a pass.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -17,7 +17,7 @@ await client.connect(new StdioClientTransport({ command: process.execPath, args:
 const text = (r) => r.content.map((c) => c.text).join('\n')
 try {
   const tools = (await client.listTools()).tools.map((t) => t.name)
-  for (const n of ['board_list', 'card_add', 'card_move', 'card_comment', 'card_retype', 'types']) assert.ok(tools.includes(n), `tool ${n}`)
+  for (const n of ['board_list', 'card_add', 'card_move', 'card_comment', 'card_retype', 'card_merge', 'types']) assert.ok(tools.includes(n), `tool ${n}`)
   assert.equal((await client.listResources()).resources.length, 3)
   assert.equal(text(await client.callTool({ name: 'types', arguments: {} })), 'bug (BUG)\nenhancement (ENH)\nchore (CHORE)')
 
@@ -38,6 +38,14 @@ try {
   const followed = await client.callTool({ name: 'card_comment', arguments: { id: 'BUG-0001', text: 'still here', who: 'e2e' } })
   assert.equal(text(followed), 'Comment added to ENH-0001 (was BUG-0001).')
 
+  await client.callTool({ name: 'card_add', arguments: { title: 'Second card', type: 'bug', body: 'To be merged.', who: 'e2e' } })
+  const mergedOver = await client.callTool({ name: 'card_merge', arguments: { id: 'BUG-0002', onto: 'ENH-0001', who: 'e2e' } })
+  assert.equal(text(mergedOver), 'BUG-0002 merged into ENH-0001.')
+  assert.equal(cardFile(kanban, 'BUG-0002'), undefined)
+  assert.match(readFileSync(join(kanban, cardFile(kanban, 'ENH-0001')), 'utf8'), /\n## Merged from BUG-0002: Second card\nTo be merged\./)
+  const viaMerged = await client.callTool({ name: 'card_comment', arguments: { id: 'BUG-0002', text: 'found it', who: 'e2e' } })
+  assert.equal(text(viaMerged), 'Comment added to ENH-0001 (was BUG-0002).')
+
   const listed = text(await client.callTool({ name: 'board_list', arguments: {} }))
   assert.match(listed, /Plan \(1\)\n {2}ENH-0001 End to end card/)
 
@@ -47,7 +55,7 @@ try {
   const none = await bare.callTool({ name: 'board_list', arguments: {} })
   assert.ok(none.isError, 'no board is refused, not a crash')
   await bare.close()
-  console.log('e2e ok: add, move, retype, list and the no-board refusal all behaved')
+  console.log('e2e ok: add, move, retype, merge, list and the no-board refusal all behaved')
 } finally {
   await client.close()
 }

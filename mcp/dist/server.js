@@ -36541,7 +36541,7 @@ var StdioServerTransport = class {
 };
 
 // src/store.ts
-import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, parse as parse3, resolve } from "node:path";
 
 // ../hooks/lib/frontmatter.ts
@@ -36743,11 +36743,22 @@ function setScalar(text, key, value) {
   }
   return ok(applyLines(fm.value, splitLines(stripBom(text).rest), entry, [line2.value]));
 }
+function setList(text, key, items) {
+  const fm = parseFrontmatter(text);
+  if (!fm.ok) return fm;
+  const line2 = formatListLine(key, items);
+  if (!line2.ok) return line2;
+  const entry = findEntry(fm.value, key);
+  if (entry !== void 0) {
+    if (entry.kind === "scalar" && entry.scalar !== "") return fail("type-mismatch", `"${key}" is a single value; it cannot be set to a list.`, entry.line);
+    if (entry.kind !== "scalar" && entry.items.length === items.length && entry.items.every((v, i) => v === items[i])) return ok(text);
+  }
+  return ok(applyLines(fm.value, splitLines(stripBom(text).rest), entry, [line2.value]));
+}
 
 // ../hooks/lib/settings.ts
-var ROLES = ["manager", "planner", "worker", "advisor"];
+var ROLES = ["manager", "planner", "worker"];
 var MODELS = ["haiku", "sonnet", "opus", "fable"];
-var ADVISOR_MODELS = ["none", ...MODELS];
 var THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 var NOT_SET = "none";
 var THINKING_VALUES = [NOT_SET, ...THINKING_LEVELS];
@@ -36758,8 +36769,7 @@ var DEFAULTS = {
   roles: {
     manager: { model: "opus", thinking: "medium" },
     planner: { model: "opus", thinking: "high" },
-    worker: { model: "sonnet", thinking: "medium" },
-    advisor: { model: "fable", thinking: "high" }
+    worker: { model: "sonnet", thinking: "medium" }
   }
 };
 function settingKey(role, field) {
@@ -36773,6 +36783,7 @@ var DEFAULT_KEYS = SAVED_KEYS.map((k) => `default_${k}`);
 
 // ../hooks/lib/ids.ts
 var RETYPED = /^retyped from ([A-Z]{1,10}-\d{4,}) to ([A-Z]{1,10}-\d{4,})$/;
+var MERGED = /^merged ([A-Z]{1,10}-\d{4,}) ".*" into ([A-Z]{1,10}-\d{4,})$/;
 function pad(n) {
   return String(n).padStart(4, "0");
 }
@@ -36782,7 +36793,7 @@ function escapeRegExp(s) {
 function formerIdsOf(log) {
   const out = [];
   for (const entry of log) {
-    const m = RETYPED.exec(entry.text);
+    const m = RETYPED.exec(entry.text) ?? MERGED.exec(entry.text);
     if (m) out.push(m[1]);
   }
   return out;
@@ -37060,6 +37071,85 @@ function retypeCardText(text, newId, stamp, who2) {
   if (!withId.ok) return withId;
   return appendLog(withId.value, { date: stamp.date, time: stamp.time, who: who2, text: `retyped from ${card.value.id} to ${newId}` });
 }
+function mergedLogText(draggedId, draggedTitle, survivorId) {
+  return `merged ${draggedId} "${draggedTitle}" into ${survivorId}`;
+}
+function mergeRefusal(dragged, survivor, cards, board, working = []) {
+  if (dragged.id === survivor.id) return `${dragged.id} cannot be merged into itself. Nothing was changed.`;
+  const inAuto = (status) => {
+    const key = status.trim().toLowerCase();
+    return board.lanes.some((l) => l.role === "auto" && l.label.toLowerCase() === key);
+  };
+  for (const card of [dragged, survivor]) {
+    if (inAuto(card.status) || working.includes(card.id)) {
+      return `${card.id} is being worked. Move it out of Auto or wait, then merge. Nothing was changed.`;
+    }
+  }
+  if (dragged.parent === survivor.id || survivor.parent === dragged.id) {
+    const [parent, child] = dragged.parent === survivor.id ? [survivor.id, dragged.id] : [dragged.id, survivor.id];
+    return `${parent} is the parent of ${child}, so they cannot be merged. Nothing was changed.`;
+  }
+  const work = dragged.branch !== "" ? dragged.branch : dragged.pr;
+  if (work !== "") return `${dragged.id} has work on ${work} and cannot be merged. Nothing was changed.`;
+  const children = cards.filter((c) => c.parent === dragged.id).map((c) => c.id);
+  if (children.length > 0) return `${dragged.id} has child cards: ${children.join(", ")}. Delete or re-parent them first. Nothing was changed.`;
+  return void 0;
+}
+function mergedBody(draggedText) {
+  const fm = parseFrontmatter(draggedText);
+  if (!fm.ok) return fm;
+  const lines = splitLines(fm.value.body).lines;
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  i++;
+  const out = [];
+  let inLog = false;
+  for (; i < lines.length; i++) {
+    const line2 = lines[i];
+    if (line2.startsWith("## ")) inLog = line2 === "## Log";
+    if (inLog) continue;
+    out.push(line2.startsWith("## ") ? "#" + line2 : line2);
+  }
+  while (out.length > 0 && out[0].trim() === "") out.shift();
+  while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return ok(out);
+}
+function mergeCardText(survivorText, draggedText, stamp, who2) {
+  const survivor = parseCard(survivorText);
+  if (!survivor.ok) return survivor;
+  const dragged = parseCard(draggedText);
+  if (!dragged.ok) return dragged;
+  if (survivor.value.id === dragged.value.id) return fail("bad-value", `A card cannot be merged into itself (${survivor.value.id}).`);
+  const body = mergedBody(draggedText);
+  if (!body.ok) return body;
+  const fm = parseFrontmatter(survivorText);
+  if (!fm.ok) return fm;
+  const { bom, rest } = stripBom(survivorText);
+  const sp = splitLines(rest);
+  const eol = fm.value.eol;
+  let at = sp.lines.length;
+  for (let i = fm.value.closeLine; i < sp.lines.length; i++) {
+    if (sp.lines[i] === "## Plan" || sp.lines[i] === "## Log") {
+      at = i;
+      break;
+    }
+  }
+  const section2 = ["## Merged from " + dragged.value.id + ": " + dragged.value.title, ...body.value];
+  if (at > 0 && sp.lines[at - 1].trim() !== "") section2.unshift("");
+  if (at < sp.lines.length) section2.push("");
+  insertLines(sp, at, section2, eol);
+  const withSection = (bom ? BOM2 : "") + joinLines(sp);
+  const labels = [...survivor.value.labels];
+  for (const label of dragged.value.labels) if (!labels.includes(label)) labels.push(label);
+  const withLabels = setList(withSection, "labels", labels);
+  if (!withLabels.ok) return withLabels;
+  return appendLog(withLabels.value, {
+    date: stamp.date,
+    time: stamp.time,
+    who: who2,
+    text: mergedLogText(dragged.value.id, dragged.value.title, survivor.value.id)
+  });
+}
 function newCardText(input2) {
   if (!ID_PATTERN.test(input2.id)) return fail("bad-id", `"${input2.id}" is not a card ID like KB-0012.`);
   const title = typeof input2.title === "string" ? input2.title.trim() : "";
@@ -37121,12 +37211,9 @@ function settingProblem(key, value) {
     case "worker_model":
     case "planner_model":
       return MODELS.indexOf(value) !== -1 ? void 0 : `"${key}" must be one of ${MODELS.join(", ")}.`;
-    case "advisor_model":
-      return ADVISOR_MODELS.indexOf(value) !== -1 ? void 0 : `"advisor_model" must be one of ${MODELS.join(", ")}, none.`;
     case "manager_thinking":
     case "planner_thinking":
     case "worker_thinking":
-    case "advisor_thinking":
       return THINKING_VALUES.indexOf(value) !== -1 ? void 0 : `"${key}" must be one of ${THINKING_VALUES.slice(1).join(", ")}, none (none is Not set).`;
     default:
       return `"${key}" is not a board setting.`;
@@ -37212,11 +37299,9 @@ function parseBoard(text) {
     managerModel: raw.manager_model,
     plannerModel: raw.planner_model,
     workerModel: raw.worker_model,
-    advisorModel: raw.advisor_model,
     managerThinking: raw.manager_thinking,
     plannerThinking: raw.planner_thinking,
     workerThinking: raw.worker_thinking,
-    advisorThinking: raw.advisor_thinking,
     defaults,
     savedDefaults,
     lanes: lanes2
@@ -37272,11 +37357,9 @@ function builtInValues() {
     manager_model: DEFAULTS.roles.manager.model,
     planner_model: DEFAULTS.roles.planner.model,
     worker_model: DEFAULTS.roles.worker.model,
-    advisor_model: DEFAULTS.roles.advisor.model,
     manager_thinking: DEFAULTS.roles.manager.thinking,
     planner_thinking: DEFAULTS.roles.planner.thinking,
-    worker_thinking: DEFAULTS.roles.worker.thinking,
-    advisor_thinking: DEFAULTS.roles.advisor.thinking
+    worker_thinking: DEFAULTS.roles.worker.thinking
   };
 }
 function defaultsFrom(v) {
@@ -37285,8 +37368,7 @@ function defaultsFrom(v) {
     roles: {
       manager: { model: v.manager_model, thinking: v.manager_thinking },
       planner: { model: v.planner_model, thinking: v.planner_thinking },
-      worker: { model: v.worker_model, thinking: v.worker_thinking },
-      advisor: { model: v.advisor_model, thinking: v.advisor_thinking }
+      worker: { model: v.worker_model, thinking: v.worker_thinking }
     }
   };
 }
@@ -37712,6 +37794,35 @@ function retypeCard(dir2, input2, now = /* @__PURE__ */ new Date()) {
   if (unmoved.length > 0) message += ` The parent line of ${unmoved.join(", ")} could not be changed; set it to ${newId} by hand.`;
   return { ok: true, message, id: newId, was: found.id };
 }
+function mergeCards(dir2, input2, now = /* @__PURE__ */ new Date()) {
+  const who2 = cleanWho(input2.who);
+  if (typeof who2 !== "string") return who2;
+  const loaded = loadBoard(dir2);
+  if (!loaded.ok) return loaded;
+  const d = findCardFile(loaded.state, input2.id);
+  if (!d.ok) return d;
+  const s = findCardFile(loaded.state, input2.onto);
+  if (!s.ok) return s;
+  const dragged = d.found;
+  const survivor = s.found;
+  const cards = loadCards(loaded.state).cards;
+  const draggedCard = cards.find((c) => c.id === dragged.id);
+  const survivorCard = cards.find((c) => c.id === survivor.id);
+  if (draggedCard === void 0 || survivorCard === void 0) {
+    return refuse(`${draggedCard === void 0 ? dragged.id : survivor.id} cannot be read (see board_list). Nothing was changed.`);
+  }
+  const refused = mergeRefusal(draggedCard, survivorCard, cards, loaded.state.board);
+  if (refused !== void 0) return refuse(refused);
+  const text = mergeCardText(survivor.text, dragged.text, stampOf(now), who2);
+  if (!text.ok) return refuse(`${text.message} Nothing was changed.`);
+  if (!existsSync(dragged.path) || statSync(dragged.path).mtimeMs !== dragged.mtime) {
+    return refuse(`${dragged.name} changed while this was being made. Nothing was changed; try again.`);
+  }
+  const written = writeChecked(survivor.path, text.value, survivor.mtime);
+  if (written) return written;
+  unlinkSync(dragged.path);
+  return { ok: true, message: `${nameOf(dragged)} merged into ${nameOf(survivor)}.`, id: survivor.id, was: dragged.id };
+}
 function decide(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const loaded = loadBoard(dir2);
   if (!loaded.ok) return loaded;
@@ -37951,7 +38062,7 @@ function registerReadTools(server2, kanbanDir, noBoard) {
     "card_get",
     {
       description: "The whole file of one card (frontmatter, body, Plan and Log).",
-      inputSchema: { id: external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID is followed to the card that holds it now.") }
+      inputSchema: { id: external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype or a merge) is followed to the card that holds it now.") }
     },
     ({ id }) => {
       const dir2 = kanbanDir();
@@ -37972,7 +38083,7 @@ function registerReadTools(server2, kanbanDir, noBoard) {
 
 // src/tools-write.ts
 var who = external_exports.string().describe(`Your name, as it should appear in the card's Log (for example "Gemini").`);
-var cardId = external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype) is followed to the card that holds it now.");
+var cardId = external_exports.string().describe("Card ID: BUG-0012, bug 12 or 12. An old ID (from a retype or a merge) is followed to the card that holds it now.");
 var typeName = external_exports.string().describe('A type name or its letters, as in the types tool (for example "bug" or "ENH")');
 function registerWriteTools(server2, kanbanDir, noBoard) {
   const run = (go) => {
@@ -38018,6 +38129,18 @@ function registerWriteTools(server2, kanbanDir, noBoard) {
       inputSchema: { id: cardId, type: typeName, who }
     },
     (a) => run((dir2) => retypeCard(dir2, a))
+  );
+  server2.registerTool(
+    "card_merge",
+    {
+      description: `Merge card "id" into card "onto": "onto" keeps its ID, lane and place and gains the other card's text under "## Merged from <ID>: <title>", the union of the labels and one Log line; the other card's file is deleted and its ID keeps working (it finds "onto"). Refused when either card is in an auto lane, when "id" has a branch, a pull request or child cards, or when one card is the other's parent.`,
+      inputSchema: {
+        id: cardId.describe("The card that goes away: BUG-0012, bug 12 or 12"),
+        onto: cardId.describe("The card that stays and takes its text: BUG-0008, bug 8 or 8"),
+        who
+      }
+    },
+    (a) => run((dir2) => mergeCards(dir2, a))
   );
   server2.registerTool(
     "decision_add",

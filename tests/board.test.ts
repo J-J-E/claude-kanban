@@ -48,7 +48,6 @@ describe('parseBoard', () => {
     expect(board.managerModel).toBe('opus')
     expect(board.plannerModel).toBe('opus')
     expect(board.workerModel).toBe('sonnet')
-    expect(board.advisorModel).toBe('fable')
     expect(board.plannerThinking).toBe('high')
     expect(board.lanes.map((l) => l.label)).toEqual([
       'Inbox', 'Plan', 'Needs You', 'Auto', 'Manual', 'Done', 'Parked', 'Scrapped',
@@ -98,11 +97,9 @@ describe('parseBoard', () => {
       managerModel: 'opus',
       plannerModel: 'opus',
       workerModel: 'sonnet',
-      advisorModel: 'fable',
       managerThinking: 'medium',
       plannerThinking: 'high',
       workerThinking: 'medium',
-      advisorThinking: 'high',
       defaults: DEFAULTS,
       savedDefaults: [],
       lanes: [{ label: 'Inbox', role: 'intake', isSide: false, isClaudeOnly: false }],
@@ -164,8 +161,8 @@ describe('parseBoard', () => {
     expect(codeOf(parseBoard(lines('---', 'owner:', 'lanes:', '  - Inbox (intake)', '---')))).toBe('bad-setting')
     for (const line of [
       'workers: 0', 'workers: 6', 'workers: two', 'workers: 1.5',
-      'manager_thinking: extreme', 'planner_thinking: Not set', 'worker_thinking: ', 'advisor_thinking: gpt', 'manager_thinking: High',
-      'manager_model: gpt', 'planner_model: none', 'planner_model: gpt', 'worker_model: none', 'advisor_model: gpt',
+      'manager_thinking: extreme', 'planner_thinking: Not set', 'worker_thinking: ', 'manager_thinking: High',
+      'manager_model: gpt', 'planner_model: none', 'planner_model: gpt', 'worker_model: none',
       'next_bug: 0', 'next_bug: -3', 'next_bug: x',
       'workers:',
     ]) {
@@ -176,7 +173,6 @@ describe('parseBoard', () => {
   test('the allowed setting values parse', () => {
     const withSetting = (line: string) => lines('---', 'owner: John', line, 'lanes:', '  - Inbox (intake)', '---')
     expect(must(parseBoard(withSetting('workers: 5'))).workers).toBe(5)
-    expect(must(parseBoard(withSetting('advisor_model: none'))).advisorModel).toBe('none')
     for (const m of ['haiku', 'sonnet', 'opus', 'fable']) expect(must(parseBoard(withSetting('planner_model: ' + m))).plannerModel).toBe(m)
     expect(must(parseBoard(withSetting('next_bug: 10000'))).counters.BUG).toBe(10000)
   })
@@ -185,11 +181,10 @@ describe('parseBoard', () => {
     const withSetting = (line: string) => lines('---', 'owner: John', line, 'lanes:', '  - Inbox (intake)', '---')
     for (const level of ['low', 'medium', 'high', 'xhigh', 'max', 'none']) {
       expect(must(parseBoard(withSetting('worker_thinking: ' + level))).workerThinking).toBe(level)
-      expect(must(parseBoard(withSetting('advisor_thinking: ' + level))).advisorThinking).toBe(level)
     }
     expect(must(parseBoard(withSetting('manager_thinking: none'))).managerThinking).toBe('none')
     const none = must(parseBoard(withSetting('next_bug: 3')))
-    expect([none.managerThinking, none.plannerThinking, none.workerThinking, none.advisorThinking]).toEqual(['medium', 'high', 'medium', 'high'])
+    expect([none.managerThinking, none.plannerThinking, none.workerThinking]).toEqual(['medium', 'high', 'medium'])
   })
 
   test('frontmatter errors pass through', () => {
@@ -218,8 +213,8 @@ describe('defaultBoardText', () => {
     expect(b.types).toEqual(DEFAULT_TYPES)
     expect(b.counters).toEqual({ BUG: 1, ENH: 1, CHORE: 1 })
     expect(b.workers).toBe(2)
-    expect([b.managerModel, b.plannerModel, b.workerModel, b.advisorModel]).toEqual(['opus', 'opus', 'sonnet', 'fable'])
-    expect([b.managerThinking, b.plannerThinking, b.workerThinking, b.advisorThinking]).toEqual(['medium', 'high', 'medium', 'high'])
+    expect([b.managerModel, b.plannerModel, b.workerModel]).toEqual(['opus', 'opus', 'sonnet'])
+    expect([b.managerThinking, b.plannerThinking, b.workerThinking]).toEqual(['medium', 'high', 'medium'])
   })
 
   test('refuses an owner that cannot be written or used in a Log line', () => {
@@ -309,8 +304,8 @@ describe('setBoardSetting', () => {
   })
 
   test('keeps CRLF and the BOM, whole output compared', () => {
-    const out = must(setBoardSetting(BOM + crlf(BOARD_EXAMPLE), 'advisor_model', 'none'))
-    expect(out).toBe(BOM + crlf(BOARD_EXAMPLE.replace('advisor_model: fable', 'advisor_model: none')))
+    const out = must(setBoardSetting(BOM + crlf(BOARD_EXAMPLE), 'worker_model', 'haiku'))
+    expect(out).toBe(BOM + crlf(BOARD_EXAMPLE.replace('worker_model: sonnet', 'worker_model: haiku')))
   })
 
   test('a value that changes nothing returns the same string', () => {
@@ -350,7 +345,7 @@ describe('setBoardSetting', () => {
     expect(must(setBoardSetting(text, 'worker_thinking', 'xhigh'))).toBe(
       lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'worker_thinking: xhigh', '---'),
     )
-    expect(must(parseBoard(must(setBoardSetting(text, 'advisor_thinking', 'none')))).advisorThinking).toBe('none')
+    expect(must(parseBoard(must(setBoardSetting(text, 'worker_thinking', 'none')))).workerThinking).toBe('none')
     for (const bad of ['Not set', 'extreme', '', 'HIGH']) expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'manager_thinking', bad))).toBe('bad-setting')
   })
 
@@ -691,25 +686,24 @@ describe('default_ lines in parseBoard', () => {
     const b = must(parseBoard(boardWith()))
     expect(b.defaults).toEqual(DEFAULTS)
     expect(b.savedDefaults).toEqual([])
-    expect([b.workers, b.managerModel, b.plannerThinking, b.advisorModel]).toEqual([2, 'opus', 'high', 'fable'])
+    expect([b.workers, b.managerModel, b.plannerThinking]).toEqual([2, 'opus', 'high'])
   })
 
-  test('reads each kind of default_ key: workers, model, thinking and the advisor none model', () => {
+  test('reads each kind of default_ key: workers, model and thinking', () => {
     const b = must(
       parseBoard(
-        boardWith('default_workers: 4', 'default_manager_model: haiku', 'default_planner_thinking: max', 'default_advisor_model: none', 'default_worker_thinking: none'),
+        boardWith('default_workers: 4', 'default_manager_model: haiku', 'default_planner_thinking: max', 'default_worker_thinking: none'),
       ),
     )
     expect(b.defaults.workers).toBe(4)
     expect(b.defaults.roles.manager).toEqual({ model: 'haiku', thinking: 'medium' })
     expect(b.defaults.roles.planner).toEqual({ model: 'opus', thinking: 'max' })
     expect(b.defaults.roles.worker).toEqual({ model: 'sonnet', thinking: 'none' })
-    expect(b.defaults.roles.advisor).toEqual({ model: 'none', thinking: 'high' })
   })
 
   test('savedDefaults lists the keys that have a line, in DEFAULT_KEYS order', () => {
-    const b = must(parseBoard(boardWith('default_advisor_thinking: low', 'default_workers: 3', 'default_manager_thinking: low')))
-    expect(b.savedDefaults).toEqual(['default_workers', 'default_manager_thinking', 'default_advisor_thinking'])
+    const b = must(parseBoard(boardWith('default_worker_thinking: low', 'default_workers: 3', 'default_manager_thinking: low')))
+    expect(b.savedDefaults).toEqual(['default_workers', 'default_manager_thinking', 'default_worker_thinking'])
   })
 
   test('fallback: the setting line beats the default_ line beats the built-in', () => {
@@ -738,9 +732,8 @@ describe('default_ lines in parseBoard', () => {
       'default_workers: two',
       'default_manager_model: none',
       'default_worker_model: gpt',
-      'default_advisor_model: gpt',
       'default_planner_thinking: extreme',
-      'default_advisor_thinking: HIGH',
+      'default_worker_thinking: HIGH',
     ]) {
       expect(codeOf(parseBoard(boardWith(line)))).toBe('bad-setting')
     }
@@ -752,20 +745,20 @@ describe('default_ lines in parseBoard', () => {
 
 describe('saveDefaults', () => {
   test('writes only values that differ from the built-in, removes the setting lines, whole output compared', () => {
-    const settingLines = ['workers: 1', 'manager_model: opus', 'planner_model: opus', 'worker_model: sonnet', 'advisor_model: fable', 'planner_thinking: high']
+    const settingLines = ['workers: 1', 'manager_model: opus', 'planner_model: opus', 'worker_model: sonnet', 'planner_thinking: high']
     const expected = BOARD_EXAMPLE.replace(settingLines.join('\n') + '\n', '').replace('---\n# Board notes', 'default_workers: 1\n---\n# Board notes')
     expect(must(saveDefaults(BOARD_EXAMPLE))).toBe(expected)
   })
 
   test('a new default_ line lands before the closing ---, like a new setting', () => {
-    const out = must(saveDefaults(boardWith('workers: 4', 'worker_model: haiku', 'advisor_thinking: low')))
+    const out = must(saveDefaults(boardWith('workers: 4', 'worker_model: haiku', 'worker_thinking: low')))
     expect(out).toBe(
-      lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 4', 'default_worker_model: haiku', 'default_advisor_thinking: low', '---', '# Notes', '', 'Free text.'),
+      lines('---', 'next_bug: 5', 'next_enh: 2', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_workers: 4', 'default_worker_model: haiku', 'default_worker_thinking: low', '---', '# Notes', '', 'Free text.'),
     )
   })
 
   test('the re-parsed board reads the same values, now as its defaults, with no setting lines', () => {
-    const text = boardWith('workers: 4', 'manager_model: sonnet', 'planner_thinking: max', 'default_worker_model: haiku', 'advisor_model: none')
+    const text = boardWith('workers: 4', 'manager_model: sonnet', 'planner_thinking: max', 'default_worker_model: haiku')
     const before = must(parseBoard(text))
     const saved = must(saveDefaults(text))
     const after = must(parseBoard(saved))
@@ -776,12 +769,11 @@ describe('saveDefaults', () => {
         manager: { model: 'sonnet', thinking: 'medium' },
         planner: { model: 'opus', thinking: 'max' },
         worker: { model: 'haiku', thinking: 'medium' },
-        advisor: { model: 'none', thinking: 'high' },
       },
     })
-    expect(after.savedDefaults).toEqual(['default_workers', 'default_manager_model', 'default_planner_thinking', 'default_worker_model', 'default_advisor_model'])
+    expect(after.savedDefaults).toEqual(['default_workers', 'default_manager_model', 'default_planner_thinking', 'default_worker_model'])
     const keys = saved.split('\n').map((l) => l.split(':')[0])
-    expect(keys.filter((k) => ['workers', 'manager_model', 'planner_thinking', 'advisor_model'].includes(k))).toEqual([])
+    expect(keys.filter((k) => ['workers', 'manager_model', 'planner_thinking', 'worker_thinking'].includes(k))).toEqual([])
   })
 
   test('removes a default_ line whose value now equals the built-in, and replaces one in place', () => {
@@ -810,7 +802,7 @@ describe('saveDefaults', () => {
 })
 
 describe('clearSavedDefaults', () => {
-  const text = boardWith('workers: 4', 'default_workers: 3', 'default_planner_model: haiku', 'manager_thinking: low', 'default_advisor_model: none')
+  const text = boardWith('workers: 4', 'default_workers: 3', 'default_planner_model: haiku', 'manager_thinking: low', 'default_worker_thinking: none')
 
   test('removes every default_ line and setting line and nothing else, whole output compared', () => {
     expect(must(clearSavedDefaults(text))).toBe(boardWith())

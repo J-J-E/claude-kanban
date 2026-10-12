@@ -3,6 +3,7 @@
 // the spec's busy day of 38 rows is 33 here and the quiet day of 31 is 26.
 import { test, expect, describe } from 'claude-code/testing'
 import {
+  cardAt,
   cardHeight,
   dropAt,
   ghostOf,
@@ -882,11 +883,9 @@ describe('the place slot', () => {
     for (const y of [0, 1]) expect(at(y)).toMatchObject({ lane: 'Inbox', gap: 0, after: null, before: 'KB-0001', rect: R(4, 1, 72, 1) })
   })
 
-  test('on a 1-row card the gap under it; on a 2-row card row 1 is the gap above and row 2 the gap below', () => {
-    expect(at(2)).toMatchObject({ gap: 1, after: 'KB-0001', before: 'KB-0002', rect: R(4, 3, 72, 1) })
-    expect(at(4)).toMatchObject({ gap: 1, after: 'KB-0001', before: 'KB-0002' })
-    expect(at(5)).toMatchObject({ gap: 2, after: 'KB-0002', before: 'KB-0003', rect: R(4, 6, 72, 1) })
-    expect(at(7)).toMatchObject({ gap: 3, after: 'KB-0003', before: null, rect: R(4, 8, 72, 1) })
+  test('the rows of a card are no gap: there is no slot on them (a release there is a merge, cardAt)', () => {
+    for (const y of [2, 4, 5, 7]) expect(at(y)).toBeNull()
+    expect(at(4, 'KB-0002')).toBeNull()
   })
 
   test('on a gap row, that gap; below the last card, the last place (before is null: the end)', () => {
@@ -896,11 +895,11 @@ describe('the place slot', () => {
   })
 
   test('the card in hand is never a neighbour: the gaps on either side of it name the same two cards', () => {
-    const above = at(4, 'KB-0002')
-    const below = at(5, 'KB-0002')
+    const above = at(3, 'KB-0002')
+    const below = at(6, 'KB-0002')
     expect(above).toMatchObject({ after: 'KB-0001', before: 'KB-0003' })
     expect(below).toMatchObject({ after: 'KB-0001', before: 'KB-0003' })
-    expect(at(2, 'KB-0001')).toMatchObject({ gap: 1, after: null, before: 'KB-0002' })
+    expect(at(1, 'KB-0001')).toMatchObject({ gap: 0, after: null, before: 'KB-0002' })
   })
 
   test('over no lane (a gap between lanes, outside) there is no slot', () => {
@@ -941,6 +940,39 @@ describe('the place slot', () => {
     const last = (panel(lc, 'Inbox').cards.at(-1) as { rect: Rect }).rect
     expect(placeSlotAt(lc, cut, 20, last.y + 1)).toBeNull()
     expect(placeSlotAt(lc, cut, 20, last.y - 1)).toMatchObject({ before: 'KB-0030' })
+  })
+})
+
+describe('the card under a release (cardAt)', () => {
+  // The same Inbox as above: KB-0001 at y 2, KB-0002 at 4 and 5, KB-0003 at 7; gap rows at 1, 3, 6 and 8; the title bar at 0.
+  const p = props([lane('Inbox', 'intake', { cards: [card('KB-0001'), two('KB-0002'), card('KB-0003')] }), lane('Auto', 'auto', { cards: cardsOf(1, 10) })])
+  const l = panelLayout(p, 80)
+
+  test('every row of a card is that card, the `⋯` zone and the far edge included', () => {
+    for (const x of [4, 20, 70, 75]) {
+      expect(cardAt(l, x, 2)).toEqual({ lane: 'Inbox', index: 0, id: 'KB-0001' })
+      expect(cardAt(l, x, 4)).toEqual({ lane: 'Inbox', index: 0, id: 'KB-0002' })
+      expect(cardAt(l, x, 5)).toEqual({ lane: 'Inbox', index: 0, id: 'KB-0002' })
+      expect(cardAt(l, x, 7)).toEqual({ lane: 'Inbox', index: 0, id: 'KB-0003' })
+    }
+  })
+  test('the title bar, the gap rows and the space under the last card are no card', () => {
+    for (const y of [0, 1, 3, 6, 8]) expect(cardAt(l, 20, y)).toBeNull()
+  })
+  test('outside every lane, and on a collapsed line, there is no card', () => {
+    expect(cardAt(l, 20, 500)).toBeNull()
+    expect(cardAt(l, 1, 2)).toBeNull()
+    const q = props([lane('Inbox', 'intake', { cards: [card('KB-0001')] }), lane('Plan', 'plan', { cards: [card('KB-0002')] })])
+    const lq = panelLayout(q, 80, { fold: { Plan: { isOpen: false, flagged: 0 } } })
+    const plan = panel(lq, 'Plan')
+    expect(plan.isOpen).toBe(false)
+    expect(cardAt(lq, 20, plan.rect.y)).toBeNull()
+  })
+  test('a card is a card in any sort, and in a lane only Claude fills', () => {
+    const sorted = panelLayout({ ...p, lanes: p.lanes.map((x) => (x.name === 'Inbox' ? { ...x, sort: 'title' } : x)) }, 80)
+    expect(cardAt(sorted, 20, 2)?.id).toBe('KB-0001')
+    const q = props([lane('Needs You', 'needs-you', { isClaudeOnly: true, cards: [card('KB-0009')] })])
+    expect(cardAt(panelLayout(q, 80), 20, 2)).toEqual({ lane: 'Needs You', index: 0, id: 'KB-0009' })
   })
 })
 

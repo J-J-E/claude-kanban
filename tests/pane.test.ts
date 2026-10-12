@@ -463,8 +463,6 @@ const SELECT_KEYS = [
   'set-planner_thinking',
   'set-worker_model',
   'set-worker_thinking',
-  'set-advisor_model',
-  'set-advisor_thinking',
 ]
 
 test('Settings tab, fresh install (spec check 10): the defaults, no Reset, nothing saved', async ($, on) => {
@@ -484,18 +482,17 @@ test('Settings tab, fresh install (spec check 10): the defaults, no Reset, nothi
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
   expect(await ui.find({ key: 'restore-all' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-'))).toEqual([])
-  // Nine Selects, all at the shipped defaults.
+  // Seven Selects, all at the shipped defaults.
   const selects = await ui.findAll({ type: 'Select' })
   expect(selects.map((s) => s.key)).toEqual(SELECT_KEYS)
-  expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium', 'fable', 'high'])
+  expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   const model = (k: string) => (selects.find((s) => s.key === k)?.props.options as { value: string; label?: string }[]).map((o) => o.value)
   expect(model('set-manager_model')).toEqual(['haiku', 'sonnet', 'opus', 'fable'])
-  expect(model('set-advisor_model')).toEqual(['none', 'haiku', 'sonnet', 'opus', 'fable'])
   expect(model('set-workers')).toEqual(['1', '2', '3', '4', '5'])
   expect((selects[2]?.props.options as { value: string; label?: string }[]).map((o) => o.label)).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
   // The labels, the defaults beside each row, the key and the three notes.
   const texts = await drawnTexts(ui)
-  for (const t of ['Workers at once', 'Manager', 'Planner', 'Worker', 'Advisor', 'Model', 'Thinking']) {
+  for (const t of ['Workers at once', 'Manager', 'Planner', 'Worker', 'Model', 'Thinking']) {
     expect(texts).toContain(t)
   }
   // A default shows only on a row that differs from it.
@@ -509,6 +506,8 @@ test('Settings tab, fresh install (spec check 10): the defaults, no Reset, nothi
   expect(texts.join(' ')).toContain("Ultracode is the app's own multi-agent mode")
   expect(texts.join(' ')).toContain('Manager is the model this board suggests for the conversation')
   expect(texts.join(' ')).toContain('Changes apply from the next turn.')
+  expect(texts.join(' ')).toContain("The Claude app has its own advisor, a stronger model it may consult in any chat, including the agents this board starts. It is set in your Claude settings (/advisor), not here. If it is on it uses your plan's limits (a Fable advisor can use a lot), and this board cannot see or change it. To turn it off, run /advisor off.")
+  expect(texts).not.toContain('Advisor')
   // Nothing was written, nothing said.
   expect(w.writes).toEqual([])
   expect(w.toasts).toEqual([])
@@ -525,8 +524,6 @@ test('Settings tab: every Select writes its line and says so; /model never runs'
     ['set-manager_thinking', 'max', 'manager_thinking: max', 'Manager thinking set to max.'],
     ['set-planner_thinking', 'medium', 'planner_thinking: medium', 'Planner thinking set to medium.'],
     ['set-worker_thinking', 'none', 'worker_thinking: none', 'Worker thinking set to Not set.'],
-    ['set-advisor_thinking', 'xhigh', 'advisor_thinking: xhigh', 'Advisor thinking set to extra.'],
-    ['set-advisor_model', 'none', 'advisor_model: none', 'Advisor model set to none.'],
   ]
   for (const [key, value, line, toast] of cases) {
     w.toasts.length = 0
@@ -561,7 +558,6 @@ test('Settings tab: the thinking list follows the role model; picking `medium (r
   await ui.press({ key: 'header-tab-settings' })
   const labels = async (key: string) => ((await ui.find({ key }))?.props.options as { value: string; label?: string }[]).map((o) => o.label)
   expect(await labels('set-planner_thinking')).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
-  expect(await labels('set-advisor_thinking')).toEqual(['Not set', 'low', 'medium', 'high (recommended)', 'extra', 'max'])
   // The option labelled `medium (recommended)` carries the value medium; the label never reaches the file.
   await ui.select({ key: 'set-planner_thinking', value: 'medium' })
   expect(w.text(BOARD_PATH)).toContain('\nplanner_thinking: medium\n')
@@ -610,7 +606,7 @@ test('Settings tab (spec check 11): a changed row shows Reset and Restore all de
   // Restore all defaults removes every saved settings line and keeps everything else.
   await ui.select({ key: 'set-workers', value: '4' })
   await ui.select({ key: 'set-manager_model', value: 'haiku' })
-  await ui.select({ key: 'set-advisor_thinking', value: 'low' })
+  await ui.select({ key: 'set-worker_thinking', value: 'low' })
   await ui.select({ key: 'set-planner_model', value: 'sonnet' })
   expect(w.text(BOARD_PATH)).not.toBe(board)
   w.toasts.length = 0
@@ -618,7 +614,7 @@ test('Settings tab (spec check 11): a changed row shows Reset and Restore all de
   await ui.press({ key: 'restore-yes' })
   expect(w.text(BOARD_PATH)).toBe(board)
   expect(w.toasts).toEqual(['All settings are back to their defaults.'])
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium', 'fable', 'high'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
 })
 
@@ -632,15 +628,20 @@ test('Settings tab: a saved line equal to the default shows no Reset', async ($,
   expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-'))).toEqual([])
 })
 
-test('Settings tab: the Advisor with no model says its thinking is not used and draws no thinking Select', async ($, on) => {
+test('Settings tab: a board.md that still has advisor lines draws no Advisor row and keeps the lines', async ($, on) => {
   const files = freshFiles()
-  files[BOARD_PATH] = INIT_BOARD_EXAMPLE.replace('owner: John\n', 'owner: John\nadvisor_model: none\n')
-  await boot($, on, files)
+  files[BOARD_PATH] = INIT_BOARD_EXAMPLE.replace('owner: John\n', 'owner: John\nadvisor_model: fable\nadvisor_thinking: high\ndefault_advisor_model: opus\n')
+  const w = await boot($, on, files)
   const ui = await mountPane($, 'desktop', 80)
   await ui.press({ key: 'header-tab-settings' })
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.key)).not.toContain('set-advisor_thinking')
-  expect(await ui.find({ type: 'Text', text: 'Advisor thinking: not used' })).toBeDefined()
-  expect(await ui.find({ key: 'reset-advisor' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.key)).toEqual(SELECT_KEYS)
+  expect(await ui.find({ key: 'reset-advisor' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
+  await ui.select({ key: 'set-workers', value: '3' })
+  await ui.press({ key: 'reset-workers' })
+  await ui.select({ key: 'set-workers', value: '3' })
+  await ui.press({ key: 'save-defaults' })
+  expect(w.text(BOARD_PATH)).toContain('\nadvisor_model: fable\nadvisor_thinking: high\ndefault_advisor_model: opus\n')
 })
 
 test('Settings tab at 45, 60, 80 and 108 cells (spec check 14): the same controls, the default beside its Reset, and no percent sign', async ($, on) => {
@@ -670,11 +671,11 @@ test('Settings tab: a snapshot saved before the thinking settings (no thinking, 
   await boot($, on, freshFiles())
   const ui = await mountPane($, 'desktop', 80)
   const snapshot = state.wrote.snapshot
-  const { owner, prefix, workers, managerModel, plannerModel, workerModel, advisorModel } = snapshot.settings
-  state.seed('snapshot', { ...snapshot, settings: { owner, prefix, workers, managerModel, plannerModel, workerModel, advisorModel } })
+  const { owner, prefix, workers, managerModel, plannerModel, workerModel } = snapshot.settings
+  state.seed('snapshot', { ...snapshot, settings: { owner, prefix, workers, managerModel, plannerModel, workerModel } })
   await redraw(ui)
   await ui.press({ key: 'header-tab-settings' })
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium', 'fable', 'high'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
 })
 
@@ -2449,6 +2450,182 @@ test('a retype asked from the open card marks the card worked at turn.start; whe
   expect(state.wrote.queued).toEqual([])
   expect(await ui.find({ key: 'card' })).toBeDefined()
   expect((await ui.find({ key: 'card-header' }))?.text).toBe('ENH-0020 (was BUG-0012)  in Pending')
+})
+
+// ---------------------------------------------------------------- BUG-0016: a drop on another card asks to merge the two
+
+const DATE_FIX = cardPath('BUG-0012', 'fix-date')
+const DATE_BUG = cardPath('BUG-0008', 'date-bug')
+const MERGE_QUESTION = 'Merge BUG-0012 "Fix date" into BUG-0008 "Date bug"? BUG-0012 is deleted and its text moves into BUG-0008.'
+const MERGE_PROMPT = 'Kanban: John asked to merge BUG-0012 "Fix date" into BUG-0008 "Date bug". Merge the cards with the kanban skill.'
+
+function mergeFiles(): Record<string, string> {
+  return {
+    [BOARD_PATH]: INIT_BOARD_EXAMPLE,
+    [DATE_FIX]: cardText('BUG-0012', 'Fix date', 'Pending', 1000),
+    [DATE_BUG]: cardText('BUG-0008', 'Date bug', 'Pending', 2000),
+    [cardPath('BUG-0020', 'in-auto')]: cardText('BUG-0020', 'In auto', 'Auto', 1000),
+    [cardPath('BUG-0021', 'a-parent')]: cardText('BUG-0021', 'A parent', 'Pending', 3000),
+  }
+}
+
+/** What the board Client posts for a release on another card's rows; `rev` is the one the Client was handed. */
+async function dropOn(ui: Pane, id: string, onto: string, rev?: number): Promise<void> {
+  await ui.post({ type: 'merge', id, onto, rev: rev ?? (await boardProps(ui)).rev } as never, { in: 'board' })
+}
+
+/** The question row's words, or undefined when none is drawn. */
+async function mergeAsked(ui: Pane): Promise<string | undefined> {
+  if ((await ui.find({ key: 'merge-ask' })) === undefined) return undefined
+  return (await ui.findAll({ type: 'Text' })).map((t) => String(t.text)).find((t) => t.startsWith('Merge '))
+}
+
+test('a drop on another card shows the question with the exact words and the two buttons, and writes and sends nothing', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  expect(await mergeAsked(ui)).toBe(MERGE_QUESTION)
+  expect((await ui.find({ key: 'merge-yes' }))?.props.label).toBe('Merge')
+  expect((await ui.find({ key: 'merge-no' }))?.props.label).toBe('Keep both')
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+  expect(w.toasts).toEqual([])
+  // The lanes are still drawn under the question.
+  expect(await ui.find({ type: 'Client', key: 'board' })).toBeDefined()
+})
+
+test('Keep both closes the question and writes nothing and sends nothing', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await ui.press({ key: 'merge-no' })
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+  expect(w.toasts).toEqual([])
+})
+
+test('Merge closes the question, sends exactly the prompt and the toast, and writes no file', async ($, on) => {
+  const state = watchState(on)
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await ui.press({ key: 'merge-yes' })
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.sent.map((s) => s.text)).toEqual([MERGE_PROMPT])
+  expect(w.toasts).toEqual(['Claude is merging BUG-0012 into BUG-0008.'])
+  expect(w.writes).toEqual([])
+  expect(state.wrote.queued).toMatchObject([{ id: 'BUG-0012', kind: 'merge', text: MERGE_PROMPT }])
+  // The turn starts: the prompt leaves the queue and the turn is about the card that goes away.
+  await $.turn.start({ text: MERGE_PROMPT, turnId: 't1' })
+  expect(state.wrote.queued).toEqual([])
+  expect(state.wrote.turnCard).toBe('BUG-0012')
+})
+
+test('Merge while Claude is busy says it waits, as a delete does', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await $.turn.start({ text: 'Kanban: John moved BUG-0020 "In auto" from Pending to Auto. Do the auto lane action from the kanban skill.', turnId: 't0' })
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await ui.press({ key: 'merge-yes' })
+  expect(w.toasts).toEqual(['Claude will merge BUG-0012 into BUG-0008 when it finishes what it is doing.'])
+  expect(w.sent.map((s) => s.text)).toEqual([MERGE_PROMPT])
+  expect(w.writes).toEqual([])
+})
+
+test('a long title is cut in the question and in the prompt the way the other confirmations cut it', async ($, on) => {
+  const long = 'Word '.repeat(40).trim()
+  const files = mergeFiles()
+  files[DATE_FIX] = cardText('BUG-0012', long, 'Pending', 1000)
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  const asked = await mergeAsked(ui)
+  expect(asked).toContain('Merge BUG-0012 "Word Word')
+  expect(asked).not.toContain(long)
+  await ui.press({ key: 'merge-yes' })
+  expect(w.sent[0]?.text).not.toContain(long)
+  expect(w.sent[0]?.text).toContain('asked to merge BUG-0012 "Word Word')
+})
+
+test('each refusal shows a toast, no question and writes nothing', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  const refused = async (id: string, onto: string, toast: string, rev?: number): Promise<void> => {
+    w.toasts.length = 0
+    await dropOn(ui, id, onto, rev)
+    expect(w.toasts).toEqual([toast])
+    expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+    expect(w.writes).toEqual([])
+    expect(w.sent).toEqual([])
+  }
+  // A card in Auto is being worked; a card with itself; a card that is not on the board.
+  await refused('BUG-0012', 'BUG-0020', 'BUG-0020 is being worked. Move it out of Auto or wait, then merge. Nothing was changed.')
+  await refused('BUG-0020', 'BUG-0008', 'BUG-0020 is being worked. Move it out of Auto or wait, then merge. Nothing was changed.')
+  await refused('BUG-0012', 'BUG-0012', 'BUG-0012 cannot be merged into itself. Nothing was changed.')
+  await refused('BUG-0012', 'BUG-0099', 'No card BUG-0099 on the board.')
+  // A stale rev: the board changed while the card was dragged.
+  await refused('BUG-0012', 'BUG-0008', STALE, (await boardProps(ui)).rev + 1)
+  // A card with work on a branch cannot be merged away.
+  w.put(DATE_FIX, w.text(DATE_FIX).replace(/\nbranch:[^\n]*/, '\nbranch: bug-12-fix-date'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  await refused('BUG-0012', 'BUG-0008', 'BUG-0012 has work on bug-12-fix-date and cannot be merged. Nothing was changed.')
+})
+
+test('a card Claude is editing is refused, and so is a board that cannot be read', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  const release = w.hold()
+  const edit = $.tool.call({ tool: 'Edit', file_path: '/project/kanban/BUG-0008-date-bug.md', old_string: 'Date bug', new_string: 'Date bugs' })
+  await w.clock.settle()
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  expect(w.toasts).toEqual(['BUG-0008 is being edited by Claude; try again in a moment.'])
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  release()
+  await edit
+  w.toasts.length = 0
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('owner: John', 'owner: John\nworkers: 9'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  expect(w.toasts).toEqual(["The board file can't be read. Nothing was changed."])
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.sent).toEqual([])
+})
+
+test('a second drop replaces the pending question', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await dropOn(ui, 'BUG-0008', 'BUG-0021')
+  expect(await mergeAsked(ui)).toBe('Merge BUG-0008 "Date bug" into BUG-0021 "A parent"? BUG-0008 is deleted and its text moves into BUG-0021.')
+  expect(await ui.findAll({ key: 'merge-ask' })).toHaveLength(1)
+  await ui.press({ key: 'merge-yes' })
+  expect(w.sent.map((s) => s.text)).toEqual(['Kanban: John asked to merge BUG-0008 "Date bug" into BUG-0021 "A parent". Merge the cards with the kanban skill.'])
+})
+
+test('the question goes away when either card disappears, and when the tab changes', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  for (const gone of [DATE_FIX, DATE_BUG]) {
+    await dropOn(ui, 'BUG-0012', 'BUG-0008')
+    expect(await mergeAsked(ui)).toBe(MERGE_QUESTION)
+    const text = w.text(gone)
+    w.files.delete(gone)
+    await w.clock.advance(2000)
+    await w.clock.settle()
+    expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+    w.put(gone, text)
+    await w.clock.advance(2000)
+    await w.clock.settle()
+  }
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await ui.press({ key: 'header-tab-settings' })
+  await ui.press({ key: 'header-tab-board' })
+  expect(await ui.find({ key: 'merge-ask' })).toBeUndefined()
+  expect(w.sent).toEqual([])
 })
 
 /** Starts a session with `cwd`, `root` being what `$.session.root()` answers, and returns the fs paths the pane used with a board showing. */

@@ -10,7 +10,7 @@
       "name": "kanban",
       "source": "./",
       "description": "A kanban board for Claude Code: markdown cards in your repo, a skill that runs the board, and a drag-and-drop pane in the desktop app.",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "author": {
         "name": "John Ehlen"
       },

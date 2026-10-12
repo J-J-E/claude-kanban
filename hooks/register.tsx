@@ -22,6 +22,7 @@ import {
   compareIds,
   ID_PATTERN,
   isCardFileName,
+  mergeRefusal,
   newCardText,
   nextOrder,
   orderBetween,
@@ -37,7 +38,7 @@ import { cardView } from './lib/cardview.ts'
 import { findWords, matchesFind } from './lib/find.ts'
 import type { CardView as CardModel, StatusBox } from './lib/cardview.ts'
 import { flagKind } from './lib/flags.ts'
-import { isGateApproval, managerNote } from './lib/strings.ts'
+import { isGateApproval, managerNote, MERGE_NO, MERGE_YES, mergeQuestion } from './lib/strings.ts'
 import type { NoteCard } from './lib/strings.ts'
 import { parseFrontmatter } from './lib/frontmatter.ts'
 import {
@@ -169,8 +170,8 @@ const MAX_VIEW_LANES = 64
 const MAX_LANE_NAME = 100
 
 const SETUP_PROMPT = 'Kanban: set up a board here with the kanban skill.'
-/** The prompts about one card: a move, a card created in a lane that has an action, a delete, and a retype. */
-const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete|asked to retype) ([A-Z]{1,10}-\d{4,}) "/
+/** The prompts about one card: a move, a card created in a lane that has an action, a delete, a retype and a merge (the card dropped, which goes away). */
+const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete|asked to retype|asked to merge) ([A-Z]{1,10}-\d{4,}) "/
 const KANBAN_FILE = /(^|\/)kanban\/([^/]+\.md)$/
 const WORKING_ID = /^([A-Z]{1,10}-\d{4,})/
 
@@ -209,6 +210,8 @@ function drawFaultLine(reason: string): string {
   const one = reason.split(/\s+/).join(' ').trim()
   return `kanban: the board could not be drawn: ${one.length > DRAW_FAULT_MAX ? one.slice(0, DRAW_FAULT_MAX - 1) + '…' : one}`
 }
+/** The pair a drop on another card's rows asked to merge, until Merge or Keep both; null: no question. */
+const mergeAskA = atom({ plugin: 'kanban', key: 'mergeAsk' } as const, null)
 const confirmDeleteA = atom({ plugin: 'kanban', key: 'confirmDelete' } as const, false)
 /** The type name picked in the open card's Type list and not yet asked for ('' = none): the question row shows while it differs from the card's own type. */
 const retypePickA = atom({ plugin: 'kanban', key: 'retypePick' } as const, '')
@@ -324,6 +327,11 @@ function retypePrompt(owner: string, id: string, title: string, type: string): s
   return `Kanban: ${cleanText(owner, 40)} asked to retype ${id} "${cleanText(title, TITLE_MAX)}" as ${cleanText(type, 20)}. Retype the card with the kanban skill.`
 }
 
+/** The prompt that asks Claude to merge a card into another; the pane never writes or deletes a card file for a merge. */
+function mergePrompt(owner: string, id: string, title: string, onto: string, ontoTitle: string): string {
+  return `Kanban: ${cleanText(owner, 40)} asked to merge ${id} "${cleanText(title, TITLE_MAX)}" into ${onto} "${cleanText(ontoTitle, TITLE_MAX)}". Merge the cards with the kanban skill.`
+}
+
 /** What Claude does when it has a turn running: it starts on the card when that turn is over (spec 14.4 and 11). */
 const AFTER_TURN = ' Claude will start when it finishes what it is doing.'
 
@@ -391,11 +399,9 @@ const NO_SETTINGS = {
   managerModel: DEFAULTS.roles.manager.model,
   plannerModel: DEFAULTS.roles.planner.model,
   workerModel: DEFAULTS.roles.worker.model,
-  advisorModel: DEFAULTS.roles.advisor.model,
   managerThinking: DEFAULTS.roles.manager.thinking,
   plannerThinking: DEFAULTS.roles.planner.thinking,
   workerThinking: DEFAULTS.roles.worker.thinking,
-  advisorThinking: DEFAULTS.roles.advisor.thinking,
   saved: [] as string[],
   defaults: DEFAULTS as Defaults,
   savedDefaults: [] as string[],
@@ -425,11 +431,9 @@ function boardOf(snap: KanbanSnapshot): Board {
     managerModel: s.managerModel,
     plannerModel: s.plannerModel,
     workerModel: s.workerModel,
-    advisorModel: s.advisorModel,
     managerThinking: s.managerThinking ?? DEFAULTS.roles.manager.thinking,
     plannerThinking: s.plannerThinking ?? DEFAULTS.roles.planner.thinking,
     workerThinking: s.workerThinking ?? DEFAULTS.roles.worker.thinking,
-    advisorThinking: s.advisorThinking ?? DEFAULTS.roles.advisor.thinking,
     lanes: snap.lanes.map((l) => ({ label: l.label, role: l.role, isSide: l.isSide, isClaudeOnly: l.isClaudeOnly })),
   }
 }
@@ -534,8 +538,6 @@ function settingsValues(s: KanbanSnapshot['settings']): SettingsValues {
     plannerThinking: s.plannerThinking ?? DEFAULTS.roles.planner.thinking,
     workerModel: s.workerModel,
     workerThinking: s.workerThinking ?? DEFAULTS.roles.worker.thinking,
-    advisorModel: s.advisorModel,
-    advisorThinking: s.advisorThinking ?? DEFAULTS.roles.advisor.thinking,
   }
 }
 
@@ -1073,11 +1075,9 @@ function buildSnapshot(
       managerModel: board.managerModel,
       plannerModel: board.plannerModel,
       workerModel: board.workerModel,
-      advisorModel: board.advisorModel,
       managerThinking: board.managerThinking,
       plannerThinking: board.plannerThinking,
       workerThinking: board.workerThinking,
-      advisorThinking: board.advisorThinking,
       saved: savedKeysOf(boardText?.text ?? ''),
       defaults: board.defaults,
       savedDefaults: [...board.savedDefaults],
@@ -1155,6 +1155,17 @@ async function dropStaleSelection($: EngineInterface, ctx: Ctx): Promise<void> {
   }
   await update($, selectedA, () => null)
   await resetCardView($, ctx)
+}
+
+/** Drops the merge question once either of its cards is gone from the board (a retyped card is followed to its new ID). */
+async function dropStaleMerge($: EngineInterface): Promise<void> {
+  const ask = await read($, mergeAskA)
+  if (ask === null) return
+  const snap = await read($, snapshotA)
+  const id = snap === null ? null : cardIdIn(snap, ask.id)
+  const onto = snap === null ? null : cardIdIn(snap, ask.onto)
+  if (id === null || onto === null || id === onto) await update($, mergeAskA, () => null)
+  else if (id !== ask.id || onto !== ask.onto) await update($, mergeAskA, () => ({ id, onto }))
 }
 
 /** What the open card draws: the content model of hooks/lib/cardview.ts, and the card's text as Markdown (everything but the plan and the Log). */
@@ -1297,6 +1308,7 @@ function refresh($: EngineInterface, ctx: Ctx): Promise<void> {
       await loadWorking($)
       await followRetypes($)
       await dropStaleSelection($, ctx)
+      await dropStaleMerge($)
     })
     .catch(async (err: unknown) => {
       try {
@@ -1998,6 +2010,7 @@ async function chooseTab($: EngineInterface, ctx: Ctx, tab: 'board' | 'settings'
   if (snap === null || !snap.hasBoard) return
   if (tab === 'settings') {
     if (!snap.isReadOnly) {
+      await update($, mergeAskA, () => null)
       await update($, confirmRestoreA, () => false)
       await update($, confirmOriginalA, () => false)
       await update($, tabA, () => 'settings')
@@ -2007,6 +2020,7 @@ async function chooseTab($: EngineInterface, ctx: Ctx, tab: 'board' | 'settings'
     return
   }
   const wasBoard = shownTab(snap, await read($, tabA)) === 'board'
+  await update($, mergeAskA, () => null)
   await update($, confirmRestoreA, () => false)
   await update($, confirmOriginalA, () => false)
   await update($, tabA, () => 'board')
@@ -2133,6 +2147,80 @@ async function confirmedRetype($: EngineInterface, id: string, type: string): Pr
   await askRetype($, id, type)
 }
 
+/**
+ * The two cards of a merge, or why not (a toast text; '' says nothing, as a move does for a missing board): a board that cannot be read, a
+ * card that is not on the board or has two files, a file Claude is editing, and every refusal of mergeRefusal (itself, Auto or work, parent
+ * and child, a branch or PR, children). Nothing is written.
+ */
+async function mergePair($: EngineInterface, ctx: Ctx, id: string, onto: string): Promise<{ ok: true; dragged: KanbanCard; survivor: KanbanCard; snap: KanbanSnapshot } | { ok: false; text: string }> {
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard) return { ok: false, text: '' }
+  if (snap.isReadOnly) return { ok: false, text: `${NOT_READABLE} Nothing was changed.` }
+  const pair: KanbanCard[] = []
+  for (const want of [id, onto]) {
+    const matches = snap.cards.filter((c) => c.id === want)
+    const found = matches[0]
+    if (found === undefined) return { ok: false, text: `No card ${want} on the board.` }
+    if (matches.length > 1 || !isCardFileName(found.file)) return { ok: false, text: `More than one file has ID ${want}. Fix by hand; nothing was changed.` }
+    if (ctx.busy.has(found.file)) return { ok: false, text: `${want} is being edited by Claude; try again in a moment.` }
+    pair.push(found)
+  }
+  const [dragged, survivor] = pair
+  if (dragged === undefined || survivor === undefined) return { ok: false, text: '' }
+  // The snapshot has no parent lines: they are read from the files the pane already holds.
+  const cards = snap.cards.map((c) => {
+    const held = ctx.cache.get(c.file)
+    const parsed = held === undefined ? null : parseCard(held.text, c.file)
+    return parsed !== null && parsed.ok ? parsed.value : toCard(c)
+  })
+  const mine = (c: KanbanCard): Card => cards.find((x) => x.fileName === c.file) ?? toCard(c)
+  const working = [...workingOf(await read($, workingA)).map((w) => w.id), ...[await read($, turnCardA)].filter((t): t is string => t !== null)]
+  const refused = mergeRefusal(mine(dragged), mine(survivor), cards, boardOf(snap), working)
+  return refused === undefined ? { ok: true, dragged, survivor, snap } : { ok: false, text: refused }
+}
+
+/**
+ * A release on another card's rows (the Client's `merge`): the refusals show as a toast and write nothing; otherwise the pair is kept and the
+ * board tab asks. A second drop replaces the pair. `data` is untrusted; a `rev` that is not the board's now is a stale drop.
+ */
+async function offerMerge($: EngineInterface, ctx: Ctx, data: Record<string, unknown>): Promise<UiMessageResult> {
+  const { id, onto } = data
+  if (typeof id !== 'string' || !ID_PATTERN.test(id) || typeof onto !== 'string' || !ID_PATTERN.test(onto)) return {}
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard) return {}
+  const refuse = async (text: string): Promise<UiMessageResult> => {
+    $.ui.toast(text)
+    return replyProps($)
+  }
+  if (data.rev !== snap.rev) return refuse(STALE_MOVE)
+  const pair = await mergePair($, ctx, id, onto)
+  if (!pair.ok) return pair.text === '' ? {} : refuse(pair.text)
+  await update($, mergeAskA, () => ({ id, onto }))
+  return replyProps($)
+}
+
+/** What the toast says once Claude was asked to merge a card: it starts at once, or when it is free. */
+function mergeToast(id: string, onto: string, isBusy: boolean): string {
+  return isBusy ? `Claude will merge ${id} into ${onto} when it finishes what it is doing.` : `Claude is merging ${id} into ${onto}.`
+}
+
+/** Merge (confirmed by the person): closes the question, then asks Claude; no file is touched. Refused again, with a toast, if the pair can no longer be merged. */
+async function askMerge($: EngineInterface, ctx: Ctx): Promise<void> {
+  const ask = await read($, mergeAskA)
+  await update($, mergeAskA, () => null)
+  if (ask === null) return
+  const pair = await mergePair($, ctx, ask.id, ask.onto)
+  if (!pair.ok) {
+    if (pair.text !== '') $.ui.toast(pair.text)
+    return
+  }
+  const prompt = mergePrompt(pair.snap.settings.owner, ask.id, pair.dragged.title, ask.onto, pair.survivor.title)
+  const now = await $.clock.now()
+  await update($, queuedA, (list) => [...list, { id: ask.id, kind: 'merge', text: prompt, at: now }])
+  submitPrompt($, prompt)
+  $.ui.toast(mergeToast(ask.id, ask.onto, await claudeIsBusy($)))
+}
+
 /** What a lane's fold choice may look like when it comes from a Client: untrusted, so only the two fields it is read by. */
 function foldOf(value: unknown): { isOpen: boolean; flagged: number } | null {
   if (!isRecord(value) || typeof value.isOpen !== 'boolean') return null
@@ -2177,6 +2265,7 @@ async function rememberView($: EngineInterface, data: Record<string, unknown>): 
 async function handleMessage($: EngineInterface, ctx: Ctx, surface: RenderSurface, data: unknown): Promise<UiMessageResult> {
   if (!isRecord(data)) return {}
   if (data.type === 'move') return performMove($, ctx, data)
+  if (data.type === 'merge') return offerMerge($, ctx, data)
   if (data.type === 'view') {
     await rememberView($, data)
     return replyProps($)
@@ -2311,7 +2400,7 @@ async function setRenaming($: EngineInterface, ctx: Ctx, id: string, isOpen: boo
 function settingPick(key: string, raw: string): { value: string; toast: string } | null {
   if (key === 'workers') return workersChoices().some((c) => c.value === raw) ? { value: raw, toast: workersToast(raw) } : null
   for (const role of ROLES) {
-    if (key === settingKey(role, 'model')) return modelChoices(role).some((c) => c.value === raw) ? { value: raw, toast: modelToast(role, raw) } : null
+    if (key === settingKey(role, 'model')) return modelChoices().some((c) => c.value === raw) ? { value: raw, toast: modelToast(role, raw) } : null
     if (key === settingKey(role, 'thinking')) {
       const word = thinkingFromChoice(raw)
       return word === undefined ? null : { value: word, toast: thinkingToast(role, word) }
@@ -2330,8 +2419,6 @@ function valuesOfBoard(b: Board): SettingsValues {
     plannerThinking: b.plannerThinking,
     workerModel: b.workerModel,
     workerThinking: b.workerThinking,
-    advisorModel: b.advisorModel,
-    advisorThinking: b.advisorThinking,
   }
 }
 
@@ -2399,7 +2486,7 @@ async function copyModelCommand($: EngineInterface, surface: RenderSurface, want
 /** `Keep sonnet`: the board's Manager model becomes the chat's model, the way picking it in the Settings tab does (same write, same toast, same refusal on a board that cannot be written). Runs no `/model`. The button is drawn only for one of the four choices; a stale press for another writes nothing. */
 async function keepChatModel($: EngineInterface, ctx: Ctx): Promise<void> {
   const word = modelWord(await read($, chatModelA))
-  if (modelChoices('manager').some((c) => c.value === word)) await applySetting($, ctx, 'manager_model', word)
+  if (modelChoices().some((c) => c.value === word)) await applySetting($, ctx, 'manager_model', word)
 }
 
 /** `Reset` on a row: removes that row's saved lines, so the shipped defaults apply to it again. A stale press with nothing saved writes and says nothing. */
@@ -2649,6 +2736,7 @@ export const register: Register = (on) => {
     const showLog = await read($, showLogA)
     const showDetails = await read($, showDetailsA)
     const showAllProblems = await read($, showAllProblemsA)
+    const mergeAsk = await read($, mergeAskA)
     const confirmDelete = await read($, confirmDeleteA)
     const retypePick = await read($, retypePickA)
     const renaming = await read($, renamingA)
@@ -2723,6 +2811,31 @@ export const register: Register = (on) => {
               void chooseTab($, ctx, next).catch((err: unknown) => noticeError($, err))
             },
           })}
+          {tab === 'board' &&
+            mergeAsk !== null &&
+            (() => {
+              const dragged = snap.cards.find((c) => c.id === mergeAsk.id)
+              const survivor = snap.cards.find((c) => c.id === mergeAsk.onto)
+              return dragged === undefined || survivor === undefined ? null : (
+                <Box key="merge-ask" flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
+                  <Text>{mergeQuestion(dragged.id, cleanText(dragged.title, TITLE_MAX), survivor.id, cleanText(survivor.title, TITLE_MAX))}</Text>
+                  <Button
+                    key="merge-yes"
+                    label={MERGE_YES}
+                    onPress={() => {
+                      void askMerge($, ctx).catch((err: unknown) => noticeError($, err))
+                    }}
+                  />
+                  <Button
+                    key="merge-no"
+                    label={MERGE_NO}
+                    onPress={() => {
+                      void update($, mergeAskA, () => null).catch(() => {})
+                    }}
+                  />
+                </Box>
+              )
+            })()}
           {view === null &&
             tab === 'board' &&
             toolbarTree(el, toolbarProps(snap, { ...add, title: drafts.add }, lanesView, columns, isFresh, drafts.find), {
@@ -3064,7 +3177,7 @@ export const register: Register = (on) => {
     await update($, inTurnA, () => true)
     const about = CARD_PROMPT.exec(e.text)
     if (about !== null && about[1] !== undefined && about[2] !== undefined) {
-      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : about[1] === 'asked to retype' ? 'retype' : 'delete'
+      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : about[1] === 'asked to retype' ? 'retype' : about[1] === 'asked to merge' ? 'merge' : 'delete'
       const id = about[2]
       await dequeue($, e.text, (q) => q.kind === kind && q.id === id)
       const held = followedId(await read($, snapshotA), id)

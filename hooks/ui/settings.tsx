@@ -7,7 +7,6 @@
 import type { EngineInterface } from 'claude-code'
 
 import {
-  ADVISOR_THINKING_UNUSED,
   ALL_AT_DEFAULT,
   HEAD_DEFAULT,
   HEAD_MODEL,
@@ -133,21 +132,15 @@ function roleRow(el: Els, row: RoleRow, isWide: boolean, gap: number, act: Setti
   const { Box, Text } = el
   const share = isWide ? WIDE : NARROW
   const role = row.target
-  const noThinking = role === 'advisor' && row.model === 'none'
   return (
     <Box key={`settings-role-${role}`} flexDirection="column" marginTop={1}>
       <Box key={`settings-role-line-${role}`} flexDirection="row" alignItems="center" columnGap={gap}>
         <Box key={`settings-name-${role}`} width={NAME_W} flexShrink={0}>
           <Text>{row.label}</Text>
         </Box>
-        {pickOf(el, settingKey(role, 'model'), modelChoices(role), row.model, share.model, act)}
-        {noThinking ? (
-          <Box key="settings-thinking-unused" width={share.thinking} flexShrink={1} minWidth={0}>
-            <Text dimColor>{ADVISOR_THINKING_UNUSED}</Text>
-          </Box>
-        ) : (
-          pickOf(el, settingKey(role, 'thinking'), thinkingChoices(row.model), row.thinking, share.thinking, act)
-        )}
+        {pickOf(el, settingKey(role, 'model'), modelChoices(), row.model, share.model, act)}
+        {pickOf(el, settingKey(role, 'thinking'), thinkingChoices(row.model), row.thinking, share.thinking, act)}
+
         {isWide && (
           <Box key={`settings-default-cell-${role}`} flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" alignItems="center" columnGap={2}>
             {row.differs && defaultOf(el, row, DEFAULT_W_WIDE, act)}

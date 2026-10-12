@@ -23,6 +23,14 @@ describe('formerIdsOf', () => {
   test('no Log, no old IDs', () => {
     expect(formerIdsOf([])).toEqual([])
   })
+  test('reads the dragged ID of a merge line, in Log order with the retypes', () => {
+    const l = log('merged BUG-0012 "Fix the date" into BUG-0008', 'retyped from BUG-0008 to ENH-0007', 'merged BUG-0003 "Say "hi"" into ENH-0007')
+    expect(formerIdsOf(l)).toEqual(['BUG-0012', 'BUG-0008', 'BUG-0003'])
+  })
+  test('a merge line has to be exactly that; a merged branch is not one', () => {
+    const l = log('merged bug-12-fix-the-date', 'merged BUG-0012 into BUG-0008', 'merged BUG-0012 "x" into bug-8', 'merged BUG-0012 "x" into BUG-0008 today', 'Merged BUG-0012 "x" into BUG-0008')
+    expect(formerIdsOf(l)).toEqual([])
+  })
 })
 
 describe('lineage', () => {
@@ -43,6 +51,10 @@ describe('allocateId', () => {
   })
   test('a retired number ahead', () => {
     expect(allocateId('BUG', 2, ['BUG-0004-x.md'], ['BUG-0020', 'ENH-0090', 'KB-0100'])).toEqual({ id: 'BUG-0021', n: 21 })
+  })
+  test('a merged ID counts as retired, as a retyped one does', () => {
+    const former = formerIdsOf(log('merged BUG-0030 "Gone" into BUG-0008'))
+    expect(allocateId('BUG', 2, ['BUG-0008-x.md'], former)).toEqual({ id: 'BUG-0031', n: 31 })
   })
   test('a bad counter counts from 1', () => {
     expect(allocateId('CHORE', 0, [], [])).toEqual({ id: 'CHORE-0001', n: 1 })
@@ -65,6 +77,14 @@ describe('resolveRef', () => {
     expect(resolveRef('KB-0034', board, cards)).toEqual({ kind: 'one', id: 'ENH-0007', was: 'KB-0034' })
     expect(resolveRef('kb 34', board, cards)).toEqual({ kind: 'one', id: 'ENH-0007', was: 'KB-0034' })
     expect(resolveRef('bug-50', board, cards)).toEqual({ kind: 'one', id: 'ENH-0007', was: 'BUG-0050' })
+  })
+  test('a merged ID resolves to the survivor, and through a later retype of it (A merged into B, B retyped)', () => {
+    // BUG-0012 was merged into BUG-0008, which became ENH-0009: both old IDs lead to ENH-0009
+    const merged = [live('ENH-0009', ...formerIdsOf(log('merged BUG-0012 "Fix date" into BUG-0008', 'retyped from BUG-0008 to ENH-0009')))]
+    expect(resolveRef('BUG-0012', board, merged)).toEqual({ kind: 'one', id: 'ENH-0009', was: 'BUG-0012' })
+    expect(resolveRef('bug 12', board, merged)).toEqual({ kind: 'one', id: 'ENH-0009', was: 'BUG-0012' })
+    expect(resolveRef('bug 8', board, merged)).toEqual({ kind: 'one', id: 'ENH-0009', was: 'BUG-0008' })
+    expect(resolveRef('12', board, merged)).toEqual({ kind: 'one', id: 'ENH-0009', was: 'BUG-0012' })
   })
   test('a valid-looking ID nothing holds is none', () => {
     expect(resolveRef('BUG-0999', board, cards)).toEqual({ kind: 'none' })

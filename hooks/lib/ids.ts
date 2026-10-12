@@ -4,6 +4,8 @@
 import type { LogEntry } from './types.ts'
 
 const RETYPED = /^retyped from ([A-Z]{1,10}-\d{4,}) to ([A-Z]{1,10}-\d{4,})$/
+// `merged BUG-0012 "Fix date" into BUG-0008`: the title is the dragged card's, in quotes, and may hold quotes itself.
+const MERGED = /^merged ([A-Z]{1,10}-\d{4,}) ".*" into ([A-Z]{1,10}-\d{4,})$/
 
 /** The pieces ids.ts reads from a board and from a parsed card (a Board and a Card both fit). */
 export type TypesOf = { types: readonly { name: string; prefix: string }[] }
@@ -24,11 +26,14 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** The old IDs in a card's Log lines `retyped from <A> to <B>` (the text exactly), oldest first. */
+/**
+ * The old IDs in a card's Log lines `retyped from <A> to <B>` and `merged <A> "<title>" into <B>` (the text exactly),
+ * oldest first. A merged ID is retired like a retyped one: it resolves to the card that holds the line.
+ */
 export function formerIdsOf(log: readonly LogEntry[]): string[] {
   const out: string[] = []
   for (const entry of log) {
-    const m = RETYPED.exec(entry.text)
+    const m = RETYPED.exec(entry.text) ?? MERGED.exec(entry.text)
     if (m) out.push(m[1])
   }
   return out
@@ -44,7 +49,7 @@ export function lineage(cards: readonly CardIds[]): Map<string, string> {
 /**
  * The next ID for a type: n = max(counter, highest file number for the prefix + 1, highest retired number for the
  * prefix + 1). A file is a name in `names` matching ^<PREFIX>-(\d+)(-.*)?\.md$, case-sensitive; retired numbers
- * come from `formerIds`. The caller writes `n + 1` back as the type's counter.
+ * come from `formerIds` (retyped and merged IDs alike, see formerIdsOf). The caller writes `n + 1` back as the type's counter.
  */
 export function allocateId(
   prefix: string,

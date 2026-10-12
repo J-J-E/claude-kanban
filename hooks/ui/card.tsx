@@ -12,10 +12,14 @@ type Els = ReturnType<EngineInterface['ui']['resolve']>
 const SURFACE = 'userMessageBackground'
 /** The words under the open card's Model and Thinking Selects for "no choice": the first option of each. */
 const AUTO = 'Auto'
-/** Below this many cells the Type, Lane, Model and Thinking Selects stack, one per row. */
+/** Below this many cells the three groups (Lane; Model and Thinking; Type) stack, and Model and Thinking stack inside theirs. */
 const NARROW = 60
-/** From this many cells the four Selects stand in one row; between NARROW and this, two rows of two. */
+/** From this many cells the three groups stand in one row; between NARROW and this, Lane and Type share a row with Model and Thinking under them. */
 const WIDE = 90
+/** The headings over the three groups of Selects (bold, small; the outlines carry the rest). */
+const HEAD_LANE = 'Lane (move it)'
+const HEAD_CLAUDE = 'Claude runs it with'
+const HEAD_TYPE = 'Card type'
 
 /** The Auto choice: its value is `Auto` (what the pane writes as "no choice"), its words carry the board's default. */
 function autoOption(words: string): { value: string; label: string } {
@@ -75,7 +79,7 @@ export type CardProps = {
   /** What `Auto` stands for on this card (the model and the thinking the board's settings give it; thinking '' when Not set): the Auto choice reads `Auto (sonnet)`. */
   autoModel: string
   autoThinking: string
-  /** The pane's width in cells: from WIDE the four Selects stand in one row, from NARROW two rows of two, below that one under the other. */
+  /** The pane's width in cells: from WIDE the three groups of Selects stand in one row, from NARROW Lane and Type share a row, below that one under the other. */
   columns: number
   comment: string
   confirmDelete: boolean
@@ -96,7 +100,7 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
   const isWide = p.columns >= WIDE
   // The question shows while a type other than the card's own is picked.
   const isAsking = p.retypePick !== '' && p.retypePick !== view.typeValue
-  const selectBoxes = [
+  const typeBox = (
     <Box key="card-type-box" flexGrow={1} flexShrink={1} minWidth={0}>
       <Select
         key="card-type"
@@ -105,7 +109,9 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
         value={p.retypePick !== '' ? p.retypePick : view.typeValue}
         onSelect={(v: string) => act.pickType(v)}
       />
-    </Box>,
+    </Box>
+  )
+  const moveBox = (
     <Box key="card-move-box" flexGrow={1} flexShrink={1} minWidth={0}>
       <Select
         key="card-move"
@@ -114,7 +120,9 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
         value={view.moveTo.value}
         onSelect={(v: string) => act.move(view.id, view.lane, v)}
       />
-    </Box>,
+    </Box>
+  )
+  const modelBox = (
     <Box key="card-model-box" flexGrow={1} flexShrink={1} minWidth={0}>
       <Select
         key="card-model"
@@ -123,7 +131,9 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
         value={ownModel === '' ? AUTO : ownModel}
         onSelect={(v: string) => act.set(view.id, 'model', v)}
       />
-    </Box>,
+    </Box>
+  )
+  const thinkingBox = (
     <Box key="card-thinking-box" flexGrow={1} flexShrink={1} minWidth={0}>
       <Select
         key="card-thinking"
@@ -132,7 +142,81 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
         value={ownThinking === '' ? AUTO : ownThinking}
         onSelect={(v: string) => act.set(view.id, 'thinking', v)}
       />
-    </Box>,
+    </Box>
+  )
+  // Each group is a bold heading over a round outline: bright for Lane (the action), dim for the other two. No colour is added.
+  const laneGroup = (
+    <Box key="card-group-lane" flexDirection="column" flexGrow={isWide ? 0 : 1} flexShrink={1} minWidth={0}>
+      <Text bold wrap="truncate-end">{HEAD_LANE}</Text>
+      <Box borderStyle="round" borderDimColor={false} flexDirection="row" paddingX={1}>
+        {moveBox}
+      </Box>
+    </Box>
+  )
+  const claudeGroup = (
+    <Box key="card-group-claude" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+      <Text bold wrap="truncate-end">{HEAD_CLAUDE}</Text>
+      <Box borderStyle="round" borderDimColor flexDirection="column" paddingX={1}>
+        <Box key="card-claude-lists" flexDirection={isNarrow ? 'column' : 'row'} columnGap={2}>
+          {modelBox}
+          {thinkingBox}
+        </Box>
+        <Box key="card-model-line" flexDirection="row">
+          {pinText === '' ? (
+            <Text dimColor wrap="truncate-end">
+              {`Auto: Settings decide. ${autoLine.charAt(0).toUpperCase()}${autoLine.slice(1)}.`}
+            </Text>
+          ) : (
+            <Box flexDirection="row">
+              <Text bold wrap="truncate-end">
+                {`Set on this card: ${pinText}.`}
+              </Text>
+              <Text dimColor wrap="truncate-end">
+                {'  It stays with the card until you choose Auto or the card is done.'}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  )
+  const typeGroup = (
+    <Box key="card-group-type" flexDirection="column" flexGrow={isWide ? 0 : 1} flexShrink={1} minWidth={0}>
+      <Text bold wrap="truncate-end">{HEAD_TYPE}</Text>
+      <Box borderStyle="round" borderDimColor flexDirection="row" paddingX={1}>
+        {typeBox}
+      </Box>
+    </Box>
+  )
+  // The suggestion and the retype question belong to the Type group: they stand directly under it (under the row that holds it when
+  // the group shares a row), before anything else.
+  const typeNotes = [
+    !snap.isReadOnly && view.suggestion !== null && (
+      <Box key="card-suggestion" flexShrink={1} minWidth={0}>
+        <Text dimColor wrap="wrap">
+          {view.suggestion.text}
+        </Text>
+      </Box>
+    ),
+    isAsking && (
+      <Box key="card-retype-ask" marginTop={1} flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Text>{`Retype ${view.id} as ${p.retypePick}? Its ID will change.`}</Text>
+        <Button
+          key="card-retype-yes"
+          label="Retype"
+          onPress={() => {
+            act.confirmedRetype(view.id, p.retypePick)
+          }}
+        />
+        <Button
+          key="card-retype-no"
+          label="Cancel"
+          onPress={() => {
+            act.cancelRetype()
+          }}
+        />
+      </Box>
+    ),
   ]
   return (
       <Box key="card" flexDirection="column" marginX={2}>
@@ -330,64 +414,23 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
             )}
             {!snap.isReadOnly && (
               <Box key="card-selects-row" marginTop={1} flexDirection={isWide ? 'row' : 'column'} columnGap={2}>
-                {isWide || isNarrow ? (
-                  selectBoxes
+                {isWide ? (
+                  [laneGroup, claudeGroup, typeGroup]
+                ) : isNarrow ? (
+                  [laneGroup, claudeGroup, typeGroup, ...typeNotes]
                 ) : (
                   [
-                    <Box key="card-selects-pair-1" flexDirection="row" columnGap={2}>
-                      {selectBoxes.slice(0, 2)}
+                    <Box key="card-selects-top" flexDirection="row" columnGap={2}>
+                      {laneGroup}
+                      {typeGroup}
                     </Box>,
-                    <Box key="card-selects-pair-2" flexDirection="row" columnGap={2}>
-                      {selectBoxes.slice(2)}
-                    </Box>,
+                    ...typeNotes,
+                    claudeGroup,
                   ]
                 )}
               </Box>
             )}
-            {!snap.isReadOnly && view.suggestion !== null && (
-              <Box key="card-suggestion" flexShrink={1} minWidth={0}>
-                <Text dimColor wrap="wrap">
-                  {view.suggestion.text}
-                </Text>
-              </Box>
-            )}
-            {isAsking && (
-              <Box key="card-retype-ask" marginTop={1} flexDirection="row" flexWrap="wrap" columnGap={1}>
-                <Text>{`Retype ${view.id} as ${p.retypePick}? Its ID will change.`}</Text>
-                <Button
-                  key="card-retype-yes"
-                  label="Retype"
-                  onPress={() => {
-                    act.confirmedRetype(view.id, p.retypePick)
-                  }}
-                />
-                <Button
-                  key="card-retype-no"
-                  label="Cancel"
-                  onPress={() => {
-                    act.cancelRetype()
-                  }}
-                />
-              </Box>
-            )}
-            {!snap.isReadOnly && (
-              <Box key="card-model-line" flexDirection="row">
-                {pinText === '' ? (
-                  <Text dimColor wrap="truncate-end">
-                    {`Auto: Settings decide. ${autoLine.charAt(0).toUpperCase()}${autoLine.slice(1)}.`}
-                  </Text>
-                ) : (
-                  <Box flexDirection="row">
-                    <Text bold wrap="truncate-end">
-                      {`Set on this card: ${pinText}.`}
-                    </Text>
-                    <Text dimColor wrap="truncate-end">
-                      {'  It stays with the card until you choose Auto or the card is done.'}
-                    </Text>
-                  </Box>
-                )}
-              </Box>
-            )}
+            {(snap.isReadOnly || isWide) && typeNotes}
             {view.plan !== null && (
               <Box key="card-plan" marginTop={2} flexDirection="column">
                 <Box flexDirection="row" justifyContent="space-between">

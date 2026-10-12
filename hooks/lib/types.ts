@@ -30,7 +30,7 @@ export type Card = {
   thinking: string
   title: string
   log: LogEntry[]
-  /** Old IDs from the Log's `retyped from <A> to <B>` lines, oldest first; each now resolves to this card. */
+  /** Old IDs from the Log's `retyped from <A> to <B>` and `merged <A> "<title>" into <B>` lines, oldest first; each now resolves to this card. */
   formerIds: string[]
   /** `YYYY-MM-DD HH:MM`: `created` plus the time of the first Log line (`00:00` when there is none); sorts as text. */
   createdAt: string
