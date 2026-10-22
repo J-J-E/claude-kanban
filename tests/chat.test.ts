@@ -4,8 +4,9 @@
 import { test, expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { BoardProps } from '../hooks/lib/layout.ts'
-import { BOARD_PATH, cardPath, cardText, headerState, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
+import { BOARD_PATH, cardPath, cardText, defaultFiles, headerState, mountPane, sevenLaneFiles, startSession, stubs } from './fixtures.ts'
 import type { World } from './fixtures.ts'
+import { NEEDS_YOU_CHAT_LINE } from '../hooks/lib/strings.ts'
 
 const HEAD =
   'Kanban board: this project has kanban/board.md (owner John). You are its manager. Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").'
@@ -42,6 +43,26 @@ test('cards in Needs You are listed by ID and flag, never by title', async ($, o
   expect(got.context?.join('')).not.toContain('Write docs')
 })
 
+const CHAT_ON = (files: Record<string, string>): Record<string, string> => ({ ...files, [BOARD_PATH]: (files[BOARD_PATH] as string).replace('owner: John\n', 'owner: John\nneeds_you_in_chat: on\n') })
+
+test('needs_you_in_chat off or absent leaves the note as it was; on adds the question line after the Waiting line', async ($, on) => {
+  const w = await boot($, on, sevenLaneFiles())
+  expect((await type($, w, 'one')).context).toEqual([HEAD + '\nWaiting on John: KB-0002 PLAN READY'])
+  w.put(BOARD_PATH, (w.text(BOARD_PATH)).replace('owner: John\n', 'owner: John\nneeds_you_in_chat: off\n'))
+  expect((await type($, w, 'two')).context).toEqual([HEAD + '\nWaiting on John: KB-0002 PLAN READY'])
+  w.put(BOARD_PATH, (w.text(BOARD_PATH)).replace('needs_you_in_chat: off', 'needs_you_in_chat: on'))
+  const got = await type($, w, 'three')
+  expect(got.context).toEqual([HEAD + '\nWaiting on John: KB-0002 PLAN READY\n' + NEEDS_YOU_CHAT_LINE])
+  expect(got.context?.join('')).not.toContain('Write docs')
+})
+
+test('needs_you_in_chat on with nothing waiting adds nothing', async ($, on) => {
+  const files = CHAT_ON(sevenLaneFiles())
+  delete files[cardPath('KB-0002', 'write-docs')]
+  const w = await boot($, on, files)
+  expect((await type($, w, 'quiet')).context).toEqual([HEAD])
+})
+
 test('a message from the Remote Control bridge is a person too', async ($, on) => {
   const w = await boot($, on, sevenLaneFiles())
   const got = await type($, w, 'from my phone', { kind: 'bridge' })
@@ -57,12 +78,15 @@ test('a prompt that is not a person\'s gets no note', async ($, on) => {
   }
 })
 
-test('a Kanban: prompt gets no note', async ($, on) => {
+test('a Kanban: prompt carries the note too, from a person or from this plugin, but not from another plugin', async ($, on) => {
   const w = await boot($, on)
   const text = 'Kanban: John moved KB-0001 "Fix footer" from Pending to Auto. Do the auto lane action from the kanban skill.'
   const got = await type($, w, text)
   expect(got.sent).toBe(text)
-  expect(got.context).toBeUndefined()
+  expect(got.context).toEqual([HEAD])
+  expect((await type($, w, text, { kind: 'plugin', name: 'kanban' } as Origin)).context).toEqual([HEAD])
+  expect((await type($, w, text, { kind: 'plugin', name: 'other' } as Origin)).context).toBeUndefined()
+  expect((await type($, w, 'not a pane prompt', { kind: 'plugin', name: 'kanban' } as Origin)).context).toBeUndefined()
 })
 
 test('a slash command gets no note', async ($, on) => {
@@ -232,4 +256,77 @@ test('inTurn is true from turn.start to turn.complete, a subagent finishing does
   await startSession($)
   await w.clock.settle()
   expect(await busy()).toBe(false)
+})
+
+test('started Auto cards nobody is on are listed after a restart: IDs only, no titles; a card with a worker or a named wait is not', async ($, on) => {
+  const files = defaultFiles()
+  const started = (id: string, slug: string, title: string, extra: string): string =>
+    cardText(id, title, 'Auto', 1000).trimEnd() + '\n- 2026-10-08 09:11 Claude: started: in place\n' + extra
+  files[cardPath('KB-0003', 'ship-it')] = started('KB-0003', 'ship-it', 'Ship it', '')
+  files[cardPath('KB-0005', 'secret-title')] = started('KB-0005', 'secret-title', 'Secret title', '- 2026-10-08 09:30 Claude: waiting on John: which colour\n')
+  const w = await boot($, on, files)
+  const got = await type($, w, 'where were we?')
+  expect(got.context).toEqual([HEAD + '\nHanging in Auto: KB-0003'])
+  expect(got.context?.join('')).not.toContain('Ship it')
+  w.agents = [{ id: 'a1', description: 'KB-0003 step 1: x', type: 'general-purpose', status: 'running' }]
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect((await type($, w, 'and now?')).context).toEqual([HEAD])
+})
+
+// ---------------------------------------------------------------- the manager is told of a worker it has not heard from (BUG-0024)
+
+const WORKER_LINE = (agent: string, id: string, time: string): string => `Your worker ${agent} on ${id} finished or went idle ${time}; no step was logged. Message it for its report.`
+
+function startedCard(log: string): Record<string, string> {
+  const files = defaultFiles()
+  files[cardPath('KB-0003', 'ship-it')] = cardText('KB-0003', 'Ship it', 'Auto', 1000).trimEnd() + '\n- 2026-10-08 09:11 Claude: started: in place\n' + log
+  return files
+}
+
+for (const status of ['idle', 'completed'] as const) {
+  test(`a ${status} worker with no step logged after it is named in the note, by agent id and card ID only`, async ($, on) => {
+    const w = stubs(on, startedCard(''))
+    w.agents = [{ id: 'agent-7', description: 'KB-0003 step 1: x', type: 'general-purpose', status }]
+    await startSession($)
+    await w.clock.settle()
+    const got = await type($, w, 'hello')
+    expect(got.context).toEqual([HEAD + '\n' + WORKER_LINE('agent-7', 'KB-0003', '14:05')])
+    expect(got.context?.join('')).not.toContain('Ship it')
+    // A pane prompt carries it too.
+    const pane = await type($, w, 'Kanban: John asked to resume KB-0009.', { kind: 'plugin', name: 'kanban' } as Origin)
+    expect(pane.context).toEqual([HEAD + '\n' + WORKER_LINE('agent-7', 'KB-0003', '14:05')])
+  })
+}
+
+test('no worker line when a step N done line follows the agent, or while an agent is running; one when that line is older', async ($, on) => {
+  const after = stubs(on, startedCard('- 2026-10-08 14:06 Claude: step 1 done: x\n'))
+  after.agents = [{ id: 'a1', description: 'KB-0003 step 1: x', type: 'general-purpose', status: 'completed' }]
+  await startSession($)
+  await after.clock.settle()
+  expect((await type($, after, 'hello')).context).toEqual([HEAD])
+  after.agents = [{ id: 'a1', description: 'KB-0003 step 1: x', type: 'general-purpose', status: 'completed' }, { id: 'a2', description: 'KB-0003 step 2: x', type: 'general-purpose', status: 'running' }]
+  await after.clock.advance(1000)
+  await after.clock.settle()
+  expect((await type($, after, 'again')).context).toEqual([HEAD])
+})
+
+test('a step N done line older than the agent does not hide the worker line', async ($, on) => {
+  const w = stubs(on, startedCard('- 2026-10-08 09:30 Claude: step 1 done: x\n'))
+  w.agents = [{ id: 'a1', description: 'KB-0003 step 2: x', type: 'general-purpose', status: 'completed' }]
+  await startSession($)
+  await w.clock.settle()
+  expect((await type($, w, 'hello')).context).toEqual([HEAD + '\n' + WORKER_LINE('a1', 'KB-0003', '14:05')])
+})
+
+test('after the chat is compacted the next note says to re-read the skill, once', async ($, on) => {
+  const w = stubs(on)
+  on('session.compact', () => ({ messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }] }))
+  await startSession($)
+  await w.clock.settle()
+  expect((await type($, w, 'one')).context).toEqual([HEAD])
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }] } as never)
+  const COMPACT = 'The chat was compacted: re-read the kanban skill, then references/lanes.md, and lanes-auto.md for Auto cards, then reconcile your Auto cards.'
+  expect((await type($, w, 'two')).context).toEqual([HEAD + '\n' + COMPACT])
+  expect((await type($, w, 'three')).context).toEqual([HEAD])
 })

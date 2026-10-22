@@ -364,6 +364,73 @@ test('a release on the rows of another card asks to merge: a merge post, no plac
   expect(s.posts).toEqual([{ type: 'merge', id: 'KB-0003', onto: 'KB-0002', rev: 5 }])
 })
 
+// BUG-0020: while the merge question is open the two cards are marked, and the marks follow the prop.
+const WORKING = { kind: 'working', text: 'Step 3 of 5: panels', colour: 'default' as const, bar: { done: 2, total: 5 }, time: '4 min ago' }
+
+/** Inbox KB-0001 (one row) and KB-0002; Auto KB-0003 with a status line (two rows). */
+function mergeProps(ask: BoardProps['mergeAsk']): BoardProps {
+  const p = props(ask === undefined ? {} : { mergeAsk: ask })
+  ;(p.lanes[3] as BoardLane).cards = [card('KB-0003', { status: WORKING })]
+  return p
+}
+
+test('with the merge question open the card dropped on has an orange outline and a note, the card dropped is dim with its note; the rows do not change', async () => {
+  const plainProps = mergeProps(undefined)
+  const p = mergeProps({ id: 'KB-0003', onto: 'KB-0001' })
+  const h = await board(p)
+  const tree = h.render()
+  const l = lay(p)
+  // The layout is the one without the question: the same rectangles, the same rows.
+  expect(lay(plainProps).panels.map((x) => x.cards.map((c) => [c.id, c.rect, c.rows]))).toEqual(l.panels.map((x) => x.cards.map((c) => [c.id, c.rect, c.rows])))
+  const into = tileNode(tree, 'KB-0001') as Node
+  expect(into.props).toMatchObject({ borderColor: 'warning', height: 1, borderStyle: 'round' })
+  expect(into.props.hover).toBeUndefined()
+  expect(find(into, (n) => n.type === 'Text' && text(n) === '◀ KB-0003 would go into this card')[0]?.props.color).toBe('warning')
+  // A one-row card has no row 2: the note takes the right side of its row, the title stays.
+  expect(find(into, (n) => n.type === 'Text' && text(n) === 'Title of KB-0001')).toHaveLength(1)
+  const gone = tileNode(tree, 'KB-0003') as Node
+  expect(gone.props.borderColor).not.toBe('warning')
+  expect(find(gone, (n) => n.type === 'Text' && text(n) === 'Title of KB-0003')[0]?.props.dimColor).toBe(true)
+  expect(find(gone, (n) => n.type === 'Text' && text(n) === '▶ would be deleted; goes into KB-0001')[0]?.props.dimColor).toBe(true)
+  // A card with two rows shows its note in place of the status line.
+  expect(find(gone, (n) => n.type === 'Text' && text(n).includes('Step 3'))).toHaveLength(0)
+  expect(gone.props.height).toBe(2)
+  // Every other card is as before.
+  const other = tileNode(tree, 'KB-0002') as Node
+  expect(other.props.borderColor).toBe('composerSidebarBackground')
+  expect(text(other)).not.toContain('◀')
+  expect(text(other)).not.toContain('▶')
+  expect(placed(tree, 'tile-KB-0001').top).toBe(tile(l, 'KB-0001').rect.y)
+})
+
+test('without the question, or once it is gone, no card is marked and the status line is back', async () => {
+  const h = await board(mergeProps({ id: 'KB-0003', onto: 'KB-0001' }))
+  expect(text(h.tree)).toContain('◀ KB-0003')
+  const tree = h.setProps(mergeProps(undefined))
+  expect(text(tree)).not.toContain('◀')
+  expect(text(tree)).not.toContain('▶')
+  expect((tileNode(tree, 'KB-0001') as Node).props.borderColor).toBe('composerSidebarBackground')
+  expect(find(tileNode(tree, 'KB-0003') as Node, (n) => n.type === 'Text' && text(n).includes('Step 3'))).toHaveLength(1)
+  // Props whose pair is not two IDs mark nothing and throw nothing.
+  expect(() => h.setProps({ ...mergeProps(undefined), mergeAsk: { id: 3, onto: null } as never })).not.toThrow()
+  expect(text(h.tree)).not.toContain('◀')
+})
+
+test('a drag still works while the marks show: the pointer picks the card up, judges the lane and posts the move and the merge', async () => {
+  const p = mergeProps({ id: 'KB-0003', onto: 'KB-0001' })
+  const h = await board(p)
+  const l = lay(p)
+  const two = tile(l, 'KB-0002').rect
+  // Onto the marked card: a merge post as ever.
+  const onto = tile(l, 'KB-0001').rect
+  drag(h, { x: two.x + 2, y: two.y }, { x: onto.x + 5, y: onto.y })
+  expect(h.posts).toEqual([{ type: 'merge', id: 'KB-0002', onto: 'KB-0001', rev: 5 }])
+  // Picking up the marked card itself, and a drop on a lane.
+  const marked = tile(l, 'KB-0001').rect
+  drag(h, { x: marked.x + 2, y: marked.y }, { x: laneX(l, 'Manual'), y: laneY(l, 'Manual') })
+  expect(h.posts[1]).toMatchObject({ type: 'move', id: 'KB-0001', from: 'Inbox', to: 'Manual', rev: 5 })
+})
+
 test('a release in the gap between cards, on the title bar or under the last card still places the card', async () => {
   const p = props()
   const l = lay(p)
@@ -1114,6 +1181,20 @@ test('a card with a worker, one waiting to start and the running turn: marks in 
   const bar2 = titleBar(tree, 'Auto')
   expect(text(bar2)).toContain('● 1 working')
   expect(text(bar2)).toContain('○ 1 waiting to start')
+})
+
+test('a card whose pull request is ready to merge has a green (success) spine, not the warning one', async () => {
+  const p = props()
+  ;(p.lanes[2] as BoardLane).cards = [
+    card('KB-0005', { flag: 'QUESTION: which repo?', status: { kind: 'waiting', text: '? Which repo?', colour: 'warning', bar: null, time: '' } }),
+    card('KB-0008', { flag: 'READY TO MERGE', status: { kind: 'waiting', text: '✓ Ready to merge. Open it for the link and the command', colour: 'success', bar: null, time: '3 min ago' } }),
+  ]
+  ;(p.lanes[2] as BoardLane).total = 2
+  const h = await board(p)
+  const tree = h.render()
+  const spine = (id: string) => (tileNode(tree, id) as Node).children.filter((c): c is Node => typeof c === 'object' && c !== null)[1]
+  expect(spine('KB-0008')?.props).toMatchObject({ position: 'absolute', width: 1, height: 2, backgroundColor: 'success' })
+  expect(spine('KB-0005')?.props.backgroundColor).toBe('warning')
 })
 
 test('a card waiting on him has an orange spine, a failed one a red spine, and the lane header is filled and its name and count orange; only in a Claude-only lane', async () => {

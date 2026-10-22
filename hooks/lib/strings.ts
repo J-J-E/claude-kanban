@@ -240,6 +240,11 @@ export const WAITING_MARK = '○ Waiting'
 export function workingWords(n: number): string {
   return '● ' + n + ' working'
 }
+
+/** One worker's line in the header: its own text, with the card ID in front only when the workers are on different cards (`isWithId`). */
+export function workerLine(id: string, text: string, isWithId: boolean): string {
+  return isWithId ? id + ' ' + text : text
+}
 export function waitingStartWords(n: number): string {
   return '○ ' + n + ' waiting to start'
 }
@@ -292,6 +297,26 @@ export const VERDICT_REFUSE = 'Claude only'
 /** A card that waits on the owner, as the note names it: its ID and its flag. The title and the body never go in. */
 export type NoteCard = { id: string; flag: string }
 
+/** A worker that finished or went idle with no step logged, as the note names it: the agent's id, its card and the time. */
+export type NoteWorker = { agent: string; id: string; time: string }
+
+/** What else the note can carry: workers to message, and that the chat was compacted. */
+export type NoteExtras = { workers?: readonly NoteWorker[]; isCompacted?: boolean; isNeedsYouInChat?: boolean }
+
+/**
+ * The line after the Waiting line when the board's `needs_you_in_chat` is on (ENH-0052): put each waiting card to the owner in chat as a question with choices.
+ * One line, no card title or body; the rules are in the kanban skill ("Requests in chat") and references/lanes.md (Needs You).
+ */
+export const NEEDS_YOU_CHAT_LINE =
+  'Ask the owner in chat: put each card above to them as a question with choices, all together in your first reply to this prompt (the rest on the next turn), once per card in this chat. ' +
+  'Show the card ID and title, its flag, and the question or a few lines of the plan, never the card body. ' +
+  'Each choice is a reply and the lane the card moves to. ' +
+  'PLAN READY: Approve -> Auto, Change the plan -> Plan, Drop it -> Discarded. QUESTION: Answer -> Auto. FAILED: Retry -> Auto, Drop it -> Discarded. GATE: Yes go ahead -> Auto, No -> stays in Needs You. READY TO MERGE: I merged it -> Auto, Not yet -> stays in Needs You. ' +
+  'Every card also takes a free-text reply.'
+
+/** The line after a compaction: the manager's rules went out of its context. */
+export const COMPACT_LINE = 'The chat was compacted: re-read the kanban skill, then references/lanes.md, and lanes-auto.md for Auto cards, then reconcile your Auto cards.'
+
 /** The most cards the note names; the rest are counted. */
 export const NOTE_MAX_CARDS = 5
 /** The most characters of one card's flag the note carries. */
@@ -314,27 +339,80 @@ function oneLine(raw: string, max: number, isDroppingQuotes = false): string {
 /**
  * The hidden note for a project with a board: who owns it, that the session is its manager, and which cards wait on the owner
  * (at most NOTE_MAX_CARDS, in the order given, each as `ID flag`; the flag is cut; the ID alone when the flag is empty).
+ * `hanging` are the IDs of started Auto cards nobody is working on (the pane's call): the first NOTE_MAX_CARDS and a count, never titles.
  * Card titles and bodies are the person's free text and never ride in a system note.
  */
-export function managerNote(owner: string, waiting: readonly NoteCard[]): string {
+export function managerNote(owner: string, waiting: readonly NoteCard[], hanging: readonly string[] = [], extras: NoteExtras = {}): string {
   const who = oneLine(owner, NOTE_OWNER_MAX, true)
   let note =
     `Kanban board: this project has kanban/board.md (owner ${who}). You are its manager. ` +
     'Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").'
-  if (waiting.length === 0) return note
-  const named = waiting.slice(0, NOTE_MAX_CARDS).map((c) => {
-    const flag = oneLine(c.flag, NOTE_FLAG_MAX)
-    return flag === '' ? oneLine(c.id, 20) : `${oneLine(c.id, 20)} ${flag}`
-  })
-  const more = waiting.length - named.length
-  note += `\nWaiting on ${who}: ${named.join('; ')}` + (more > 0 ? ` and ${more} more` : '')
+  if (waiting.length > 0) {
+    const named = waiting.slice(0, NOTE_MAX_CARDS).map((c) => {
+      const flag = oneLine(c.flag, NOTE_FLAG_MAX)
+      return flag === '' ? oneLine(c.id, 20) : `${oneLine(c.id, 20)} ${flag}`
+    })
+    const more = waiting.length - named.length
+    note += `\nWaiting on ${who}: ${named.join('; ')}` + (more > 0 ? ` and ${more} more` : '')
+    if (extras.isNeedsYouInChat === true) note += '\n' + NEEDS_YOU_CHAT_LINE
+  }
+  if (hanging.length > 0) {
+    const ids = hanging.slice(0, NOTE_MAX_CARDS).map((id) => oneLine(id, 20))
+    const more = hanging.length - ids.length
+    note += `\nHanging in Auto: ${ids.join(', ')}` + (more > 0 ? ` and ${more} more` : '')
+  }
+  // A worker the manager started has finished or gone idle and no `step N done` line follows: the manager messages it for its report.
+  for (const w of (extras.workers ?? []).slice(0, NOTE_MAX_CARDS)) {
+    note += `\nYour worker ${oneLine(w.agent, 40)} on ${oneLine(w.id, 20)} finished or went idle ${oneLine(w.time, 20)}; no step was logged. Message it for its report.`
+  }
+  if (extras.isCompacted === true) note += '\n' + COMPACT_LINE
   return note
 }
 
-/** The question row at the top of the board tab once a card is dropped on another (spec 14.7); the titles are already cut by the caller. */
-export function mergeQuestion(draggedId: string, draggedTitle: string, survivorId: string, survivorTitle: string): string {
-  return `Merge ${draggedId} "${draggedTitle}" into ${survivorId} "${survivorTitle}"? ${draggedId} is deleted and its text moves into ${survivorId}.`
+/** The strip above the lanes when started Auto cards have nobody on them, and the button that asks Claude to pick them back up (the ask starts nothing by itself). */
+export const RESUME_LABEL = 'Pick these back up'
+export function hangingStripText(ids: readonly string[]): string {
+  const shown = ids.slice(0, NOTE_MAX_CARDS).join(', ')
+  const more = ids.length - Math.min(ids.length, NOTE_MAX_CARDS)
+  return `Nobody is working on ${ids.length === 1 ? 'this card' : `these ${ids.length} cards`} in Auto: ${shown}${more > 0 ? ` and ${more} more` : ''}.`
 }
-/** The button that asks Claude to merge, and the one that drops the question. */
+
+/** The first line of the merge box (bold, in the warning colour): the drop only asked, nothing is done until he answers (spec 14.7). */
+export const MERGE_HEAD = '? Nothing has been merged yet.'
+/** The question in the merge box above the lanes once a card is dropped on another (spec 14.7); the titles are already cut by the caller. */
+export function mergeQuestion(draggedId: string, draggedTitle: string, survivorId: string, survivorTitle: string): string {
+  return `Merge ${draggedId} "${draggedTitle}" into ${survivorId} "${survivorTitle}"? ${draggedId} would be deleted and its text moves into ${survivorId}.`
+}
+/** The button that asks Claude to merge, and the one that drops the question (the main button: nothing is lost by it). */
 export const MERGE_YES = 'Merge'
 export const MERGE_NO = 'Keep both'
+/** The toast that says once where the question is, when the pane could not scroll it into view (spec 14.7). */
+export function mergeScrollToast(draggedId: string, survivorId: string): string {
+  return `Merge ${draggedId} into ${survivorId}? Answer at the top of the board.`
+}
+/** The note on the card dropped on, and on the card dropped, while the question is open (spec 14.7). */
+export function mergeNoteInto(draggedId: string): string {
+  return `◀ ${draggedId} would go into this card`
+}
+export function mergeNoteGone(survivorId: string): string {
+  return `▶ would be deleted; goes into ${survivorId}`
+}
+
+// ---------------------------------------------------------------- a card parent and children (ENH-0060)
+
+/** The short mark on a card row: `↑ENH-0025` for a child, `2/3` for a parent (children done of all), both joined by a space; empty for a card with neither. */
+export function linkMark(parent: string, kids: { done: number; total: number }): string {
+  const up = parent === '' ? '' : `↑${parent}`
+  const down = kids.total === 0 ? '' : `${kids.done}/${kids.total}`
+  return [up, down].filter((x) => x !== '').join(' ')
+}
+
+/** The head of the open card Children line: `Children (3): 2 of 3 done`. */
+export function childrenHead(kids: { done: number; total: number }): string {
+  return `Children (${kids.total}): ${kids.done} of ${kids.total} done`
+}
+
+/** The Parent list: its label, the choice that removes the link, and how many cards it offers besides (the first by ID). */
+export const PARENT_LABEL = 'Parent'
+export const PARENT_NONE = 'None'
+export const PARENT_MAX = 50

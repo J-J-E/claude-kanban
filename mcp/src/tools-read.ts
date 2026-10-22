@@ -53,21 +53,47 @@ function notStarted(card: Card, label: string): boolean {
   const target = ` -> ${label}`
   let landed = -1
   card.log.forEach((e, i) => {
-    if (e.text.startsWith('moved ') && e.text.endsWith(target)) landed = i
+    // a card moved by hand in Obsidian ends `moved A -> B in Obsidian`: the same landing
+    if (e.text.startsWith('moved ') && e.text.replace(/ in Obsidian$/, '').endsWith(target)) landed = i
   })
   return !card.log.slice(landed + 1).some((e) => e.who === 'Claude' && /^started\b/.test(e.text))
 }
 
-function section(title: string, cards: readonly Card[]): string[] {
+/**
+ * True when the newest `Claude:` Log line starts `waiting on` and is still a wait: it names no card ID (John, hardware, a lead), or at least one
+ * named card that is on the board is not Done. An ID with no card (retyped or merged away) is ignored; a wait whose IDs are all gone is not a wait.
+ * The pane's isNamedWait (hooks/lib/status.ts) has the same rule.
+ */
+function stillWaiting(card: Card, doneIds: ReadonlySet<string>, allIds: ReadonlySet<string>): boolean {
+  const mine = card.log.filter((e) => e.who === 'Claude')
+  const last = mine[mine.length - 1]
+  if (last === undefined || !/^(?:waiting on|queued behind)\b/.test(last.text)) return false
+  const ids = last.text.match(/\b[A-Z]+-\d+\b/g) ?? []
+  return ids.length === 0 || ids.some((id) => allIds.has(id) && !doneIds.has(id))
+}
+
+/** How long ago the card's newest Log line was written, as `45m`, `7h` or `2d`; `unknown` with no Log line. */
+function lastLogAge(card: Card, now: Date): string {
+  const last = card.log[card.log.length - 1]
+  if (last === undefined) return 'unknown'
+  const [y, mo, d] = last.date.split('-').map(Number)
+  const [h, mi] = last.time.split(':').map(Number)
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(y, mo - 1, d, h, mi).getTime()) / 60000))
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}h`
+  return `${Math.floor(minutes / 1440)}d`
+}
+
+function section(title: string, cards: readonly Card[], show: (card: Card) => string = line): string[] {
   const out = [title]
   if (cards.length === 0) return [...out, '  none']
-  for (const c of cards.slice(0, 5)) out.push(line(c))
+  for (const c of cards.slice(0, 5)) out.push(show(c))
   if (cards.length > 5) out.push(`  and ${cards.length - 5} more`)
   return out
 }
 
-/** The skill's `what's next` verb: Queued for Claude, Waiting on you, Untriaged. */
-export function whatsNext(dir: string): Text {
+/** The skill's `what's next` verb: Queued for Claude, Waiting on you, Untriaged, Left hanging. `now` is the clock the ages count from. */
+export function whatsNext(dir: string, now: Date = new Date()): Text {
   const loaded = loadBoard(dir)
   if (!loaded.ok) return loaded
   const { board } = loaded.state
@@ -86,7 +112,19 @@ export function whatsNext(dir: string): Text {
   const queued = [...queuedAuto, ...inRole('plan')]
   const waiting = inRole('needs-you', 'gated')
   const untriaged = inRole('intake').sort((a, b) => (a.created < b.created ? -1 : a.created > b.created ? 1 : compareIds(a.id, b.id)))
-  const out = [...section('Queued for Claude', queued), ...section('Waiting on you', waiting), ...section('Untriaged', untriaged)]
+  const doneIds = new Set(cards.filter((c) => findLane(board, c.status)?.role === 'done').map((c) => c.id))
+  const allIds = new Set(cards.map((c) => c.id))
+  const hanging = board.lanes
+    .filter((l) => l.role === 'auto')
+    .flatMap((l) =>
+      cards.filter((c) => findLane(board, c.status)?.label === l.label && !notStarted(c, l.label) && !stillWaiting(c, doneIds, allIds)).sort(byOrder),
+    )
+  const out = [
+    ...section('Queued for Claude', queued),
+    ...section('Waiting on you', waiting),
+    ...section('Untriaged', untriaged),
+    ...section('Left hanging', hanging, (c) => `  ${c.id} ${c.title} - last Log ${lastLogAge(c, now)} ago`),
+  ]
   return { ok: true, message: '', text: out.join('\n') }
 }
 
@@ -139,7 +177,7 @@ export function registerReadTools(server: McpServer, kanbanDir: () => string | u
   )
   server.registerTool(
     'whats_next',
-    { description: 'What needs attention: Queued for Claude, Waiting on you, Untriaged (at most five each).' },
+    { description: 'What needs attention: Queued for Claude, Waiting on you, Untriaged, Left hanging (started Auto cards not waiting on a named thing, with the age of the last Log line; at most five each).' },
     withDir(whatsNext),
   )
   server.registerTool(

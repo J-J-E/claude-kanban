@@ -42,7 +42,7 @@ const QUEUED_IDLE = 'You approved this just now. Claude is starting this one. Th
 /** The colour of the status box's heading (its outline is gone: the heading carries the colour), or undefined: the first coloured Text whose words are in the box. */
 async function boxColour(ui: Pane): Promise<unknown> {
   const text = (await ui.find({ key: 'card-box' }))?.text ?? ''
-  const head = (await ui.findAll({ type: 'Text' })).find((t) => t.text.length > 3 && text.includes(t.text) && ['warning', 'error', 'claude'].includes(String(t.props.color)))
+  const head = (await ui.findAll({ type: 'Text' })).find((t) => t.text.length > 3 && text.includes(t.text) && ['warning', 'error', 'claude', 'success'].includes(String(t.props.color)))
   return head?.props.color
 }
 
@@ -291,6 +291,22 @@ test('check 4: Approve and run while Claude is busy: the box says the card waits
   const top = await headerState(ui)
   expect(top.waiting.total).toBe(0)
   expect(top.queued).toBe(1)
+})
+
+test('a change ready to merge: a green box, the sentence, no button, and the header counts it', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = longCard('KB-0001', 'Fix footer', 'Needs You', 'READY TO MERGE')
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  expect(await boxColour(ui)).toBe('success')
+  expect(await ui.find({ type: 'Text', text: '✓ Ready to merge. The pull request is checked and waits for you; merge it yourself (the link and the command are in the Log), then move this card to Auto.' })).toBeDefined()
+  expect(await ui.find({ key: 'card-flag-primary' })).toBeUndefined()
+  expect(await ui.find({ key: 'card-flag-secondary' })).toBeUndefined()
+  // The pane runs nothing: no message was sent to Claude and the file is as it was.
+  expect(w.sent).toHaveLength(0)
+  expect(w.text(FOOTER)).toContain('\nflag: READY TO MERGE\n')
+  expect((await headerState(ui)).waiting.total).toBe(1)
 })
 
 test('a held step: Approve and continue, and no Park it', async ($, on) => {
@@ -554,6 +570,24 @@ test('a card that waits on other cards: the sentence and a plain Button for each
   await ui.press({ key: 'card-child-KB-0002' })
   expect(await header(ui)).toBe('KB-0002  in Inbox')
   expect(await ui.find({ key: 'card-box' })).toBeUndefined()
+})
+
+test('a card with a parent and children shows the Parent and Children lines, each a Button that opens that card', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = (files[FOOTER] as string).replace('parent:\n', 'parent: KB-0002\n')
+  files[SHIP] = (files[SHIP] as string).replace('parent:\n', 'parent: KB-0002\n')
+  await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0002')
+  expect((await ui.find({ key: 'card-parent' }))).toBeUndefined()
+  expect((await ui.find({ key: 'card-kids' }))?.text).toContain('Children (2): 0 of 2 done')
+  expect((await ui.find({ key: 'card-kid-open-KB-0001' }))?.props).toMatchObject({ label: 'KB-0001', plain: true })
+  await ui.press({ key: 'card-kid-open-KB-0001' })
+  expect(await header(ui)).toBe('KB-0001  in Inbox')
+  expect((await ui.find({ key: 'card-parent' }))?.text).toContain('Parent:')
+  expect((await ui.find({ key: 'card-parent' }))?.text).toContain('Write docs (in Inbox)')
+  await ui.press({ key: 'card-parent-open' })
+  expect(await header(ui)).toBe('KB-0002  in Inbox')
 })
 
 test('a card that still waits on him and has a queued prompt: the first match of the table wins, the header still counts it', async ($, on) => {
@@ -1191,7 +1225,7 @@ test('the open card has Lane, Model, Thinking and Type in one row of three group
   expect(thinking?.props.value).toBe('Auto')
   expect(await modelLine(ui)).toBe(AUTO_LINE)
   // Only the four Selects stand beside the comment field (ENH-0056: Lane, Model, Thinking, then Type), and reading wrote nothing.
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type', 'Parent'])
   expect(w.writes).toEqual([])
   expect(w.toasts).toEqual([])
 })
@@ -1481,6 +1515,46 @@ test('Rename opens a field with the title; Cancel closes it without writing', as
   expect(await ui.find({ key: 'card-rename' })).toBeUndefined()
 })
 
+test('the Parent list offers None and the cards not Done or Discarded; a pick writes parent, updated and one Log line, None removes it', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = (files[FOOTER] as string).replace('updated: 2026-10-08', 'updated: 2026-09-01')
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  const pick = await ui.find({ key: 'card-parent-pick' })
+  expect(pick?.props.value).toBe('None')
+  expect((pick?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['None', 'KB-0002', 'KB-0003'])
+  const before = w.text(FOOTER)
+  await ui.select({ key: 'card-parent-pick', value: 'KB-0002' })
+  const after = w.text(FOOTER)
+  expect(after.replace('parent: KB-0002', 'parent:').replace('updated: 2026-10-08', 'updated: 2026-09-01')).toBe(before + '- 2026-10-08 14:05 John: parent set to KB-0002\n')
+  expect(after).toContain('\nparent: KB-0002\n')
+  expect(w.writes).toEqual([FOOTER])
+  expect(w.sent).toEqual([])
+  expect(w.toasts).toEqual(['KB-0001 is now a child of KB-0002.'])
+  expect((await ui.find({ key: 'card-parent-pick' }))?.props.value).toBe('KB-0002')
+  expect((await ui.find({ key: 'card-parent' }))?.text).toContain('Write docs (in Inbox)')
+  await ui.select({ key: 'card-parent-pick', value: 'None' })
+  expect(w.text(FOOTER)).toContain('\nparent:\n')
+  expect(w.text(FOOTER)).toMatch(/\n- 2026-10-08 14:05 John: parent removed \(was KB-0002\)\n$/)
+  expect(w.toasts[1]).toBe('Removed the parent of KB-0001.')
+})
+
+test('the Parent list refuses a loop and a card in Auto with the rule text, and writes nothing', async ($, on) => {
+  const files = defaultFiles()
+  files[DOCS] = (files[DOCS] as string).replace('parent:\n', 'parent: KB-0001\n')
+  const w = await boot($, on, files)
+  const ui = await mountPane($, 'desktop')
+  await select(ui, 'KB-0001')
+  await ui.select({ key: 'card-parent-pick', value: 'KB-0002' })
+  expect(w.toasts).toEqual(['KB-0001 is above KB-0002, so it cannot become its child (a loop). Nothing was changed.'])
+  await ui.press({ key: 'card-back' })
+  await select(ui, 'KB-0003')
+  await ui.select({ key: 'card-parent-pick', value: 'KB-0001' })
+  expect(w.toasts[1]).toBe('KB-0003 is being worked. Move it out of Auto or wait, then change its parent. Nothing was changed.')
+  expect(w.writes).toEqual([])
+})
+
 test('Enter in the Rename field writes the title line, updated and one Log line, cleaned as an add cleans it', async ($, on) => {
   const files = defaultFiles()
   files[FOOTER] = (files[FOOTER] as string).replace('updated: 2026-10-08', 'updated: 2026-09-01')
@@ -1678,7 +1752,7 @@ test("the Type list comes after Thinking, lists the board's types with the card'
   const w = await boot($, on, typedSeven())
   const ui = await mountPane($, 'desktop')
   await select(ui, 'BUG-0012')
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.label)).toEqual(['Lane', 'Model', 'Thinking', 'Type', 'Parent'])
   const type = await ui.find({ key: 'card-type' })
   expect((type?.props.options as { value: string }[]).map((o) => o.value)).toEqual(['bug', 'enhancement', 'chore'])
   expect(type?.props.value).toBe('bug')
@@ -1885,9 +1959,9 @@ async function groupOrder(ui: Pane): Promise<string[]> {
 
 // ENH-0056: the lists stand in three headed groups, Lane, Model and Thinking, Type.
 const SHAPES = [
-  { columns: 108, direction: 'row', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type'] },
-  { columns: 80, direction: 'column', top: true, order: ['card-selects-top', 'card-group-lane', 'card-group-type', 'card-group-claude'], labels: ['Lane', 'Type', 'Model', 'Thinking'] },
-  { columns: 50, direction: 'column', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type'] },
+  { columns: 108, direction: 'row', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type', 'Parent'] },
+  { columns: 80, direction: 'column', top: true, order: ['card-selects-top', 'card-group-lane', 'card-group-type', 'card-group-claude'], labels: ['Lane', 'Type', 'Model', 'Thinking', 'Parent'] },
+  { columns: 50, direction: 'column', top: false, order: ['card-group-lane', 'card-group-claude', 'card-group-type'], labels: ['Lane', 'Model', 'Thinking', 'Type', 'Parent'] },
 ]
 for (const s of SHAPES) {
   test('at ' + s.columns + ' cells the three groups stand ' + (s.top ? 'Lane and Type in a row with Model and Thinking under them' : s.direction === 'row' ? 'in one row' : 'one under the other'), async ($, on) => {
@@ -1922,14 +1996,14 @@ for (const s of SHAPES) {
   })
 }
 
-test('the three groups carry their headings in bold, Lane in a bright outline and the other two in a dim one, no colour added', async ($, on) => {
+test('the three groups carry their headings in bold, Lane in a lighter outline (`inactive`) and the other two in a fainter one (`subtle`), never warning or the accent', async ($, on) => {
   const w = await boot($, on, typedSeven())
   const ui = await mountPane($, 'desktop', 108)
   await select(ui, 'BUG-0012')
   const groups = [
-    { key: 'card-group-lane', heading: 'Lane (move it)', dim: false },
-    { key: 'card-group-claude', heading: 'Claude runs it with', dim: true },
-    { key: 'card-group-type', heading: 'Card type', dim: true },
+    { key: 'card-group-lane', heading: 'Lane (move it)', outline: 'inactive' },
+    { key: 'card-group-claude', heading: 'Claude runs it with', outline: 'subtle' },
+    { key: 'card-group-type', heading: 'Card type', outline: 'subtle' },
   ]
   for (const g of groups) {
     const node = await ui.find({ key: g.key })
@@ -1938,8 +2012,8 @@ test('the three groups carry their headings in bold, Lane in a bright outline an
     expect(head?.props.bold).toBe(true)
     expect(head?.props.color).toBeUndefined()
     expect(outline?.props.borderStyle).toBe('round')
-    expect(Boolean(outline?.props.borderDimColor)).toBe(g.dim)
-    expect(outline?.props.borderColor).toBeUndefined()
+    expect(outline?.props.borderColor).toBe(g.outline)
+    expect(outline?.props.borderDimColor).toBeUndefined()
   }
   // Lane first, then the Model group, then Type; Rename and Copy ID stay under the title, above the groups.
   const keys = keysUnder(await ui.drawn())

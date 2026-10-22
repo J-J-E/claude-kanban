@@ -155,7 +155,14 @@ function claudeRows(el: Els, w: HeaderWords, act: HeaderActions) {
   const { Box } = el
   const c = w.claude
   const counts = countsOf(el, w)
-  const note = c.detail !== null ? cut(el, 'header-step', c.detail, 0, false) : null
+  // Two or more workers: one note line per worker, each its own row under the line (the first shares the counts row below 100 cells).
+  const lines = c.notes.length > 0 ? c.notes : c.detail !== null ? [c.detail] : []
+  const note = lines.length > 0 ? cut(el, 'header-step', lines[0] as string, 0, false) : null
+  const more = lines.slice(1).map((text, k) => (
+    <Box key={`header-note-row-${k + 2}`} flexDirection="row" paddingLeft={2}>
+      {cut(el, `header-step-${k + 2}`, text, 0, false)}
+    </Box>
+  ))
   if (w.isClaudeOneRow) {
     return [
       <Box key="header-claude-row" flexDirection="row">
@@ -169,6 +176,7 @@ function claudeRows(el: Els, w: HeaderWords, act: HeaderActions) {
           {note}
         </Box>
       ) : null,
+      ...more,
     ]
   }
   const rows = [
@@ -186,6 +194,7 @@ function claudeRows(el: Els, w: HeaderWords, act: HeaderActions) {
       </Box>,
     )
   }
+  rows.push(...more)
   if (w.isCountsOwnRow && counts.length > 0) {
     rows.push(
       <Box key="header-counts-row" flexDirection="row" paddingLeft={2}>

@@ -36764,8 +36764,17 @@ var NOT_SET = "none";
 var THINKING_VALUES = [NOT_SET, ...THINKING_LEVELS];
 var WORKERS_MIN = 1;
 var WORKERS_MAX = 5;
+var CHAT_KEY = "needs_you_in_chat";
+var CHAT_ON = "on";
+var CHAT_OFF = "off";
+var MERGE_KEY = "merge_by";
+var MERGE_CLAUDE = "claude";
+var MERGE_OWNER = "owner";
+var MERGE_VALUES = [MERGE_CLAUDE, MERGE_OWNER];
 var DEFAULTS = {
   workers: 2,
+  needsYouInChat: false,
+  mergeBy: MERGE_CLAUDE,
   roles: {
     manager: { model: "opus", thinking: "medium" },
     planner: { model: "opus", thinking: "high" },
@@ -36777,7 +36786,9 @@ function settingKey(role, field) {
 }
 var SAVED_KEYS = [
   "workers",
-  ...ROLES.flatMap((r) => [settingKey(r, "model"), settingKey(r, "thinking")])
+  ...ROLES.flatMap((r) => [settingKey(r, "model"), settingKey(r, "thinking")]),
+  CHAT_KEY,
+  MERGE_KEY
 ];
 var DEFAULT_KEYS = SAVED_KEYS.map((k) => `default_${k}`);
 
@@ -37062,6 +37073,30 @@ function setParent(text, id) {
   }
   return setScalar(text, "parent", id);
 }
+function parentRefusal(child, newParentId, cards) {
+  if (newParentId === child.id) return `${child.id} cannot be its own parent. Nothing was changed.`;
+  const target = cards.find((c) => c.id === newParentId);
+  if (target === void 0) return `No card ${newParentId} on the board. Nothing was changed.`;
+  if (child.parent === newParentId) return `${newParentId} is already the parent of ${child.id}. Nothing was changed.`;
+  const seen = /* @__PURE__ */ new Set();
+  for (let up = target; up !== void 0 && !seen.has(up.id); up = cards.find((c) => c.id === up?.parent)) {
+    if (up.parent === child.id) return `${child.id} is above ${newParentId}, so it cannot become its child (a loop). Nothing was changed.`;
+    seen.add(up.id);
+  }
+  return void 0;
+}
+function setParentCard(text, id, stamp, who2) {
+  const card = parseCard(text);
+  if (!card.ok) return card;
+  const old = card.value.parent;
+  if (old === id) return ok(text);
+  if (id === "" && old === "") return ok(text);
+  const withParent = setParent(text, id);
+  if (!withParent.ok) return withParent;
+  const stamped = setScalar(withParent.value, "updated", stamp.date);
+  if (!stamped.ok) return stamped;
+  return appendLog(stamped.value, { date: stamp.date, time: stamp.time, who: who2, text: id === "" ? `parent removed (was ${old})` : `parent set to ${id}` });
+}
 function retypeCardText(text, newId, stamp, who2) {
   if (typeof newId !== "string" || !ID_PATTERN.test(newId)) return fail("bad-id", `"${newId}" is not a card ID like BUG-0012.`);
   const card = parseCard(text);
@@ -37207,6 +37242,10 @@ function settingProblem(key, value) {
       return void 0;
     case "workers":
       return /^[1-5]$/.test(value) && Number(value) >= WORKERS_MIN && Number(value) <= WORKERS_MAX ? void 0 : '"workers" must be a whole number from 1 to 5.';
+    case CHAT_KEY:
+      return value === CHAT_ON || value === CHAT_OFF ? void 0 : `"${key}" must be ${CHAT_ON} or ${CHAT_OFF}.`;
+    case MERGE_KEY:
+      return MERGE_VALUES.indexOf(value) !== -1 ? void 0 : `"${key}" must be ${MERGE_VALUES.join(" or ")}.`;
     case "manager_model":
     case "worker_model":
     case "planner_model":
@@ -37296,6 +37335,8 @@ function parseBoard(text) {
     counters,
     owner: raw.owner,
     workers: Number(raw.workers),
+    needsYouInChat: raw[CHAT_KEY] === CHAT_ON,
+    mergeBy: raw[MERGE_KEY],
     managerModel: raw.manager_model,
     plannerModel: raw.planner_model,
     workerModel: raw.worker_model,
@@ -37354,6 +37395,8 @@ function readTypes(fm) {
 function builtInValues() {
   return {
     workers: String(DEFAULTS.workers),
+    [CHAT_KEY]: DEFAULTS.needsYouInChat ? CHAT_ON : CHAT_OFF,
+    [MERGE_KEY]: DEFAULTS.mergeBy,
     manager_model: DEFAULTS.roles.manager.model,
     planner_model: DEFAULTS.roles.planner.model,
     worker_model: DEFAULTS.roles.worker.model,
@@ -37365,6 +37408,8 @@ function builtInValues() {
 function defaultsFrom(v) {
   return {
     workers: Number(v.workers),
+    needsYouInChat: v[CHAT_KEY] === CHAT_ON,
+    mergeBy: v[MERGE_KEY],
     roles: {
       manager: { model: v.manager_model, thinking: v.manager_thinking },
       planner: { model: v.planner_model, thinking: v.planner_thinking },
@@ -37823,6 +37868,41 @@ function mergeCards(dir2, input2, now = /* @__PURE__ */ new Date()) {
   unlinkSync(dragged.path);
   return { ok: true, message: `${nameOf(dragged)} merged into ${nameOf(survivor)}.`, id: survivor.id, was: dragged.id };
 }
+function setCardParent(dir2, input2, now = /* @__PURE__ */ new Date()) {
+  const who2 = cleanWho(input2.who);
+  if (typeof who2 !== "string") return who2;
+  const loaded = loadBoard(dir2);
+  if (!loaded.ok) return loaded;
+  const f = findCardFile(loaded.state, input2.id);
+  if (!f.ok) return f;
+  const { found } = f;
+  const cards = loadCards(loaded.state).cards;
+  const card = cards.find((c) => c.id === found.id);
+  if (card === void 0) return refuse(`${found.id} cannot be read (see board_list). Nothing was changed.`);
+  if (findLane(loaded.state.board, card.status)?.role === "auto") {
+    return refuse(`${found.id} is being worked. Move it out of Auto or wait, then change its parent. Nothing was changed.`);
+  }
+  let parentId = "";
+  if (String(input2.parent ?? "") !== "") {
+    const p = findCardFile(loaded.state, input2.parent);
+    if (!p.ok) return p;
+    parentId = p.found.id;
+    const refused = parentRefusal(card, parentId, cards);
+    if (refused !== void 0) return refuse(refused);
+  } else if (card.parent === "") {
+    return refuse(`${found.id} has no parent. Nothing was changed.`);
+  }
+  const text = setParentCard(found.text, parentId, stampOf(now), who2);
+  if (!text.ok) return refuse(`${text.message} Nothing was changed.`);
+  const written = writeChecked(found.path, text.value, found.mtime);
+  if (written) return written;
+  return {
+    ok: true,
+    message: parentId === "" ? `Removed the parent of ${nameOf(found)}.` : `${nameOf(found)} is now a child of ${parentId}.`,
+    id: found.id,
+    parent: parentId
+  };
+}
 function decide(dir2, input2, now = /* @__PURE__ */ new Date()) {
   const loaded = loadBoard(dir2);
   if (!loaded.ok) return loaded;
@@ -37855,6 +37935,7 @@ function flagKind(flag) {
   if (f.startsWith("QUESTION")) return "question";
   if (f.startsWith("FAILED")) return "failed";
   if (f.startsWith("GATE")) return "gate";
+  if (f.startsWith("READY TO MERGE")) return "ready";
   return "other";
 }
 
@@ -37985,18 +38066,35 @@ function notStarted(card, label) {
   const target = ` -> ${label}`;
   let landed = -1;
   card.log.forEach((e, i) => {
-    if (e.text.startsWith("moved ") && e.text.endsWith(target)) landed = i;
+    if (e.text.startsWith("moved ") && e.text.replace(/ in Obsidian$/, "").endsWith(target)) landed = i;
   });
   return !card.log.slice(landed + 1).some((e) => e.who === "Claude" && /^started\b/.test(e.text));
 }
-function section(title, cards) {
+function stillWaiting(card, doneIds, allIds) {
+  const mine = card.log.filter((e) => e.who === "Claude");
+  const last = mine[mine.length - 1];
+  if (last === void 0 || !/^(?:waiting on|queued behind)\b/.test(last.text)) return false;
+  const ids = last.text.match(/\b[A-Z]+-\d+\b/g) ?? [];
+  return ids.length === 0 || ids.some((id) => allIds.has(id) && !doneIds.has(id));
+}
+function lastLogAge(card, now) {
+  const last = card.log[card.log.length - 1];
+  if (last === void 0) return "unknown";
+  const [y, mo, d] = last.date.split("-").map(Number);
+  const [h, mi] = last.time.split(":").map(Number);
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(y, mo - 1, d, h, mi).getTime()) / 6e4));
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / 1440)}d`;
+}
+function section(title, cards, show = line) {
   const out = [title];
   if (cards.length === 0) return [...out, "  none"];
-  for (const c of cards.slice(0, 5)) out.push(line(c));
+  for (const c of cards.slice(0, 5)) out.push(show(c));
   if (cards.length > 5) out.push(`  and ${cards.length - 5} more`);
   return out;
 }
-function whatsNext(dir2) {
+function whatsNext(dir2, now = /* @__PURE__ */ new Date()) {
   const loaded = loadBoard(dir2);
   if (!loaded.ok) return loaded;
   const { board } = loaded.state;
@@ -38013,7 +38111,17 @@ function whatsNext(dir2) {
   const queued = [...queuedAuto, ...inRole("plan")];
   const waiting = inRole("needs-you", "gated");
   const untriaged = inRole("intake").sort((a, b) => a.created < b.created ? -1 : a.created > b.created ? 1 : compareIds(a.id, b.id));
-  const out = [...section("Queued for Claude", queued), ...section("Waiting on you", waiting), ...section("Untriaged", untriaged)];
+  const doneIds = new Set(cards.filter((c) => findLane(board, c.status)?.role === "done").map((c) => c.id));
+  const allIds = new Set(cards.map((c) => c.id));
+  const hanging = board.lanes.filter((l) => l.role === "auto").flatMap(
+    (l) => cards.filter((c) => findLane(board, c.status)?.label === l.label && !notStarted(c, l.label) && !stillWaiting(c, doneIds, allIds)).sort(byOrder)
+  );
+  const out = [
+    ...section("Queued for Claude", queued),
+    ...section("Waiting on you", waiting),
+    ...section("Untriaged", untriaged),
+    ...section("Left hanging", hanging, (c) => `  ${c.id} ${c.title} - last Log ${lastLogAge(c, now)} ago`)
+  ];
   return { ok: true, message: "", text: out.join("\n") };
 }
 function cardGet(dir2, id) {
@@ -38055,7 +38163,7 @@ function registerReadTools(server2, kanbanDir, noBoard) {
   );
   server2.registerTool(
     "whats_next",
-    { description: "What needs attention: Queued for Claude, Waiting on you, Untriaged (at most five each)." },
+    { description: "What needs attention: Queued for Claude, Waiting on you, Untriaged, Left hanging (started Auto cards not waiting on a named thing, with the age of the last Log line; at most five each)." },
     withDir(whatsNext)
   );
   server2.registerTool(
@@ -38143,6 +38251,14 @@ function registerWriteTools(server2, kanbanDir, noBoard) {
     (a) => run((dir2) => mergeCards(dir2, a))
   );
   server2.registerTool(
+    "card_parent",
+    {
+      description: 'Set or remove the parent of a card. "parent" is the ID of the parent card, or "" to remove the link. Sets parent:, updated and one Log line (parent set to <ID> / parent removed (was <ID>)). Refused for a card in an auto lane, for the card itself, a card not on the board, the parent it already has, and a loop.',
+      inputSchema: { id: cardId, parent: external_exports.string().describe("The parent: BUG-0012, bug 12 or 12; an empty string removes the parent"), who }
+    },
+    (a) => run((dir2) => setCardParent(dir2, a))
+  );
+  server2.registerTool(
     "decision_add",
     {
       description: 'Record a decision in DECISIONS.md. A decision line has no author, so "who" is accepted for symmetry and not stored.',
@@ -38165,10 +38281,15 @@ import { fileURLToPath } from "node:url";
 function pluginRoot(fromUrl = import.meta.url) {
   return join2(dirname2(fileURLToPath(fromUrl)), "..", "..");
 }
+var PROMPT_URIS = ["kanban://skill", "kanban://lanes", "kanban://format"];
 var FILES = [
   { name: "kanban-skill", uri: "kanban://skill", path: "skills/kanban/SKILL.md", title: "Kanban skill", description: "How to run the board: the verbs and the replies." },
   { name: "kanban-format", uri: "kanban://format", path: "skills/kanban/references/format.md", title: "Card and board file format", description: "The exact layout of board.md and card files." },
-  { name: "kanban-lanes", uri: "kanban://lanes", path: "skills/kanban/references/lanes.md", title: "Lane rules", description: "What each lane means and what moving a card there does." }
+  { name: "kanban-lanes", uri: "kanban://lanes", path: "skills/kanban/references/lanes.md", title: "Lane rules", description: "What each lane means and what moving a card there does." },
+  { name: "kanban-lanes-auto", uri: "kanban://lanes-auto", path: "skills/kanban/references/lanes-auto.md", title: "Auto card rules", description: "The Auto flow, gate approval, gates, resuming, running/waiting/nobody and flag values." },
+  { name: "kanban-verbs", uri: "kanban://verbs", path: "skills/kanban/references/verbs.md", title: "Manual and rare verbs", description: "Manual steps for add, move, comment, list and what is next (when the tools are missing), and for init, the Obsidian view, delete, retype, merge, parent and decide." },
+  { name: "kanban-refusals", uri: "kanban://refusals", path: "skills/kanban/references/refusals.md", title: "Refusal texts", description: "The exact refusal replies, to print word for word." },
+  { name: "kanban-older-roles", uri: "kanban://older-roles", path: "skills/kanban/references/older-roles.md", title: "Older lane roles", description: "The roles older boards may still list." }
 ];
 function readPluginFile(root, rel) {
   try {
@@ -38188,16 +38309,21 @@ function registerResources(server2, root = pluginRoot()) {
   }
   server2.registerPrompt(
     "kanban_rules",
-    { title: "Kanban rules", description: "The kanban skill and its format and lane rules, to read before changing the board." },
+    { title: "Kanban rules", description: "The kanban skill, its lane rules and its file format, to read before changing the board; the other files are resources to fetch." },
     async () => ({
       messages: [
         {
           role: "user",
           content: {
             type: "text",
-            text: FILES.map((f) => `# ${f.path}
+            text: [
+              ...FILES.filter((f) => PROMPT_URIS.includes(f.uri)).map((f) => `# ${f.path}
 
-${readPluginFile(root, f.path)}`).join("\n\n---\n\n")
+${readPluginFile(root, f.path)}`),
+              `# More files, as resources to fetch when needed
+
+${FILES.filter((f) => !PROMPT_URIS.includes(f.uri)).map((f) => `- ${f.uri} (${f.path}): ${f.description}`).join("\n")}`
+            ].join("\n\n---\n\n")
           }
         }
       ]
@@ -38206,7 +38332,7 @@ ${readPluginFile(root, f.path)}`).join("\n\n---\n\n")
 }
 
 // src/server.ts
-var server = new McpServer({ name: "kanban", version: "0.1.0" });
+var server = new McpServer({ name: "kanban", version: "0.2.3" });
 var dir = () => findKanbanDir(process.cwd());
 registerReadTools(server, dir, NO_BOARD_TEXT);
 registerWriteTools(server, dir, NO_BOARD_TEXT);

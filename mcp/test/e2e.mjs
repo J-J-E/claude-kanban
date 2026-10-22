@@ -17,7 +17,7 @@ await client.connect(new StdioClientTransport({ command: process.execPath, args:
 const text = (r) => r.content.map((c) => c.text).join('\n')
 try {
   const tools = (await client.listTools()).tools.map((t) => t.name)
-  for (const n of ['board_list', 'card_add', 'card_move', 'card_comment', 'card_retype', 'card_merge', 'types']) assert.ok(tools.includes(n), `tool ${n}`)
+  for (const n of ['board_list', 'card_add', 'card_move', 'card_comment', 'card_retype', 'card_merge', 'card_parent', 'types']) assert.ok(tools.includes(n), `tool ${n}`)
   assert.equal((await client.listResources()).resources.length, 3)
   assert.equal(text(await client.callTool({ name: 'types', arguments: {} })), 'bug (BUG)\nenhancement (ENH)\nchore (CHORE)')
 

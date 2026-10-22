@@ -11,6 +11,8 @@ type Pane = Awaited<ReturnType<typeof mountPane>>
 
 const SELECT_KEYS = [
   'set-workers',
+  'set-needs_you_in_chat',
+  'set-merge_by',
   'set-manager_model',
   'set-manager_thinking',
   'set-planner_model',
@@ -44,14 +46,14 @@ async function buttons(ui: Pane): Promise<string[]> {
   return (await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-')).map((b) => String(b.key))
 }
 
-test('all seven Selects are there with their values, at every width', async ($, on) => {
+test('all nine Selects are there with their values, at every width', async ($, on) => {
   await boot($, on)
   for (const columns of [45, 60, 80, 108]) {
     const ui = await open($, columns)
     const selects = await ui.findAll({ type: 'Select' })
     expect(selects.map((s) => s.key)).toEqual(SELECT_KEYS)
-    expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
-    const labels = (selects[4]?.props.options as { value: string; label?: string }[]).map((o) => o.label)
+    expect(selects.map((s) => s.props.value)).toEqual(['2', 'off', 'claude', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
+    const labels = (selects[6]?.props.options as { value: string; label?: string }[]).map((o) => o.label)
     expect(labels).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
     await ui.unmount()
   }
@@ -321,4 +323,34 @@ test('the Settings tab says which model the chat is on, after the notes', async 
   ui = await open($)
   expect(await ui.find({ key: 'settings-chat-model' })).toBeUndefined()
   expect(NOTES[0]).toBe("Manager is the model this board suggests for the conversation; the board never switches the chat itself. Planner writes each card's plan. Worker does each step of a plan.")
+})
+
+test('the Chat questions row sits under Workers, shows its Default and Reset when on, and lines up with the others', async ($, on) => {
+  await boot($, on, 'needs_you_in_chat: on\n')
+  for (const columns of [45, 60, 108]) {
+    const ui = await open($, columns)
+    const text = await flat(ui)
+    expect(text).toContain('Chat questions')
+    expect(text).toContain('Default: off')
+    expect(await buttons(ui)).toEqual(['restore-all', 'save-defaults', 'reset-chat'])
+    const keys = (await ui.findAll({ type: 'Select' })).map((s) => String(s.key))
+    expect(keys.indexOf('set-needs_you_in_chat')).toBe(keys.indexOf('set-workers') + 1)
+    expect((await ui.find({ key: 'settings-chat-name' }))?.props.width).toBe((await ui.find({ key: 'settings-name-planner' }))?.props.width)
+    await ui.unmount()
+  }
+})
+
+test('the Merge by row sits under Chat questions, shows its Default and Reset when owner, and lines up with the others', async ($, on) => {
+  await boot($, on, 'merge_by: owner\n')
+  for (const columns of [45, 60, 108]) {
+    const ui = await open($, columns)
+    const text = await flat(ui)
+    expect(text).toContain('Merge by')
+    expect(text).toContain('Default: claude')
+    expect(await buttons(ui)).toEqual(['restore-all', 'save-defaults', 'reset-merge'])
+    const keys = (await ui.findAll({ type: 'Select' })).map((s) => String(s.key))
+    expect(keys.indexOf('set-merge_by')).toBe(keys.indexOf('set-needs_you_in_chat') + 1)
+    expect((await ui.find({ key: 'settings-merge-name' }))?.props.width).toBe((await ui.find({ key: 'settings-name-planner' }))?.props.width)
+    await ui.unmount()
+  }
 })

@@ -16,7 +16,7 @@ import type { CardMenuLevel, Labels } from './strings.ts'
 export type BoardStatus = {
   kind: string
   text: string
-  colour: 'default' | 'claude' | 'warning' | 'error' | 'dim'
+  colour: 'default' | 'claude' | 'warning' | 'error' | 'success' | 'dim'
   /** The plan's progress, null where the table says no bar. */
   bar: { done: number; total: number } | null
   /** The time words (`4 min ago`), '' when none. */
@@ -45,6 +45,8 @@ export type BoardCard = {
   status?: BoardStatus
   /** The gray pin chip's text (`opus, medium`); '' until a card has its own model or thinking. */
   pin?: string
+  /** The short dim mark of the card's parent or children (`↑ENH-0025`, `2/3`); absent when it has neither. */
+  link?: string
 }
 
 /** One lane as the hooks module sends it: every card (only a props size budget cuts a lane), `total` the true count (with Find on: the matches). */
@@ -82,6 +84,8 @@ export type BoardProps = {
   isBusy?: boolean
   /** Find is on: the lanes hold only the matches. Lanes with matches open whatever their fold and show every match; the empty-board hint never shows. Absent: off. */
   isFiltered?: boolean
+  /** The merge question is open (spec 14.7): `id` was dropped on `onto`. The two cards are marked until it closes. Absent: no question. */
+  mergeAsk?: { id: string; onto: string }
 }
 
 /** What the Client posts to the hooks module: a valid drop (`move`; also a drop on the lane the card is in and a drop on a

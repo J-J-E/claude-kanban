@@ -315,6 +315,51 @@ export function setParent(text: string, id: string): Result<string> {
   return setScalar(text, 'parent', id)
 }
 
+/** The IDs of the cards whose `parent:` is `id`, in the order `cards` has them. */
+export function childrenOf(cards: readonly Pick<Card, 'id' | 'parent'>[], id: string): string[] {
+  return cards.filter((c) => c.parent === id).map((c) => c.id)
+}
+
+/**
+ * Why `child` cannot take `newParentId` as its parent, as the one-line text the pane, the skill and the MCP tool print; undefined
+ * when it can: the card itself, a card not on the board, the parent it already has, or a loop (the new parent is one of the card's
+ * own descendants). `cards` is every card. Auto lanes and agents at work are the caller's check. Nothing is changed in any case.
+ */
+export function parentRefusal(
+  child: Pick<Card, 'id' | 'parent'>,
+  newParentId: string,
+  cards: readonly Pick<Card, 'id' | 'parent'>[],
+): string | undefined {
+  if (newParentId === child.id) return `${child.id} cannot be its own parent. Nothing was changed.`
+  const target = cards.find((c) => c.id === newParentId)
+  if (target === undefined) return `No card ${newParentId} on the board. Nothing was changed.`
+  if (child.parent === newParentId) return `${newParentId} is already the parent of ${child.id}. Nothing was changed.`
+  const seen = new Set<string>()
+  for (let up: Pick<Card, 'id' | 'parent'> | undefined = target; up !== undefined && !seen.has(up.id); up = cards.find((c) => c.id === up?.parent)) {
+    if (up.parent === child.id) return `${child.id} is above ${newParentId}, so it cannot become its child (a loop). Nothing was changed.`
+    seen.add(up.id)
+  }
+  return undefined
+}
+
+/**
+ * Set (or, with an empty `id`, remove) a card's parent: `parent:` and `updated:` change and one Log line is appended,
+ * `parent set to <ID>` or `parent removed (was <ID>)`. The parent the card already has returns the same string. Whether the
+ * parent exists, and a loop, are parentRefusal's; the caller checks them first.
+ */
+export function setParentCard(text: string, id: string, stamp: Stamp, who: string): Result<string> {
+  const card = parseCard(text)
+  if (!card.ok) return card
+  const old = card.value.parent
+  if (old === id) return ok(text)
+  if (id === '' && old === '') return ok(text)
+  const withParent = setParent(text, id)
+  if (!withParent.ok) return withParent
+  const stamped = setScalar(withParent.value, 'updated', stamp.date)
+  if (!stamped.ok) return stamped
+  return appendLog(stamped.value, { date: stamp.date, time: stamp.time, who, text: id === '' ? `parent removed (was ${old})` : `parent set to ${id}` })
+}
+
 /**
  * Give the card a new ID after a retype: rewrite `id:` and `updated:` and append one Log line
  * `retyped from <old> to <new>`. Every other byte stays (the file rename is the caller's). The ID the card

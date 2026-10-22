@@ -7,13 +7,14 @@
 // Nothing in the running code imports this file yet; hooks/register.tsx will draw from it in Child 4 step 2.
 //
 // Where the spec is silent, the choice is in a comment next to the code and in the build report.
-import { parseCard } from './cards.ts'
+import { compareIds, parseCard } from './cards.ts'
 import { flagKind } from './flags.ts'
 import type { FlagKind } from './flags.ts'
 import { DEFAULT_TYPES, findLane, typeOfId } from './board.ts'
 import type { Lane } from './board.ts'
 import { agentText, barText, cardFacts, cardStatus, reasonLine, stepInHand, timeWords } from './status.ts'
 import type { CardFacts, CardStatus } from './status.ts'
+import { childrenHead } from './strings.ts'
 import type { Result, Stamp } from './types.ts'
 
 /** The open card shows this many of the newest Log lines until `Show the whole log` is pressed (spec 10). */
@@ -33,14 +34,24 @@ export type CardViewInput = {
   board: { lanes: readonly Lane[] }
   /** The lane label each card this one waits on sits in, by card ID. A card missing here is not known to be done. */
   childLanes: Readonly<Record<string, string>>
+  /** Every card on the board (ID, title, status line, `parent:`), for the Parent and Children lines. Absent: none are shown. */
+  cards?: readonly { id: string; title: string; status: string; parent?: string }[]
   /** A worker agent is running on the card. */
   isWorking: boolean
   /** A turn is queued for the card, no worker is on it, and it is not the running turn. */
   isQueued: boolean
+  /** The running turn is about this card. Absent reads as false. */
+  isTurn?: boolean
   /** Claude is in a running turn (about any card). */
   isClaudeBusy: boolean
+  /** A turn is running, about any card or none: someone is on the card, so it is not hanging. Absent reads as false. */
+  isAnyTurn?: boolean
+  /** The card's only agents are idle or completed (between steps); see StatusInput.between. */
+  between?: { since: Stamp; isNeutral: boolean; isIdle?: boolean } | null
   /** The running agent's description (`KB-0012 step 2: fix date format`), null when none. */
   agent: string | null
+  /** Every running agent's text on the card, in order (the working box lists them when there are two or more). Absent: none. */
+  agents?: readonly string[]
   /** The local moment now, for the time words. */
   now: Stamp
   /** `Show the whole log` has been pressed: every Log line is shown. */
@@ -237,7 +248,7 @@ export function flagButtons(kind: FlagKind | null, lanes: readonly Lane[]): Flag
 export type WaitingBox = {
   kind: 'waiting'
   flagKind: FlagKind
-  colour: 'warning' | 'error'
+  colour: 'warning' | 'error' | 'success'
   glyph: string
   /** The sentence beside the glyph, bold. */
   text: string
@@ -256,6 +267,8 @@ export type WorkingBox = {
   label: string
   /** `Step 3 of 5: lane panels and spacing`; with no plan the running agent's text (may be ''). */
   text: string
+  /** Each worker's own text when two or more run on the card, else empty. */
+  workers: string[]
   /** The bar's raw counts and its text (`▰▰▱▱▱`); null with no plan. */
   bar: { done: number; total: number; glyphs: string } | null
   /** `2 of 5 steps done`; null with no plan. */
@@ -275,6 +288,12 @@ export type ChildrenBox = {
 }
 
 export type StatusBox = WaitingBox | QueuedBox | WorkingBox | ChildrenBox
+
+/** A card linked to the open one by `parent:`: `lane` is its lane as the board names it (null when the card is not on the board), `isDone` when that lane has the role done. */
+export type FamilyLink = { id: string; title: string; lane: string | null; isDone: boolean }
+
+/** The open card's children (the cards whose `parent:` is its ID) with `head` the line's words, `Children (3): 2 of 3 done`. */
+export type ChildrenLine = { head: string; children: FamilyLink[] }
 
 const HINT_QUESTION = 'Type your answer in the comment box below.'
 
@@ -299,6 +318,8 @@ function waitingBox(flag: string, steps: number, lanes: readonly Lane[]): Waitin
     text = 'A step failed 4 times. Open the log to see why.'
   } else if (reason.kind === 'gate') {
     text = sentenceEnd(reason.text) + '. Claude will not go on until you approve.'
+  } else if (reason.kind === 'ready') {
+    text = 'Ready to merge. The pull request is checked and waits for you; merge it yourself (the link and the command are in the Log), then move this card to Auto.'
   } else {
     // A question is its question; any other flag is shown as written (spec 8 has the same two).
     text = reason.text
@@ -329,7 +350,7 @@ function queuedBox(isClaudeBusy: boolean): QueuedBox {
   }
 }
 
-function workingBox(facts: CardFacts, status: CardStatus, agent: string | null, branch: string, pr: string, now: Stamp): WorkingBox {
+function workingBox(facts: CardFacts, status: CardStatus, agent: string | null, agents: readonly string[], branch: string, pr: string, now: Stamp): WorkingBox {
   const hasPlan = facts.total > 0
   const text = hasPlan ? status.text : agentText(agent)
   const last = facts.last === null ? null : 'Last: ' + facts.last.text + (status.time === '' ? '' : ', ' + timeWords({ date: facts.last.date, time: facts.last.time }, now))
@@ -340,6 +361,7 @@ function workingBox(facts: CardFacts, status: CardStatus, agent: string | null, 
     colour: 'claude',
     label: '● Working',
     text,
+    workers: agents.length > 1 ? agents.slice() : [],
     bar: hasPlan ? { done: facts.done, total: facts.total, glyphs: barText(facts.done, facts.total) } : null,
     progress: hasPlan ? facts.done + ' of ' + facts.total + (facts.total === 1 ? ' step done' : ' steps done') : null,
     last,
@@ -378,6 +400,10 @@ export type CardView = {
   typeOptions: string[]
   /** Claude's suggestion of another type, or null (none, or a retype came after it). */
   suggestion: TypeSuggestion | null
+  /** The card's parent (its `parent:` line), null when it has none. */
+  parent: FamilyLink | null
+  /** The card's children, null when it has none. */
+  kids: ChildrenLine | null
 }
 
 /**
@@ -406,6 +432,13 @@ export function cardView(i: CardViewInput): Result<CardView> {
     const found = at === undefined ? undefined : findLane({ lanes }, at)
     return { id, lane: at === undefined ? null : found === undefined ? at : found.label, isDone: found !== undefined && found.role === 'done' }
   })
+  const link = (id: string): FamilyLink => {
+    const found = (i.cards ?? []).find((c) => c.id === id)
+    const at = found === undefined ? undefined : findLane({ lanes }, found.status)
+    return { id, title: found === undefined ? '' : found.title, lane: found === undefined ? null : at === undefined ? found.status : at.label, isDone: at !== undefined && at.role === 'done' }
+  }
+  const kidIds = (i.cards ?? []).filter((c) => c.parent === card.id).map((c) => c.id).sort(compareIds)
+  const kids = kidIds.map(link)
   const status = cardStatus({
     facts: f,
     flag: card.flag,
@@ -413,17 +446,21 @@ export function cardView(i: CardViewInput): Result<CardView> {
     isClaudeOnly: claudeOnly,
     isWorking: i.isWorking,
     isQueued: i.isQueued,
+    isTurn: i.isTurn,
     isClaudeBusy: i.isClaudeBusy,
+    isAnyTurn: i.isAnyTurn,
+    between: i.between,
     agent: i.agent,
     branch: card.branch,
     pr: card.pr,
     doneChildren: children.filter((c) => c.isDone).map((c) => c.id),
+    goneChildren: children.filter((c) => c.lane === null).map((c) => c.id),
     now: i.now,
   })
 
   let box: StatusBox | null = null
   if (status.kind === 'queued') box = queuedBox(i.isClaudeBusy)
-  else if (status.kind === 'working') box = workingBox(f, status, i.agent, card.branch, card.pr, i.now)
+  else if (status.kind === 'working') box = workingBox(f, status, i.agent, i.agents ?? [], card.branch, card.pr, i.now)
   else if (status.kind === 'waiting') box = waitingBox(card.flag, f.total, lanes)
   else if (status.kind === 'children') box = { kind: 'children', colour: 'default', text: status.text, children }
 
@@ -438,6 +475,8 @@ export function cardView(i: CardViewInput): Result<CardView> {
       typeValue: own === undefined ? NO_TYPE : own.name,
       typeOptions: own === undefined ? [NO_TYPE, ...typeNames] : typeNames,
       suggestion: typeSuggestion(card.log),
+      parent: card.parent === '' ? null : link(card.parent),
+      kids: kids.length === 0 ? null : { head: childrenHead({ done: kids.filter((k) => k.isDone).length, total: kids.length }), children: kids },
       id: card.id,
       title: card.title,
       lane: lane === undefined ? card.status : lane.label,

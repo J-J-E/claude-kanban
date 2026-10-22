@@ -1,4 +1,4 @@
-// The file layer: finds kanban/, reads the board and cards, and makes the six writes (add, move, comment, retype, merge, decide)
+// The file layer: finds kanban/, reads the board and cards, and makes the seven writes (add, move, comment, retype, merge, parent, decide)
 // through the same library the pane uses (../../hooks/lib). Every write re-checks the file's time first and refuses
 // when the file changed since it was read. Nothing here throws for a refused request: it returns { ok: false }.
 import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -17,7 +17,7 @@ import {
   unknownTypeMessage,
 } from '../../hooks/lib/board.ts'
 import type { Board, CardFile, Lane, Problem } from '../../hooks/lib/board.ts'
-import { appendLog, cardFileName, mergeCardText, mergeRefusal, newCardText, nextOrder, retypeCardText, setParent } from '../../hooks/lib/cards.ts'
+import { appendLog, cardFileName, mergeCardText, mergeRefusal, newCardText, nextOrder, parentRefusal, retypeCardText, setParent, setParentCard } from '../../hooks/lib/cards.ts'
 import { allocateId, resolveRef, retypedFileName } from '../../hooks/lib/ids.ts'
 import type { Card, Stamp } from '../../hooks/lib/types.ts'
 
@@ -391,6 +391,49 @@ export function mergeCards(dir: string, input: MergeInput, now: Date = new Date(
   if (written) return written
   unlinkSync(dragged.path)
   return { ok: true, message: `${nameOf(dragged)} merged into ${nameOf(survivor)}.`, id: survivor.id, was: dragged.id }
+}
+
+export type ParentInput = { id: string; parent: string; who: string }
+
+/**
+ * Set a card's parent, or remove it with an empty `parent` (the parent verb, format.md sections 3 and 11): `parent:`, `updated:` and one
+ * Log line (`parent set to <ID>` / `parent removed (was <ID>)`). Refused, changing nothing, for a card in an auto lane and for every
+ * refusal of parentRefusal (itself, a card not on the board, the parent it already has, a loop). An old ID is followed on both cards.
+ */
+export function setCardParent(dir: string, input: ParentInput, now: Date = new Date()): Outcome<{ id: string; parent: string }> {
+  const who = cleanWho(input.who)
+  if (typeof who !== 'string') return who
+  const loaded = loadBoard(dir)
+  if (!loaded.ok) return loaded
+  const f = findCardFile(loaded.state, input.id)
+  if (!f.ok) return f
+  const { found } = f
+  const cards = loadCards(loaded.state).cards
+  const card = cards.find((c) => c.id === found.id)
+  if (card === undefined) return refuse(`${found.id} cannot be read (see board_list). Nothing was changed.`)
+  if (findLane(loaded.state.board, card.status)?.role === 'auto') {
+    return refuse(`${found.id} is being worked. Move it out of Auto or wait, then change its parent. Nothing was changed.`)
+  }
+  let parentId = ''
+  if (String(input.parent ?? '') !== '') {
+    const p = findCardFile(loaded.state, input.parent)
+    if (!p.ok) return p
+    parentId = p.found.id
+    const refused = parentRefusal(card, parentId, cards)
+    if (refused !== undefined) return refuse(refused)
+  } else if (card.parent === '') {
+    return refuse(`${found.id} has no parent. Nothing was changed.`)
+  }
+  const text = setParentCard(found.text, parentId, stampOf(now), who)
+  if (!text.ok) return refuse(`${text.message} Nothing was changed.`)
+  const written = writeChecked(found.path, text.value, found.mtime)
+  if (written) return written
+  return {
+    ok: true,
+    message: parentId === '' ? `Removed the parent of ${nameOf(found)}.` : `${nameOf(found)} is now a child of ${parentId}.`,
+    id: found.id,
+    parent: parentId,
+  }
 }
 
 export type DecideInput ={ title: string; decision: string; reason: string; supersedes?: number }

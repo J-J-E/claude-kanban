@@ -19,6 +19,8 @@ import {
   clearSettings,
   clearTarget,
   defaultRoleText,
+  mergeChoices,
+  mergeBySetToast,
   modelChoices,
   modelToast,
   resetKeys,
@@ -50,11 +52,13 @@ describe('the table of defaults (spec 18.1)', () => {
     })
   })
 
-  test('the saved keys are the seven settings lines, in the tab order', () => {
+  test('the saved keys are the nine settings lines', () => {
     expect(SAVED_KEYS).toEqual([
       'workers',
       'manager_model', 'manager_thinking', 'planner_model', 'planner_thinking',
       'worker_model', 'worker_thinking',
+      'needs_you_in_chat',
+      'merge_by',
     ])
   })
 
@@ -166,7 +170,7 @@ describe('thinking choices per model, and the usage words', () => {
 describe('rows and Reset', () => {
   test('a fresh install: nothing differs, no Reset, Everything is at its default', () => {
     const rows = settingsRows(fresh())
-    expect(rows.map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker'])
+    expect(rows.map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker', 'chat', 'merge'])
     expect(rows.every((r) => !r.differs)).toBe(true)
   })
 
@@ -182,6 +186,35 @@ describe('rows and Reset', () => {
     expect(must(savedKeys(text))).toEqual(['planner_thinking', 'workers'])
     const v = must(parseBoard(text))
     expect(settingsRows(v).some((r) => r.differs)).toBe(false)
+  })
+
+  test('the chat row: off by default, differs when on, Reset removes its one line', () => {
+    const chat = (v: SettingsValues, d?: Defaults) => settingsRows(v, d)[4]
+    expect(chat(fresh())).toMatchObject({ target: 'chat', label: 'Chat questions', value: false, defaultValue: false, defaultText: 'off', differs: false })
+    expect(chat(withValues({ needsYouInChat: true }))).toMatchObject({ value: true, differs: true })
+    expect(resetToast(chat(withValues({ needsYouInChat: true })))).toBe('Chat questions is back to off.')
+    expect(chat(withValues({ needsYouInChat: true }), { ...DEFAULTS, needsYouInChat: true })).toMatchObject({ differs: false, defaultText: 'on' })
+    expect(resetKeys('chat')).toEqual(['needs_you_in_chat'])
+    const t = must(setBoardSetting(INIT_BOARD_EXAMPLE, 'needs_you_in_chat', 'on'))
+    expect(must(savedKeys(t))).toEqual(['needs_you_in_chat'])
+    expect(must(clearTarget(t, 'chat'))).toBe(INIT_BOARD_EXAMPLE)
+    expect(must(clearAllSettings(t))).toBe(INIT_BOARD_EXAMPLE)
+  })
+
+  test('the merge row: claude by default, differs when owner, Reset removes its one line', () => {
+    const merge = (v: SettingsValues, d?: Defaults) => settingsRows(v, d)[5]
+    expect(merge(fresh())).toMatchObject({ target: 'merge', label: 'Merge by', value: 'claude', defaultValue: 'claude', defaultText: 'claude', differs: false })
+    expect(merge(withValues({ mergeBy: 'owner' }))).toMatchObject({ value: 'owner', differs: true })
+    expect(resetToast(merge(withValues({ mergeBy: 'owner' })))).toBe('Merge by is back to claude.')
+    expect(merge(withValues({ mergeBy: 'owner' }), { ...DEFAULTS, mergeBy: 'owner' })).toMatchObject({ differs: false, defaultText: 'owner' })
+    expect(mergeChoices()).toEqual([{ value: 'claude', label: 'Claude' }, { value: 'owner', label: 'Owner' }])
+    expect(mergeBySetToast('owner')).toBe('Pull requests are merged by owner.')
+    expect(resetKeys('merge')).toEqual(['merge_by'])
+    expect(DEFAULTS.mergeBy).toBe('claude')
+    const t = must(setBoardSetting(INIT_BOARD_EXAMPLE, 'merge_by', 'owner'))
+    expect(must(savedKeys(t))).toEqual(['merge_by'])
+    expect(must(clearTarget(t, 'merge'))).toBe(INIT_BOARD_EXAMPLE)
+    expect(must(clearAllSettings(t))).toBe(INIT_BOARD_EXAMPLE)
   })
 
   test('reset keys: one for workers, two for a role', () => {
@@ -202,6 +235,8 @@ describe('rows and Reset', () => {
 describe('a board\'s saved defaults', () => {
   const saved: Defaults = {
     workers: 4,
+    needsYouInChat: false,
+    mergeBy: 'claude',
     roles: {
       manager: { model: 'haiku', thinking: 'low' },
       planner: { model: 'opus', thinking: 'none' },
@@ -213,7 +248,9 @@ describe('a board\'s saved defaults', () => {
     expect(DEFAULT_KEYS).toEqual(SAVED_KEYS.map((k) => 'default_' + k))
     expect(DEFAULT_KEYS[0]).toBe('default_workers')
     expect(DEFAULT_KEYS[6]).toBe('default_worker_thinking')
-    expect(DEFAULT_KEYS).toHaveLength(7)
+    expect(DEFAULT_KEYS[7]).toBe('default_needs_you_in_chat')
+    expect(DEFAULT_KEYS[8]).toBe('default_merge_by')
+    expect(DEFAULT_KEYS).toHaveLength(9)
   })
 
   test('the built-in table satisfies the Defaults type', () => {
@@ -338,7 +375,7 @@ describe('an older board.md that still has advisor lines', () => {
     const b = must(parseBoard(withOld()))
     expect(b.defaults).toEqual(DEFAULTS)
     expect(b.savedDefaults).toEqual([])
-    expect(settingsRows(b).map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker'])
+    expect(settingsRows(b).map((r) => r.target)).toEqual(['workers', 'manager', 'planner', 'worker', 'chat', 'merge'])
     expect(settingsRows(b).some((r) => r.differs)).toBe(false)
     expect(must(savedKeys(withOld('workers: 3')))).toEqual(['workers'])
   })

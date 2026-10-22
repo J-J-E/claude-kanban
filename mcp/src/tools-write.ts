@@ -1,8 +1,8 @@
-// The six write tools: card_add, card_move, card_comment, card_retype, card_merge and decision_add. They call the file layer (store.ts)
+// The seven write tools: card_add, card_move, card_comment, card_retype, card_merge, card_parent and decision_add. They call the file layer (store.ts)
 // and return its text. Every one but decision_add takes the caller's name for the Log. The server only edits files; it never starts work.
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { addCard, commentOn, decide, mergeCards, moveCardTo, refuse, retypeCard } from './store.ts'
+import { addCard, commentOn, decide, mergeCards, moveCardTo, refuse, retypeCard, setCardParent } from './store.ts'
 import type { Outcome } from './store.ts'
 import { reply } from './tools-read.ts'
 
@@ -70,6 +70,15 @@ export function registerWriteTools(server: McpServer, kanbanDir: () => string | 
       },
     },
     (a) => run((dir) => mergeCards(dir, a)),
+  )
+  server.registerTool(
+    'card_parent',
+    {
+      description:
+        'Set or remove the parent of a card. "parent" is the ID of the parent card, or "" to remove the link. Sets parent:, updated and one Log line (parent set to <ID> / parent removed (was <ID>)). Refused for a card in an auto lane, for the card itself, a card not on the board, the parent it already has, and a loop.',
+      inputSchema: { id: cardId, parent: z.string().describe('The parent: BUG-0012, bug 12 or 12; an empty string removes the parent'), who },
+    },
+    (a) => run((dir) => setCardParent(dir, a)),
   )
   server.registerTool(
     'decision_add',

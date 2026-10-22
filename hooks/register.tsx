@@ -7,9 +7,11 @@
 // below), the Settings tab's panel and the card view. Every file write the pane ever makes goes through that hook, a Select or a Button or an Input here.
 // All feedback is a toast; the pane keeps no status line.
 import { atom, read, update } from 'claude-code'
-import type { AgentInfo, EngineInterface, FsEntry, Register, RenderSurface, Timer, UiMessageResult, UiOpenResult } from 'claude-code'
+import type { AgentInfo, EngineInterface, FsEntry, On, Register, RenderSurface, Timer, UiMessageResult, UiOpenResult } from 'claude-code'
 
 import type { KanbanBad, KanbanCard, KanbanFacts, KanbanLane, KanbanLanesView, KanbanQueued, KanbanSnapshot, KanbanWorking } from '../types'
+import { PROBE_LOG_SCRIPT } from './lib/probe.ts'
+import { chatFullCheck } from './lib/hygiene.ts'
 import { clearSavedDefaults, DEFAULT_TYPES, findLane, findType, groupByLane, moveCard, parseBoard, readCards, saveDefaults, setBoardSetting, setCounter, typeOfId } from './lib/board.ts'
 import type { Board } from './lib/board.ts'
 import { allocateId, lineage } from './lib/ids.ts'
@@ -30,7 +32,9 @@ import {
   parseLogLine,
   renumber,
   setCardField,
+  parentRefusal,
   setOrder,
+  setParentCard,
   setTitle,
 } from './lib/cards.ts'
 import type { CardField } from './lib/cards.ts'
@@ -38,17 +42,27 @@ import { cardView } from './lib/cardview.ts'
 import { findWords, matchesFind } from './lib/find.ts'
 import type { CardView as CardModel, StatusBox } from './lib/cardview.ts'
 import { flagKind } from './lib/flags.ts'
-import { isGateApproval, managerNote, MERGE_NO, MERGE_YES, mergeQuestion } from './lib/strings.ts'
+import { hangingStripText, isGateApproval, linkMark, managerNote, PARENT_MAX, PARENT_NONE, MERGE_HEAD, MERGE_NO, MERGE_YES, mergeQuestion, mergeScrollToast, RESUME_LABEL } from './lib/strings.ts'
+import type { NoteWorker } from './lib/strings.ts'
 import type { NoteCard } from './lib/strings.ts'
-import { parseFrontmatter } from './lib/frontmatter.ts'
+import { getScalar, parseFrontmatter, setScalar } from './lib/frontmatter.ts'
+import { hasMergeRule, parseAllowRules, SETTINGS_SCRIPT, SETUP_KEY, setupLine } from './lib/setup.ts'
+import type { SetupFacts } from './lib/setup.ts'
 import {
+  CHAT_KEY,
+  CHAT_OFF,
+  CHAT_ON,
   DEFAULTS,
+  MERGE_KEY,
+  MERGE_VALUES,
   RESTORE_ORIGINAL_TOAST,
   RESTORE_TOAST,
   ROLES,
   SAVE_DEFAULTS_TOAST,
   clearAllSettings,
+  chatToast,
   clearTarget,
+  mergeBySetToast,
   modelChoices,
   modelToast,
   resetToast,
@@ -75,7 +89,7 @@ import { noMatchText, toolbarTree } from './ui/toolbar.tsx'
 import type { ToolbarProps } from './ui/toolbar.tsx'
 import type { BoardCard, BoardProps, BoardView } from './lib/layout.ts'
 import { isLaneOpen } from './lib/layout.ts'
-import { agentText, cardFacts, cardStatus as statusOf, changedWord, stepInHand, stepShort } from './lib/status.ts'
+import { agentKind, agentText, betweenIsNeutral, cardFacts, cardStatus as statusOf, changedWord, isNobodyOn, stepInHand, stepShort } from './lib/status.ts'
 import type { CardFacts } from './lib/status.ts'
 import type { Card, Result, Stamp } from './lib/types.ts'
 
@@ -170,8 +184,8 @@ const MAX_VIEW_LANES = 64
 const MAX_LANE_NAME = 100
 
 const SETUP_PROMPT = 'Kanban: set up a board here with the kanban skill.'
-/** The prompts about one card: a move, a card created in a lane that has an action, a delete, a retype and a merge (the card dropped, which goes away). */
-const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete|asked to retype|asked to merge) ([A-Z]{1,10}-\d{4,}) "/
+/** The prompts about one card: a move, a card created in a lane that has an action, a delete, a retype and a merge (the card dropped, which goes away); and the one ask to resume (its first ID is the card named). */
+const CARD_PROMPT = /^Kanban: .+? (moved|created|asked to delete|asked to retype|asked to merge|asked to resume) ([A-Z]{1,10}-\d{4,})(?: "|[,.])/
 const KANBAN_FILE = /(^|\/)kanban\/([^/]+\.md)$/
 const WORKING_ID = /^([A-Z]{1,10}-\d{4,})/
 
@@ -189,11 +203,14 @@ const ACTING_ROLES = ['plan', 'auto', 'manual']
 // Each reference is spelled out so `claude plugin validate` can list what the module reads and writes.
 const snapshotA = atom({ plugin: 'kanban', key: 'snapshot' } as const, null)
 const workingA = atom({ plugin: 'kanban', key: 'working' } as const, [])
+const betweenA = atom({ plugin: 'kanban', key: 'between' } as const, [])
 const turnCardA = atom({ plugin: 'kanban', key: 'turnCard' } as const, null)
 /** True from any main-session turn.start to its turn.complete: Claude is in a turn even when no card is marked (a chat turn). */
 const inTurnA = atom({ plugin: 'kanban', key: 'inTurn' } as const, false)
 /** The model the chat is really on, as the engine names it ('' = not known). The pane only says it; the board never switches it. */
 const chatModelA = atom({ plugin: 'kanban', key: 'chatModel' } as const, '')
+/** True once the chat has been asked to run /compact (hooks/lib/hygiene.ts): the message comes once per chat. */
+const chatWarnedA = atom({ plugin: 'kanban', key: 'chatWarned' } as const, false)
 const queuedA = atom({ plugin: 'kanban', key: 'queued' } as const, [])
 const selectedA = atom({ plugin: 'kanban', key: 'selected' } as const, null)
 const tabA = atom({ plugin: 'kanban', key: 'tab' } as const, 'board')
@@ -396,6 +413,8 @@ function isIdOrNull(value: unknown): value is string | null {
 const NO_SETTINGS = {
   owner: '',
   workers: DEFAULTS.workers,
+  needsYouInChat: DEFAULTS.needsYouInChat,
+  mergeBy: DEFAULTS.mergeBy,
   managerModel: DEFAULTS.roles.manager.model,
   plannerModel: DEFAULTS.roles.planner.model,
   workerModel: DEFAULTS.roles.worker.model,
@@ -428,6 +447,8 @@ function boardOf(snap: KanbanSnapshot): Board {
     counters: {},
     owner: s.owner,
     workers: s.workers,
+    needsYouInChat: s.needsYouInChat === true,
+    mergeBy: s.mergeBy ?? DEFAULTS.mergeBy,
     managerModel: s.managerModel,
     plannerModel: s.plannerModel,
     workerModel: s.workerModel,
@@ -448,7 +469,7 @@ function toCard(c: KanbanCard): Card {
     flag: c.flag,
     branch: c.branch ?? '',
     pr: c.pr ?? '',
-    parent: '',
+    parent: c.parent ?? '',
     labels: c.labels ?? [],
     model: c.model ?? '',
     thinking: c.thinking ?? '',
@@ -491,7 +512,7 @@ function workingOf(raw: unknown): KanbanWorking[] {
   if (!Array.isArray(raw)) return []
   const out: KanbanWorking[] = []
   for (const w of raw as unknown[]) {
-    if (isRecord(w) && typeof w.id === 'string') out.push({ id: w.id, description: typeof w.description === 'string' ? w.description : '' })
+    if (isRecord(w) && typeof w.id === 'string') out.push({ id: w.id, description: typeof w.description === 'string' ? w.description : '', ...(typeof w.since === 'number' ? { since: w.since } : {}), ...(typeof w.status === 'string' ? { status: w.status } : {}), ...(typeof w.agentId === 'string' ? { agentId: w.agentId } : {}) })
   }
   return out
 }
@@ -514,6 +535,8 @@ function compactFacts(text: string): KanbanFacts | null {
     retry: f.retry === null ? null : { n: f.retry.n, of: f.retry.of, text: cut(f.retry.text) },
     last: f.last === null ? null : { date: f.last.date, time: f.last.time, who: f.last.who, text: cut(f.last.text) },
     waitingOn: f.waitingOn,
+    started: f.started,
+    waitThing: f.waitThing === null ? null : cut(f.waitThing),
   }
 }
 
@@ -532,6 +555,8 @@ function defaultsOf(s: KanbanSnapshot['settings']): Defaults {
 function settingsValues(s: KanbanSnapshot['settings']): SettingsValues {
   return {
     workers: s.workers,
+    needsYouInChat: s.needsYouInChat === true,
+    mergeBy: s.mergeBy ?? DEFAULTS.mergeBy,
     managerModel: s.managerModel,
     managerThinking: s.managerThinking ?? DEFAULTS.roles.manager.thinking,
     plannerModel: s.plannerModel,
@@ -597,7 +622,7 @@ function headerProps(
   selected: string | null,
   chatModel: string,
 ): HeaderProps {
-  const waiting = { total: 0, plan: 0, question: 0, failed: 0, gate: 0, other: 0 }
+  const waiting = { total: 0, plan: 0, question: 0, failed: 0, gate: 0, other: 0, ready: 0 }
   for (const c of snap.cards) {
     const kind = waitsOnHim(laneOfCard(snap, c), c.flag) ? flagKind(c.flag) : null
     if (kind === null) continue
@@ -624,7 +649,7 @@ function headerProps(
     waiting,
     tab: shown,
     cardOpen: shown === 'board' && cardIdIn(snap, selected) !== null,
-    claude: { cards, plan, step },
+    claude: { cards, plan, step, agents: cards.flatMap((id) => agentsOf(agents, id).map((text) => ({ id, text }))) },
     workers: { running: agents.length, limit: snap.settings.workers },
     queued: waits.size,
     turnCard: turn,
@@ -667,7 +692,36 @@ function cardSections(text: string): { description: string; plan: string } {
 }
 
 /** The facts of a card the snapshot has none for (a snapshot saved before the header band, or a file that gave none). */
-const NO_FACTS: CardFacts = { steps: [], total: 0, done: 0, retry: null, last: null, waitingOn: [] }
+const NO_FACTS: CardFacts = { steps: [], total: 0, done: 0, retry: null, last: null, waitingOn: [], started: false, waitThing: null }
+
+/** A card's snapshot facts as the status library reads them: a snapshot saved before ENH-0063 has no `started` or `waitThing`. */
+function factsOfCard(f: KanbanFacts | null | undefined): CardFacts {
+  return f === null || f === undefined ? NO_FACTS : { ...f, started: f.started === true, waitThing: f.waitThing ?? null }
+}
+
+/**
+ * The cards nobody has (spec 8, row 2b), in board order: in a lane with role `auto`, the Auto flow started, no agent, no turn and no queued
+ * prompt on them, not waiting on a named thing. Only this live pane can say it: with no chat there is no pane and nothing is called lost.
+ */
+function hangingIds(snap: KanbanSnapshot, working: readonly KanbanWorking[], queued: readonly KanbanQueued[], turnCard: string | null, isInTurn: boolean, between: ReadonlyMap<string, BetweenState>): string[] {
+  const roleOf = new Map<string, string>()
+  for (const g of groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes) for (const c of g.cards) roleOf.set(c.id, g.lane.role)
+  const doneOf = (facts: CardFacts): string[] => facts.waitingOn.filter((id) => roleOf.get(id) === 'done')
+  const goneOf = (facts: CardFacts): string[] => facts.waitingOn.filter((id) => !roleOf.has(id))
+  const busy = new Set(working.map((w) => w.id))
+  const wait = new Set(queued.map((q) => q.id))
+  return boardIds(snap).filter((id) => {
+    const c = snap.cards.find((x) => x.id === id)
+    if (c === undefined) return false
+    const facts = factsOfCard(c.facts)
+    return isNobodyOn(facts, roleOf.get(id) ?? '', { isWorking: busy.has(id), isQueued: wait.has(id), isTurn: turnCard === id, isAnyTurn: turnCard !== null || isInTurn, isBetween: between.get(id)?.isNeutral === true, doneChildren: doneOf(facts), goneChildren: goneOf(facts) })
+  })
+}
+
+/** The text of every running agent on a card (each that says more than the card's ID), in the order the app lists them; none: an empty list. */
+function agentsOf(working: readonly KanbanWorking[], id: string): string[] {
+  return working.filter((w) => w.id === id).map((w) => agentText(w.description)).filter((t) => t !== '')
+}
 
 /** The description of the running agent on a card (the first that says more than the card's ID), null when there is none. */
 function agentOf(working: readonly KanbanWorking[], id: string): string | null {
@@ -726,6 +780,12 @@ function shownIds(snap: KanbanSnapshot, view: KanbanLanesView, find: string): st
  * Client's cap is 100,000). With Find on (`find` has words) only the cards that match are sent, each lane's total is its
  * matches, and the props say so (`isFiltered`).
  */
+/** The between-steps input of one card for the status line, null when it has none. */
+function betweenFor(states: ReadonlyMap<string, BetweenState>, id: string): { since: Stamp; isNeutral: boolean; isIdle: boolean } | null {
+  const b = states.get(id)
+  return b === undefined ? null : { since: stampOf(b.sinceMs), isNeutral: b.isNeutral, isIdle: b.isIdle }
+}
+
 function boardProps(
   snap: KanbanSnapshot,
   working: readonly KanbanWorking[],
@@ -736,17 +796,31 @@ function boardProps(
   nowMs: number,
   find: string,
   isInTurn = false,
+  mergeAsk: { id: string; onto: string } | null = null,
+  betweenOf: ReadonlyMap<string, BetweenState> = new Map(),
 ): ClientProps {
   const words = findWords(find)
   const isFiltered = words.length > 0
   const board = boardOf(snap)
-  const groups = groupByLane(board, snap.cards.map(toCard)).lanes.map((g) =>
+  const grouped = groupByLane(board, snap.cards.map(toCard)).lanes
+  const groups = grouped.map((g) =>
     isFiltered ? { ...g, cards: g.cards.filter((c) => matchesFind(c, words, board.types)) } : g,
   )
   const isBusy = new Set(working.map((w) => w.id))
+  const workerCount = new Map<string, number>()
+  for (const w of working) workerCount.set(w.id, (workerCount.get(w.id) ?? 0) + 1)
   const isQueued = new Set(queued.map((q) => q.id))
   const now = stampOf(nowMs)
-  const factsOf = new Map(snap.cards.map((c) => [c.id, c.facts] as const))
+  const factsOf = new Map(snap.cards.map((c) => [c.id, factsOfCard(c.facts)] as const))
+  // The row marks (ENH-0060): a child shows its parent's ID, a parent its children done of all (done: in the done lane, whether or not Find shows it).
+  const doneIds = new Set<string>()
+  for (const g of grouped) if (g.lane.role === 'done') for (const c of g.cards) doneIds.add(c.id)
+  const kidsOf = new Map<string, { done: number; total: number }>()
+  for (const c of snap.cards) {
+    if (c.parent === undefined || c.parent === '') continue
+    const k = kidsOf.get(c.parent) ?? { done: 0, total: 0 }
+    kidsOf.set(c.parent, { done: k.done + (doneIds.has(c.id) ? 1 : 0), total: k.total + 1 })
+  }
   const roleOf = new Map<string, string>()
   for (const g of groups) for (const c of g.cards) roleOf.set(c.id, g.lane.role)
   // A child listed under an ID its card has since left (a retype) is still found, through the card's former IDs.
@@ -767,6 +841,8 @@ function boardProps(
       view: viewProps(view),
       isBusy: isClaudeBusy,
       ...(isFiltered ? { isFiltered: true } : {}),
+      // While the merge question is open the board marks the two cards (spec 14.7).
+      ...(mergeAsk !== null ? { mergeAsk: { id: mergeAsk.id, onto: mergeAsk.onto } } : {}),
       lanes: groups.map((g) => {
         // The lane's sort is a view (spec 13): the cards are sorted by it before the lane is cut to the cap (the size budget).
         const sort = shared
@@ -785,7 +861,7 @@ function boardProps(
             const isTurn = turnCard === c.id
             // Waiting to start (spec 9): a prompt for the card is queued, no worker is on it, and it is not the running turn.
             const isWaiting = isQueued.has(c.id) && !isWorking && !isTurn
-            const card: BoardCard = {
+            const card: BoardCard & { workers?: number } = {
               id: c.id,
               title: c.title.slice(0, 80),
               flag,
@@ -796,20 +872,28 @@ function boardProps(
               labels: c.labels,
               pin: cardPinText(c),
             }
+            // The lane's "N working" counts workers: a card with two workers counts two.
+            if (isWorking) card.workers = workerCount.get(c.id) ?? 1
+            const mark = linkMark(c.parent, kidsOf.get(c.id) ?? { done: 0, total: 0 })
+            if (mark !== '') card.link = mark
             const changed = changedWord(c.updated, now.date)
             if (changed !== '') card.changed = changed
             const status = statusOf({
               facts: factsOf.get(c.id) ?? NO_FACTS,
+              isTurn,
               flag: c.flag,
               role: g.lane.role,
               isClaudeOnly: g.lane.isClaudeOnly,
               isWorking,
               isQueued: isWaiting,
               isClaudeBusy,
+              isAnyTurn: turnCard !== null || isInTurn,
+              between: betweenFor(betweenOf, c.id),
               agent: agentOf(working, c.id),
               branch: c.branch,
               pr: c.pr,
               doneChildren: (factsOf.get(c.id)?.waitingOn ?? []).filter((id) => roleOf.get(id) === 'done'),
+              goneChildren: (factsOf.get(c.id)?.waitingOn ?? []).filter((id) => !roleOf.has(id)),
               now,
             })
             // A plain card (kind new) has no status: it is one row.
@@ -838,6 +922,12 @@ type Ctx = {
   cache: Map<string, { sig: string; text: string }>
   chain: Promise<void>
   ticker: Timer | null
+  /** The running turn is a resume ask: at its end what it left queued is dropped. */
+  isResumeTurn: boolean
+  /** The conversation was compacted since the last manager note: the next note says to re-read the skill. */
+  isCompacted: boolean
+  /** Each agent the app listed at the last refresh: its status and when this pane first saw it in that status (a reload starts over, so `since` is then the first sight). */
+  agentSeen: Map<string, { status: string; since: number }>
   isTicking: boolean
   /** Ticks still to skip while there is no board. */
   skip: number
@@ -862,7 +952,7 @@ type Ctx = {
 }
 
 function newCtx(): Ctx {
-  return { drafts: { add: '', find: '', comment: '', rename: '' }, findTimer: null, isInteractive: false, busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isTicking: false, skip: 0, ticks: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
+  return { drafts: { add: '', find: '', comment: '', rename: '' }, findTimer: null, isInteractive: false, busy: new Set<string>(), cache: new Map<string, { sig: string; text: string }>(), chain: Promise.resolve(), ticker: null, isResumeTurn: false, isCompacted: false, agentSeen: new Map<string, { status: string; since: number }>(), isTicking: false, skip: 0, ticks: 0, isFocusDue: false, seen: new Map<string, string>(), pendingMoves: new Map<string, { from: string; to: string }>() }
 }
 
 // ---------------------------------------------------------------- state helpers
@@ -1057,6 +1147,7 @@ function buildSnapshot(
     labels: c.labels,
     branch: c.branch,
     pr: c.pr,
+    parent: c.parent,
     facts: compactFacts(ctx.cache.get(c.fileName ?? '')?.text ?? ''),
     model: c.model,
     thinking: c.thinking,
@@ -1072,6 +1163,8 @@ function buildSnapshot(
       owner: board.owner,
       types: board.types.map((t) => ({ name: t.name, prefix: t.prefix })),
       workers: board.workers,
+      needsYouInChat: board.needsYouInChat,
+      mergeBy: board.mergeBy,
       managerModel: board.managerModel,
       plannerModel: board.plannerModel,
       workerModel: board.workerModel,
@@ -1090,8 +1183,12 @@ function buildSnapshot(
   }
 }
 
-/** One entry per running or pending agent, its description starting with the card ID (C7) and kept beside it; a card with two agents appears twice. */
-async function loadWorking($: EngineInterface): Promise<void> {
+/**
+ * The agents the app lists whose description starts with a card ID, in two lists (BUG-0023): `working` (running, pending, waiting: one entry per agent,
+ * so a card with two appears twice) and `between` (idle, completed: finished a step and may yet be resumed by message, with `since`, the moment this pane
+ * first saw that status). Failed, killed and unknown statuses are left out.
+ */
+async function loadWorking($: EngineInterface, ctx: Ctx): Promise<void> {
   let agents: AgentInfo[] = []
   try {
     agents = await $.agent.list()
@@ -1099,16 +1196,63 @@ async function loadWorking($: EngineInterface): Promise<void> {
     return
   }
   const snap = await read($, snapshotA)
+  const nowMs = await $.clock.now()
+  const seen = new Map<string, { status: string; since: number }>()
   const list: KanbanWorking[] = []
+  const between: KanbanWorking[] = []
   for (const a of agents) {
-    if (a.status !== 'running' && a.status !== 'pending') continue
+    const status = String(a.status)
+    const prev = ctx.agentSeen.get(a.id)
+    const entry = prev !== undefined && prev.status === status ? prev : { status, since: nowMs }
+    seen.set(a.id, entry)
     const m = WORKING_ID.exec(a.description)
-    if (m !== null && m[1] !== undefined) list.push({ id: followedId(snap, m[1]), description: String(a.description).slice(0, FACT_TEXT_MAX) })
+    if (m === null || m[1] === undefined) continue
+    const kind = agentKind(status)
+    if (kind === 'gone') continue
+    const item: KanbanWorking = { id: followedId(snap, m[1]), description: String(a.description).slice(0, FACT_TEXT_MAX) }
+    if (kind === 'working') list.push(item)
+    else between.push({ ...item, since: entry.since, status, agentId: a.id })
   }
-  list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.description < b.description ? -1 : a.description > b.description ? 1 : 0))
+  ctx.agentSeen = seen
+  const byId = (a: KanbanWorking, b: KanbanWorking): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.description < b.description ? -1 : a.description > b.description ? 1 : 0)
+  list.sort(byId)
+  between.sort(byId)
   // A kept list that differs from the fresh one is replaced.
-  const cur = await read($, workingA)
-  if (JSON.stringify(cur) !== JSON.stringify(list)) await update($, workingA, () => list)
+  if (JSON.stringify(await read($, workingA)) !== JSON.stringify(list)) await update($, workingA, () => list)
+  if (JSON.stringify(await read($, betweenA)) !== JSON.stringify(between)) await update($, betweenA, () => between)
+}
+
+/** A card whose only agents are between steps: when the newest finished (ms) and whether the card is still neutral (betweenIsNeutral). */
+type BetweenState = { sinceMs: number; isNeutral: boolean; isIdle: boolean }
+
+/** The cards whose only agents are idle or completed, with their state at `nowMs`. A card with a running agent is not in it. */
+function betweenStates(snap: KanbanSnapshot, working: readonly KanbanWorking[], between: readonly KanbanWorking[], nowMs: number): Map<string, BetweenState> {
+  const out = new Map<string, BetweenState>()
+  for (const b of between) {
+    if (working.some((w) => w.id === b.id) || typeof b.since !== 'number') continue
+    const prev = out.get(b.id)
+    const sinceMs = prev === undefined ? b.since : Math.max(prev.sinceMs, b.since)
+    const last = snap.cards.find((c) => c.id === b.id)?.facts?.last
+    out.set(b.id, { sinceMs, isIdle: prev?.isIdle === true || b.status === 'idle', isNeutral: betweenIsNeutral(sinceMs, last === null || last === undefined ? null : { date: last.date, time: last.time }, nowMs) })
+  }
+  return out
+}
+
+/** The between-steps cards as the session has them now. */
+async function betweenNow($: EngineInterface, snap: KanbanSnapshot): Promise<Map<string, BetweenState>> {
+  return betweenStates(snap, workingOf(await read($, workingA)), workingOf(await read($, betweenA)), await $.clock.now())
+}
+
+/** Drops the queued resume entry of a card once it has an agent or its newest Claude Log line is `waiting on` / `queued behind` (the resume of several cards starts one and holds the rest). */
+async function releaseResumed($: EngineInterface): Promise<void> {
+  const queued = await read($, queuedA)
+  if (!queued.some((q) => q.kind === 'resume')) return
+  const snap = await read($, snapshotA)
+  if (snap === null) return
+  const working = workingOf(await read($, workingA))
+  const released = (q: KanbanQueued): boolean =>
+    q.kind === 'resume' && (working.some((w) => w.id === q.id) || (snap.cards.find((c) => c.id === q.id)?.facts?.waitThing ?? null) !== null)
+  if (queued.some(released)) await update($, queuedA, (list) => list.filter((q) => !released(q)))
 }
 
 /** Resets what belongs to the card shown: the comment typed, the whole log, the delete question, the type picked, the Rename field. The caller has changed the selection, which redraws. */
@@ -1187,6 +1331,7 @@ async function openCardOf(
   turnCard: string | null,
   isLogOpen: boolean,
   isInTurn: boolean,
+  betweenOf: ReadonlyMap<string, BetweenState>,
 ): Promise<OpenCard | null> {
   const card = snap.cards.find((c) => c.id === selected)
   if (card === undefined) return null
@@ -1210,11 +1355,16 @@ async function openCardOf(
     fileName: card.file,
     board: { lanes: snap.lanes },
     childLanes,
+    cards: snap.cards.map((c) => ({ id: c.id, title: c.title, status: c.status, parent: c.parent ?? '' })),
     isWorking,
     isQueued: queued.some((q) => q.id === card.id) && !isWorking && turnCard !== card.id,
+    isTurn: turnCard === card.id,
     // Claude is in a turn when the running turn is about a card, or any worker is running (a worker lives inside a turn).
     isClaudeBusy: turnCard !== null || isInTurn || working.length > 0,
+    isAnyTurn: turnCard !== null || isInTurn,
+    between: betweenFor(betweenOf, card.id),
     agent: agentOf(working, card.id),
+    agents: agentsOf(working, card.id),
     now: stampOf(await $.clock.now()),
     isLogOpen,
     types: typesOf(snap.settings),
@@ -1305,7 +1455,8 @@ function refresh($: EngineInterface, ctx: Ctx): Promise<void> {
     .then(async () => {
       await load($, ctx)
       await logOutsideMoves($, ctx)
-      await loadWorking($)
+      await loadWorking($, ctx)
+      await releaseResumed($)
       await followRetypes($)
       await dropStaleSelection($, ctx)
       await dropStaleMerge($)
@@ -1374,6 +1525,7 @@ function ensureTicker($: EngineInterface, ctx: Ctx): void {
 function submitPrompt($: EngineInterface, text: string): void {
   const failed = async (why: string): Promise<void> => {
     await dequeue($, text, () => false)
+    await update($, queuedA, (list) => list.filter((q) => !(q.kind === 'resume' && q.text === text)))
     $.ui.toast('The prompt was not accepted: ' + why)
   }
   void $.prompt
@@ -1394,6 +1546,19 @@ async function readChatModel($: EngineInterface): Promise<string> {
   }
 }
 
+/** Reads how full the chat is and, the first time it is nearly full, toasts a request to run /compact. Message only; any failure costs nothing. */
+async function checkChatFull($: EngineInterface): Promise<void> {
+  try {
+    const { context } = await $.session.usage()
+    const warned = await read($, chatWarnedA)
+    const check = chatFullCheck(context?.percent, context?.tokens, warned)
+    if (check.isWarned !== warned) await update($, chatWarnedA, () => check.isWarned)
+    if (check.message !== null) $.ui.toast(check.message)
+  } catch {
+    // The fill is not known: no message.
+  }
+}
+
 /** Keeps the chat's model in state, writing only when it changed so the pane does not redraw each tick. The board never switches it. */
 async function syncChatModel($: EngineInterface): Promise<void> {
   const current = await readChatModel($)
@@ -1411,7 +1576,7 @@ async function replyProps($: EngineInterface): Promise<UiMessageResult> {
   const selected = await read($, selectedA)
   const view = withTabChanges(await read($, lanesViewA), await read($, tabChangesA))
   const find = await read($, findA)
-  return { props: boardProps(snap, working, queued, turnCard, selected, view, await $.clock.now(), find, await read($, inTurnA)) }
+  return { props: boardProps(snap, working, queued, turnCard, selected, view, await $.clock.now(), find, await read($, inTurnA), await read($, mergeAskA), await betweenNow($, snap)) }
 }
 
 /** Whether Claude has a turn running (the running turn is about a card, or a worker is on one): the toasts then say Claude starts when it is free. */
@@ -2064,6 +2229,31 @@ async function copyText($: EngineInterface, surface: RenderSurface, text: string
   $.ui.toast(done)
 }
 
+/** The one ask that picks hanging cards back up (the strip's `Pick these back up`); the skill's Resuming section answers it. */
+function resumePrompt(owner: string, ids: readonly string[]): string {
+  return `Kanban: ${cleanText(owner, 40)} asked to resume ${ids.join(', ')}.`
+}
+
+/** The strip's most IDs in one ask. */
+const RESUME_MAX = 20
+
+/** Pick these back up: queues one entry per card (so none reads as `Nobody on this` while the ask waits) and submits one prompt. Starts nothing by itself. */
+async function askResume($: EngineInterface): Promise<void> {
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard) return
+  if (snap.isReadOnly) {
+    $.ui.toast(`${NOT_READABLE} Nothing was asked.`)
+    return
+  }
+  const ids = hangingIds(snap, workingOf(await read($, workingA)), await read($, queuedA), await read($, turnCardA), await read($, inTurnA), await betweenNow($, snap)).slice(0, RESUME_MAX)
+  if (ids.length === 0) return
+  const prompt = resumePrompt(snap.settings.owner, ids)
+  const now = await $.clock.now()
+  await update($, queuedA, (list) => [...list, ...ids.map((id) => ({ id, kind: 'resume' as const, text: prompt, at: now }))])
+  submitPrompt($, prompt)
+  $.ui.toast((await claudeIsBusy($)) ? 'Claude will pick these back up when it finishes what it is doing.' : 'Claude is picking these back up.')
+}
+
 /** What the toast says once Claude was asked to delete a card: it starts at once, or when it is free. */
 function deleteToast(id: string, isBusy: boolean): string {
   return isBusy ? `Claude will delete ${id} when it finishes what it is doing.` : `Claude is deleting ${id}.`
@@ -2167,12 +2357,7 @@ async function mergePair($: EngineInterface, ctx: Ctx, id: string, onto: string)
   }
   const [dragged, survivor] = pair
   if (dragged === undefined || survivor === undefined) return { ok: false, text: '' }
-  // The snapshot has no parent lines: they are read from the files the pane already holds.
-  const cards = snap.cards.map((c) => {
-    const held = ctx.cache.get(c.file)
-    const parsed = held === undefined ? null : parseCard(held.text, c.file)
-    return parsed !== null && parsed.ok ? parsed.value : toCard(c)
-  })
+  const cards = snap.cards.map(toCard)
   const mine = (c: KanbanCard): Card => cards.find((x) => x.fileName === c.file) ?? toCard(c)
   const working = [...workingOf(await read($, workingA)).map((w) => w.id), ...[await read($, turnCardA)].filter((t): t is string => t !== null)]
   const refused = mergeRefusal(mine(dragged), mine(survivor), cards, boardOf(snap), working)
@@ -2196,7 +2381,37 @@ async function offerMerge($: EngineInterface, ctx: Ctx, data: Record<string, unk
   const pair = await mergePair($, ctx, id, onto)
   if (!pair.ok) return pair.text === '' ? {} : refuse(pair.text)
   await update($, mergeAskA, () => ({ id, onto }))
+  showMergeAsk($, id, onto)
   return replyProps($)
+}
+
+/** How long after the drop the box is scrolled to (its drawing comes after the drop's reply), and how long before the one retry. */
+const MERGE_SCROLL_MS = 50
+const MERGE_SCROLL_RETRY_MS = 300
+
+/**
+ * Brings the merge box into view (spec 14.7): once the pane has drawn it, the engine scrolls the element keyed `merge-ask` as the DOM's
+ * scrollIntoView does, `nearest` so a box already showing does not move. A box not drawn yet is tried once more; when the engine has no
+ * scroll, throws, or answers `{ deny }` both times, one toast says where the question is. A question already answered or replaced says nothing.
+ */
+function showMergeAsk($: EngineInterface, id: string, onto: string, delay = MERGE_SCROLL_MS, isRetry = false): void {
+  $.clock.after(delay, () => {
+    void (async () => {
+      const ask = await read($, mergeAskA)
+      if (ask === null || ask.id !== id || ask.onto !== onto) return
+      let isMoved = false
+      try {
+        // Called, never read as a value (the validator follows $.noun.event calls); an engine without it throws, which lands in the catch.
+        const result = (await $.ui.scroll({ to: { key: 'merge-ask' }, block: 'nearest' })) as { deny?: string } | undefined
+        isMoved = result === undefined || typeof result.deny !== 'string'
+      } catch {
+        isMoved = false
+      }
+      if (isMoved) return
+      if (!isRetry) showMergeAsk($, id, onto, MERGE_SCROLL_RETRY_MS, true)
+      else $.ui.toast(mergeScrollToast(id, onto))
+    })().catch(() => {})
+  })
 }
 
 /** What the toast says once Claude was asked to merge a card: it starts at once, or when it is free. */
@@ -2379,6 +2594,76 @@ async function performRename($: EngineInterface, ctx: Ctx, id: string, raw: stri
   }
 }
 
+/**
+ * The open card's Parent list: sets or (with an empty `parent`) removes the card's `parent:` line, `updated` and one Log line (setParentCard), the way a
+ * rename writes its own (same busy and mtime checks). Refused with a toast, nothing written: a board that cannot be read, a card not on the board, a card
+ * in an Auto lane or being worked, and every refusal of parentRefusal (itself, a card not on the board, the parent it already has, a loop).
+ */
+async function performParent($: EngineInterface, ctx: Ctx, id: string, parent: string): Promise<boolean> {
+  const refuse = async (text: string): Promise<boolean> => {
+    $.ui.toast(text)
+    return false
+  }
+  const snap = await read($, snapshotA)
+  if (snap === null || !snap.hasBoard || snap.isReadOnly) return refuse(`${NOT_READABLE} Nothing was written.`)
+  const matches = snap.cards.filter((c) => c.id === id)
+  const found = matches[0]
+  if (found === undefined) return refuse(`No card ${id} on the board.`)
+  if (matches.length > 1 || !isCardFileName(found.file)) return refuse(`${id} cannot be given a parent; nothing was written.`)
+  const lane = laneOfCard(snap, found)
+  if ((lane !== undefined && lane.role === 'auto') || workingOf(await read($, workingA)).some((w) => w.id === id) || (await read($, turnCardA)) === id) {
+    return refuse(`${id} is being worked. Move it out of Auto or wait, then change its parent. Nothing was changed.`)
+  }
+  const file = found.file
+  if (ctx.busy.has(file)) return refuse(`${id} is being edited by Claude; try again in a moment.`)
+
+  ctx.busy.add(file)
+  try {
+    const path = kanbanPath(file)
+    const before = await $.fs.stat(path)
+    const text = await $.fs.read(path)
+    const card = parseCard(text, file)
+    if (!card.ok) return await refuse(`${id} cannot be read: ${card.message} Nothing was written.`)
+    if (card.value.id !== id) return await refuse(`${file} no longer holds ${id}; nothing was written.`)
+    if (parent === '' && card.value.parent === '') return true
+    const cards = snap.cards.map(toCard)
+    const refused = parent === '' ? undefined : parentRefusal(card.value, parent, cards)
+    if (refused !== undefined) return await refuse(refused)
+    const stamp = stampOf(await $.clock.now())
+    const written = setParentCard(text, parent, stamp, snap.settings.owner)
+    if (!written.ok) return await refuse(written.message)
+    const after = await $.fs.stat(path)
+    if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
+      return await refuse(`${id} changed while its parent was set; nothing was written.`)
+    }
+    await $.fs.write(path, written.value)
+    await refresh($, ctx)
+    $.ui.toast(parent === '' ? `Removed the parent of ${id}.` : `${id} is now a child of ${parent}.`)
+    return true
+  } finally {
+    ctx.busy.delete(file)
+  }
+}
+
+/**
+ * The Parent list's choices for a card: None, then the other cards that are not in a done or scrapped lane, the first PARENT_MAX by ID; the card's own
+ * parent is added when it is not among them, so the list can show it. `value` is the ID ('None' for no parent), `label` the ID and title.
+ */
+function parentChoices(snap: KanbanSnapshot, id: string, current: string): { value: string; label: string }[] {
+  const closed = new Set(snap.lanes.filter((l) => l.role === 'done' || l.role === 'scrapped').map((l) => l.label.toLowerCase()))
+  const open = snap.cards.filter((c) => c.id !== id && !closed.has(c.status.trim().toLowerCase())).sort((a, b) => compareIds(a.id, b.id)).slice(0, PARENT_MAX)
+  const own = snap.cards.find((c) => c.id === current && !open.some((o) => o.id === current))
+  const listed = [...open, ...(own === undefined ? [] : [own])].map((c) => ({ value: c.id, label: `${c.id} ${c.title}` }))
+  const gone = current !== '' && !listed.some((l) => l.value === current)
+  return [{ value: PARENT_NONE, label: PARENT_NONE }, ...listed, ...(gone ? [{ value: current, label: current }] : [])]
+}
+
+/** A pick on the Parent list: None removes the link, an ID sets it; anything else is ignored. */
+function parentFrom($: EngineInterface, ctx: Ctx, id: string, choice: string): void {
+  if (choice !== PARENT_NONE && !ID_PATTERN.test(choice)) return
+  void performParent($, ctx, id, choice === PARENT_NONE ? '' : choice).catch((err: unknown) => noticeError($, err))
+}
+
 /** The Rename field's own submit (Enter, or the `Save` the app draws beside it): writes, then closes the field. */
 async function renameTo($: EngineInterface, ctx: Ctx, id: string, raw: string): Promise<void> {
   if (await performRename($, ctx, id, raw)) {
@@ -2398,6 +2683,8 @@ async function setRenaming($: EngineInterface, ctx: Ctx, id: string, isOpen: boo
 
 /** The Select pick on the Settings tab, or null when the key or the value is not one the tab offers. `value` is the word to write; `toast` says it. */
 function settingPick(key: string, raw: string): { value: string; toast: string } | null {
+  if (key === CHAT_KEY) return raw === CHAT_ON || raw === CHAT_OFF ? { value: raw, toast: chatToast(raw === CHAT_ON) } : null
+  if (key === MERGE_KEY) return MERGE_VALUES.indexOf(raw) !== -1 ? { value: raw, toast: mergeBySetToast(raw) } : null
   if (key === 'workers') return workersChoices().some((c) => c.value === raw) ? { value: raw, toast: workersToast(raw) } : null
   for (const role of ROLES) {
     if (key === settingKey(role, 'model')) return modelChoices().some((c) => c.value === raw) ? { value: raw, toast: modelToast(role, raw) } : null
@@ -2413,6 +2700,8 @@ function settingPick(key: string, raw: string): { value: string; toast: string }
 function valuesOfBoard(b: Board): SettingsValues {
   return {
     workers: b.workers,
+    needsYouInChat: b.needsYouInChat,
+    mergeBy: b.mergeBy,
     managerModel: b.managerModel,
     managerThinking: b.managerThinking,
     plannerModel: b.plannerModel,
@@ -2491,7 +2780,7 @@ async function keepChatModel($: EngineInterface, ctx: Ctx): Promise<void> {
 
 /** `Reset` on a row: removes that row's saved lines, so the shipped defaults apply to it again. A stale press with nothing saved writes and says nothing. */
 async function applyReset($: EngineInterface, ctx: Ctx, target: SettingsTarget): Promise<void> {
-  if (target !== 'workers' && ROLES.indexOf(target) === -1) return
+  if (target !== 'workers' && target !== 'chat' && target !== 'merge' && ROLES.indexOf(target) === -1) return
   await editSettings(
     $,
     ctx,
@@ -2651,23 +2940,295 @@ function needsYouCards(snap: KanbanSnapshot): NoteCard[] {
 }
 
 /**
- * The manager note for a prompt the person typed, or null when none belongs on it: a prompt that did not come from a person
- * (the origin says so), the pane's own `Kanban:` prompts, a slash command, a project with no board or one whose board.md
- * cannot be read. One folder list, and a read only of a file that changed since the last one. Never throws.
+ * The workers the manager should message: a card in an `auto` lane, started, whose only agents are idle or completed (the first sight of that status is `since`),
+ * where the newest Log line is not a `step N done` written at or after `since`. IDs and times only; no titles.
  */
-async function chatNote($: EngineInterface, ctx: Ctx, kind: string | undefined, text: string): Promise<string | null> {
+function workerNotes(snap: KanbanSnapshot, working: readonly KanbanWorking[], between: readonly KanbanWorking[]): NoteWorker[] {
+  const roleOf = new Map<string, string>()
+  for (const g of groupByLane(boardOf(snap), snap.cards.map(toCard)).lanes) for (const c of g.cards) roleOf.set(c.id, g.lane.role)
+  const out: NoteWorker[] = []
+  const done = new Set<string>()
+  for (const b of between) {
+    if (done.has(b.id) || typeof b.since !== 'number' || b.agentId === undefined || working.some((w) => w.id === b.id)) continue
+    const card = snap.cards.find((c) => c.id === b.id)
+    if (card === undefined || roleOf.get(b.id) !== 'auto' || card.facts?.started !== true) continue
+    const last = card.facts.last
+    const since = Math.floor(b.since / 60000) * 60000
+    const lastMs = last === null ? NaN : new Date(Number(last.date.slice(0, 4)), Number(last.date.slice(5, 7)) - 1, Number(last.date.slice(8, 10)), Number(last.time.slice(0, 2)), Number(last.time.slice(3, 5))).getTime()
+    if (last !== null && /^step \d+ done\b/.test(last.text) && lastMs >= since) continue
+    done.add(b.id)
+    out.push({ agent: b.agentId, id: b.id, time: stampOf(b.since).time })
+  }
+  return out
+}
+
+/**
+ * The manager note for a prompt the person typed or the pane raised, or null when none belongs on it: a prompt that did not come from a person or
+ * from this plugin's own `Kanban:` prompts (the origin says so), a slash command, a project with no board or one whose board.md
+ * cannot be read. The agent list is read fresh first, so the note can name a worker that finished since the last tick.
+ * One folder list, and a read only of a file that changed since the last one. Never throws.
+ */
+async function chatNote($: EngineInterface, ctx: Ctx, origin: { kind?: string; name?: string } | undefined, text: string): Promise<string | null> {
   try {
-    if (kind === undefined || !PERSON_ORIGINS.has(kind)) return null
+    const kind = origin?.kind
     const typed = String(text).trimStart()
-    if (typed.startsWith('Kanban:') || typed.startsWith('/')) return null
+    const isPane = kind === 'plugin' && origin?.name === 'kanban' && typed.startsWith('Kanban:')
+    if (kind === undefined || (!PERSON_ORIGINS.has(kind) && !isPane)) return null
+    if (typed.startsWith('/')) return null
     const run = ctx.chain.then(() => load($, ctx))
     ctx.chain = run.catch(() => {})
     await run
     const snap = await read($, snapshotA)
     if (snap === null || !snap.hasBoard || snap.isReadOnly) return null
-    return managerNote(snap.settings.owner, needsYouCards(snap))
+    await loadWorking($, ctx)
+    const working = workingOf(await read($, workingA))
+    const hanging = hangingIds(snap, working, await read($, queuedA), await read($, turnCardA), await read($, inTurnA), await betweenNow($, snap))
+    const workers = workerNotes(snap, working, workingOf(await read($, betweenA)))
+    const isCompacted = ctx.isCompacted
+    ctx.isCompacted = false
+    return managerNote(snap.settings.owner, needsYouCards(snap), hanging, { workers, isCompacted, isNeedsYouInChat: snap.settings.needsYouInChat === true })
   } catch {
     return null
+  }
+}
+
+// ---------------------------------------------------------------- /board-probe: a kept diagnostic (ENH-0044)
+// `/board-probe` is a diagnostic command, kept so it can be run again after later development. It tries four things the board might
+// do without a full model turn, in the desktop app's own session: a) `git --version` through $.process.run, b) one test prompt through
+// $.prompt.submit (sent from the first turn.complete after the command, since the host refuses it inside command.run), c) the first main-loop step of that test turn asked to run on sonnet (the line logs the model the API says answered),
+// d) one tool-less haiku call through $.model.complete. One run spends about one tiny test turn and one tiny haiku call. Each try
+// catches its own error, and each result is a toast and a timestamped line appended to the probe log (outside the repo: KANBAN_PROBE_LOG, else the OS temp folder), under one header
+// line per run. It lives in this file because $ is never followed across an import.
+
+/** A marker the test prompt carries, so the turn.start hook can tell the probe's turn from any other. */
+const PROBE_MARK = 'BOARD-PROBE-PROMPT'
+/** The log is cut to about its newest 80 KB when it passes 100 KB. */
+const PROBE_LOG_MAX = 100_000
+const PROBE_LOG_KEEP = 80_000
+const PROBE_PROMPT = PROBE_MARK + ': this is a test from the /board-probe command. Reply with the single word "ok" and do nothing else. Use no tools.'
+// The full model id: the alias 'sonnet' was refused by the host ("Model isn't available") in the first live run. types/index.d.ts does not say how a turn.step model is spelled.
+const PROBE_WANT = 'claude-sonnet-5-5'
+
+const probeState = { armed: false, turnId: '', log: '', pendingB: false, pendingAgents: false }
+
+function probeSay(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** Keep one line on one row of the log: no newlines, at most 300 characters. */
+function probeOneLine(s: string): string {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t.length > 300 ? t.slice(0, 300) + '...' : t
+}
+
+/** Appends one line to the log: read what is there, write it back with the new line. */
+async function probeAppend($: EngineInterface, line: string): Promise<void> {
+  let old = ''
+  try {
+    old = await $.fs.read(probeState.log)
+  } catch {
+    // no log yet
+  }
+  let next = old + line + '\n'
+  if (next.length > PROBE_LOG_MAX) next = next.slice(next.length - PROBE_LOG_KEEP).replace(/^[^\n]*\n/, '') // keep the newest part, from a whole line
+  await $.fs.write(probeState.log, next)
+}
+
+async function probeRecord($: EngineInterface, which: string, ok: boolean, detail: string): Promise<void> {
+  const line = `probe ${which}: ${ok ? 'worked' : 'failed'} ${probeOneLine(detail)}`
+  try {
+    $.ui.toast(line)
+  } catch {
+    // a toast that cannot show costs nothing
+  }
+  try {
+    if (probeState.log === '') throw new Error('no log path (node could not resolve one)')
+    await probeAppend($, new Date().toISOString() + ' ' + line)
+  } catch (err) {
+    try {
+      $.ui.toast('probe: could not write the log: ' + probeSay(err))
+    } catch {
+      // nothing more to do
+    }
+  }
+}
+
+/** Logs the session's agents (id, first 40 characters of the description, status, type) under a header line; never a prompt or card text beyond those 40. */
+async function probeAgents($: EngineInterface, when: string): Promise<void> {
+  if (probeState.log === '') return
+  try {
+    const rows = await $.agent.list()
+    await probeAppend($, `agents ${when}: ${rows.length}`)
+    for (const a of rows) {
+      const r = a as { id?: unknown; description?: unknown; status?: unknown; type?: unknown }
+      const desc = probeOneLine(String(r.description ?? '')).slice(0, 40)
+      await probeAppend($, `  agent ${String(r.id)} "${desc}" ${String(r.status)}${r.type === undefined ? '' : ' ' + String(r.type)}`)
+    }
+  } catch (err) {
+    try {
+      await probeAppend($, 'agents: unavailable ' + probeOneLine(probeSay(err)))
+    } catch {
+      // the log cannot be written; nothing more to do
+    }
+  }
+}
+
+/** Called from the session.start hook of register.tsx (a second session.start hook is refused). */
+async function probeSessionStart($: EngineInterface): Promise<void> {
+  try {
+    await $.command.register({ name: 'board-probe', description: 'Diagnostic: try git, a test prompt, a sonnet step and a haiku call; results go to a log' })
+  } catch {
+    // the probe is not worth a failed session start
+  }
+}
+
+/** Called from the turn.start hook of register.tsx: the probe's turn is the one whose text starts with the marker. */
+function probeTurnStart(e: { text: string; turnId: string }): void {
+  if (String(e.text).trimStart().startsWith(PROBE_MARK)) {
+    probeState.armed = true
+    probeState.turnId = e.turnId
+  }
+}
+
+/** Called from the turn.complete hook of register.tsx: the one-shot send of the test prompt (b), from a later event than the command. */
+async function probeTurnComplete($: EngineInterface, e: { agentId?: string; turnId?: string }): Promise<void> {
+  if (probeState.pendingAgents && e.agentId === undefined) {
+    probeState.pendingAgents = false
+    await probeAgents($, 'at next turn end')
+  }
+  if (probeState.armed && e.agentId === undefined && (e as { turnId?: string }).turnId === probeState.turnId) {
+    probeState.armed = false
+    await probeRecord($, 'c', false, `no step of the test turn was seen; asked "${PROBE_WANT}" but nothing ran`)
+  }
+  if (!probeState.pendingB || e.agentId !== undefined) return
+  probeState.pendingB = false
+  try {
+    const sent = await $.prompt.submit({ text: PROBE_PROMPT, asUser: true })
+    if ('drop' in sent && typeof sent.drop === 'string') {
+      await probeRecord($, 'b', false, `dropped: ${sent.drop}`)
+      await probeRecord($, 'c', false, 'no turn ran, so no step was switched')
+    } else {
+      await probeRecord($, 'b', true, 'the prompt was accepted into the chat (from turn.complete)')
+    }
+  } catch (err) {
+    await probeRecord($, 'b', false, probeSay(err))
+    await probeRecord($, 'c', false, 'no turn ran, so no step was switched')
+  }
+}
+
+function registerProbe(on: On): void {
+  on('command.run', { command: 'board-probe' }, async ($) => {
+    probeState.armed = false
+    probeState.turnId = ''
+    probeState.log = ''
+    probeState.pendingB = false
+    probeState.pendingAgents = false
+    try {
+      const r = await $.process.run(['node', '-e', PROBE_LOG_SCRIPT])
+      if (r.exitCode === 0 && r.stdout.trim() !== '') probeState.log = r.stdout.trim()
+    } catch {
+      // no node: the results are toasts only
+    }
+    try {
+      await probeAppend($, '=== board-probe run ' + new Date().toISOString() + ' log ' + probeState.log)
+    } catch {
+      // each probeRecord() tries the log again
+    }
+
+    // The session's agents, to learn the real agent statuses; logged again at the next turn end.
+    await probeAgents($, 'at command time')
+    probeState.pendingAgents = true
+
+    // (a) git --version from the pane's code.
+    try {
+      const r = await $.process.run(['git', '--version'])
+      await probeRecord($, 'a', r.exitCode === 0, `exit ${r.exitCode}: ${r.stdout.trim()}${r.stderr.trim() === '' ? '' : ' stderr: ' + r.stderr.trim()}`)
+    } catch (err) {
+      await probeRecord($, 'a', false, probeSay(err))
+    }
+
+    // (d) one tool-less haiku call. Done before (b) so it does not wait for the chat turn.
+    try {
+      const r = await $.model.complete({ model: 'haiku', prompt: 'Reply with the single word ok.', maxTokens: 16 })
+      if (r.isAnswered) {
+        await probeRecord($, 'd', true, `reply "${r.text.trim()}" in ${r.usage.input_tokens} in / ${r.usage.output_tokens} out (cache read ${r.usage.cache_read_input_tokens})`)
+      } else {
+        await probeRecord($, 'd', false, `not answered: ${JSON.stringify(r)}`)
+      }
+    } catch (err) {
+      await probeRecord($, 'd', false, probeSay(err))
+    }
+
+    // (b) cannot be sent from here: the host refuses prompt.submit from a command.run hook (it would wait on the turn this hook holds).
+    // It is sent from the first main-session turn.complete after this command (probeTurnComplete); (c) is read in the turn.step hook below.
+    probeState.pendingB = true
+    try {
+      $.ui.toast('probe log: ' + (probeState.log === '' ? '(none: node could not resolve a path)' : probeState.log))
+    } catch {
+      // a toast that cannot show costs nothing
+    }
+    return { text: 'board-probe: a and d done, b is sent when this turn ends; c is written when the test turn runs. Results: ' + (probeState.log === '' ? '(no log: node could not resolve a path)' : probeState.log) }
+  }).catch(() => ({ text: 'board-probe: failed to run.' }))
+
+  // (c) the first main-loop step of the probe's turn asks for sonnet; what the API reports as having answered is logged.
+  on('turn.step', async function* ($, e, next) {
+    if (!probeState.armed || e.turnId !== probeState.turnId || e.agentId !== undefined) return yield* next(e)
+    probeState.armed = false
+    const before = e.model
+    try {
+      const r = yield* next({ ...e, model: PROBE_WANT })
+      if (r.usage === null) {
+        await probeRecord($, 'c', false, `session model ${before}; asked "${PROBE_WANT}"; no usage came back, so the host refused or errored the step (check the chat for an error)`)
+      } else {
+        const used = r.usage.model
+        await probeRecord($, 'c', used.toLowerCase().includes('sonnet'), `session model ${before}; asked "${PROBE_WANT}"; ${used.toLowerCase().includes('sonnet') ? 'answered by sonnet' : 'answered by another model'}: model used ${used}`)
+      }
+      return r
+    } catch (err) {
+      await probeRecord($, 'c', false, `session model ${before}; asked "${PROBE_WANT}"; host error: ${probeSay(err)}`)
+      throw err
+    }
+  })
+}
+
+// ---------------------------------------------------------------- the first-run check (ENH-0065)
+// Once per board (the `setup_checked` line of board.md remembers it), at session start: is there a git remote, is `gh` installed and
+// signed in, does the user's own settings hold an allow rule for `gh pr merge`. Every command only reads. It prints one line (a toast)
+// naming what is missing with the PowerShell command for each fix, and changes no setting of anyone's. If any command cannot run at all,
+// nothing is printed or remembered and the check is tried again at the next session.
+
+/** Runs the first-run check for the board in use. Resolves when done; never throws. */
+async function setupCheck($: EngineInterface, ctx: Ctx): Promise<void> {
+  try {
+    const snap = await read($, snapshotA)
+    if (snap === null || !snap.hasBoard || snap.isReadOnly || ctx.busy.has('board.md')) return
+    const fm = parseFrontmatter(await $.fs.read(kanbanPath('board.md')))
+    if (!fm.ok) return
+    const seen = getScalar(fm.value, SETUP_KEY)
+    if (!seen.ok || (seen.value !== undefined && seen.value !== '')) return
+    const init = sessionRoot === '' ? {} : { cwd: sessionRoot }
+    const remote = await $.process.run(['git', 'remote', 'get-url', 'origin'], init)
+    let ghState: SetupFacts['ghState'] = 'missing'
+    try {
+      const version = await $.process.run(['gh', '--version'], init)
+      if (version.exitCode === 0) ghState = (await $.process.run(['gh', 'auth', 'status'], init)).exitCode === 0 ? 'ok' : 'signed-out'
+    } catch {
+      ghState = 'missing'
+    }
+    let mergeRule: SetupFacts['mergeRule'] = 'unknown'
+    try {
+      const rules = await $.process.run(['node', '-e', SETTINGS_SCRIPT, sessionRoot], init)
+      const allow = rules.exitCode === 0 ? parseAllowRules(rules.stdout) : null
+      if (allow !== null) mergeRule = hasMergeRule(allow) ? 'found' : 'missing'
+    } catch {
+      mergeRule = 'unknown'
+    }
+    const line = setupLine({ hasRemote: remote.exitCode === 0 && remote.stdout.trim() !== '', ghState, mergeRule }, snap.settings.mergeBy ?? DEFAULTS.mergeBy)
+    const day = new Date(await $.clock.now()).toISOString().slice(0, 10)
+    // The line is remembered first: it is said only if the board now holds it, so a refused write means the next session asks again.
+    if (await editSettings($, ctx, (text) => setScalar(text, SETUP_KEY, day), () => null)) $.ui.toast(line)
+  } catch {
+    // a machine where the check cannot run costs the session nothing
   }
 }
 
@@ -2675,15 +3236,18 @@ async function chatNote($: EngineInterface, ctx: Ctx, kind: string | undefined, 
 
 export const register: Register = (on) => {
   const ctx = newCtx()
+  registerProbe(on) // the /board-probe diagnostic
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: 'Open the kanban board pane' })
+    await probeSessionStart($) // the /board-probe diagnostic
     // Find is not remembered: it starts empty with each session.
     stopFindPause(ctx)
     ctx.drafts.find = ''
     await update($, findA, () => '')
     // A new session has no turn running.
     await update($, inTurnA, () => false)
+    await update($, chatWarnedA, () => false)
     // The board is found from the project root, not from wherever a chat's shell has since cd'd.
     startRoot = typeof e.cwd === 'string' ? e.cwd : ''
     await syncRoot($)
@@ -2700,6 +3264,7 @@ export const register: Register = (on) => {
           .open({ id: PANE, title: 'Kanban', columns: PANE_COLUMNS })
           .then((opened) => update($, paneShownA, () => opened.isPlaced))
           .catch(() => {})
+        void setupCheck($, ctx)
       }
     }
     return next(e)
@@ -2722,6 +3287,7 @@ export const register: Register = (on) => {
     }
     const snap = await read($, snapshotA)
     const working = workingOf(await read($, workingA))
+    const between = workingOf(await read($, betweenA))
     const queued = await read($, queuedA)
     const turnCard = await read($, turnCardA)
     const isInTurn = await read($, inTurnA)
@@ -2766,7 +3332,7 @@ export const register: Register = (on) => {
       const columns = typeof e.props.bodyColumns === 'number' && Number.isFinite(e.props.bodyColumns) ? e.props.bodyColumns : PANE_COLUMNS
       const s = snap.settings
       const tab = shownTab(snap, chosenTab)
-      const open = tab === 'board' ? await openCardOf($, ctx, snap, selected, working, queued, turnCard, showLog, isInTurn) : null
+      const open = tab === 'board' ? await openCardOf($, ctx, snap, selected, working, queued, turnCard, showLog, isInTurn, betweenStates(snap, working, between, nowMs)) : null
       const view = open === null ? null : open.model
       // Previous and Next: where the open card stands among the cards the board shows (null when Find hides it).
       const shown = view === null ? [] : shownIds(snap, lanesView, find)
@@ -2811,31 +3377,6 @@ export const register: Register = (on) => {
               void chooseTab($, ctx, next).catch((err: unknown) => noticeError($, err))
             },
           })}
-          {tab === 'board' &&
-            mergeAsk !== null &&
-            (() => {
-              const dragged = snap.cards.find((c) => c.id === mergeAsk.id)
-              const survivor = snap.cards.find((c) => c.id === mergeAsk.onto)
-              return dragged === undefined || survivor === undefined ? null : (
-                <Box key="merge-ask" flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
-                  <Text>{mergeQuestion(dragged.id, cleanText(dragged.title, TITLE_MAX), survivor.id, cleanText(survivor.title, TITLE_MAX))}</Text>
-                  <Button
-                    key="merge-yes"
-                    label={MERGE_YES}
-                    onPress={() => {
-                      void askMerge($, ctx).catch((err: unknown) => noticeError($, err))
-                    }}
-                  />
-                  <Button
-                    key="merge-no"
-                    label={MERGE_NO}
-                    onPress={() => {
-                      void update($, mergeAskA, () => null).catch(() => {})
-                    }}
-                  />
-                </Box>
-              )
-            })()}
           {view === null &&
             tab === 'board' &&
             toolbarTree(el, toolbarProps(snap, { ...add, title: drafts.add }, lanesView, columns, isFresh, drafts.find), {
@@ -2939,8 +3480,74 @@ export const register: Register = (on) => {
               />
             </Box>
           )}
+          {tab === 'board' && view === null && fault === null && !snap.isReadOnly && mergeAsk === null &&
+            (() => {
+              const hanging = hangingIds(snap, working, queued, turnCard, isInTurn, betweenStates(snap, working, between, nowMs))
+              return hanging.length === 0 ? null : (
+            <Box key="hanging-strip" marginX={2} marginTop={1} flexDirection="row" flexWrap="wrap" columnGap={1} alignItems="center">
+              <Text color="warning" wrap="wrap">
+                {hangingStripText(hanging)}
+              </Text>
+              <Button
+                key="resume"
+                label={RESUME_LABEL}
+                variant="secondary"
+                onPress={() => {
+                  void askResume($).catch((err: unknown) => noticeError($, err))
+                }}
+              />
+            </Box>
+          
+              )
+            })()}
+          {tab === 'board' &&
+            mergeAsk !== null &&
+            (() => {
+              const dragged = snap.cards.find((c) => c.id === mergeAsk.id)
+              const survivor = snap.cards.find((c) => c.id === mergeAsk.onto)
+              // A filled box in the open card's waiting-box fill with an outline in the warning colour (a theme key, as the board's drop outlines use),
+              // directly above the lanes (spec 14.7): bold warning first line, the question, Keep both (the main button) then Merge.
+              return dragged === undefined || survivor === undefined ? null : (
+                <Box
+                  key="merge-ask"
+                  marginX={2}
+                  marginTop={1}
+                  flexDirection="column"
+                  paddingX={2}
+                  paddingY={1}
+                  borderStyle="round"
+                  borderColor="warning"
+                  backgroundColor="userMessageBackground"
+                  flexShrink={1}
+                  minWidth={0}
+                >
+                  <Text bold color="warning" wrap="wrap">
+                    {MERGE_HEAD}
+                  </Text>
+                  <Text wrap="wrap">{mergeQuestion(dragged.id, cleanText(dragged.title, TITLE_MAX), survivor.id, cleanText(survivor.title, TITLE_MAX))}</Text>
+                  <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop={1}>
+                    <Button
+                      key="merge-no"
+                      label={MERGE_NO}
+                      variant="primary"
+                      onPress={() => {
+                        void update($, mergeAskA, () => null).catch(() => {})
+                      }}
+                    />
+                    <Button
+                      key="merge-yes"
+                      label={MERGE_YES}
+                      variant="secondary"
+                      onPress={() => {
+                        void askMerge($, ctx).catch((err: unknown) => noticeError($, err))
+                      }}
+                    />
+                  </Box>
+                </Box>
+              )
+            })()}
           {view === null && tab === 'board' && fault === null && (
-            <Client key="board" module="./board.tsx" props={boardProps(snap, working, queued, turnCard, selected, boardView, nowMs, find, isInTurn)} width={columns} />
+            <Client key="board" module="./board.tsx" props={boardProps(snap, working, queued, turnCard, selected, boardView, nowMs, find, isInTurn, mergeAsk, betweenStates(snap, working, between, nowMs))} width={columns} />
           )}
           {view !== null &&
             open !== null &&
@@ -2966,6 +3573,7 @@ export const register: Register = (on) => {
                 confirmDelete,
                 retypePick,
                 renaming: { isOpen: renaming.isOpen, title: drafts.rename },
+                parentChoices: parentChoices(snap, view.id, view.parent?.id ?? ''),
                 showDetails,
                 step,
               },
@@ -3027,6 +3635,7 @@ export const register: Register = (on) => {
                 rename: (id, value) => {
                   void renameTo($, ctx, id, value).catch((err: unknown) => noticeError($, err))
                 },
+                setParent: (id, choice) => parentFrom($, ctx, id, choice),
               },
             )}
         </Box>
@@ -3168,18 +3777,32 @@ export const register: Register = (on) => {
         // A refused open costs nothing: /board opens it.
       }
     }
-    const note = await chatNote($, ctx, e.origin?.kind, e.text)
+    const note = await chatNote($, ctx, e.origin, e.text)
     return next(note === null ? e : { ...e, context: [...(e.context ?? []), note] })
+  }).catch(($, e, next) => next(e))
+
+  // After the conversation is compacted the manager's rules are gone from its context: the next note says to read them again.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && result.skip === undefined) ctx.isCompacted = true
+    return result
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
     const result = await next(e)
+    probeTurnStart(e) // the /board-probe diagnostic
     await update($, inTurnA, () => true)
     const about = CARD_PROMPT.exec(e.text)
     if (about !== null && about[1] !== undefined && about[2] !== undefined) {
-      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : about[1] === 'asked to retype' ? 'retype' : about[1] === 'asked to merge' ? 'merge' : 'delete'
+      const kind = about[1] === 'moved' ? 'move' : about[1] === 'created' ? 'create' : about[1] === 'asked to retype' ? 'retype' : about[1] === 'asked to merge' ? 'merge' : about[1] === 'asked to resume' ? 'resume' : 'delete'
       const id = about[2]
-      await dequeue($, e.text, (q) => q.kind === kind && q.id === id)
+      // A resume of several cards runs one at a time: only the first card's entry is dropped, the others stay queued (`Waiting to start`, not
+      // `Nobody on this`) until each has an agent or a `waiting on` line (releaseResumed), or the turn ends.
+      if (kind === 'resume') {
+        ctx.isResumeTurn = true
+        await update($, queuedA, (list) => list.filter((q) => !(q.text === e.text && q.id === id)))
+      }
+      else await dequeue($, e.text, (q) => q.kind === kind && q.id === id)
       const held = followedId(await read($, snapshotA), id)
       await update($, turnCardA, () => held)
     } else if (!String(e.text).trimStart().startsWith('Kanban:')) {
@@ -3197,10 +3820,15 @@ export const register: Register = (on) => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    await probeTurnComplete($, e).catch(() => undefined) // the /board-probe diagnostic
     if (e.agentId === undefined) {
       if ((await read($, turnCardA)) !== null) await update($, turnCardA, () => null)
       if (await read($, inTurnA)) await update($, inTurnA, () => false)
+      // The resume turn is over: what it did not start is not waiting for it any more.
+      if (ctx.isResumeTurn) await update($, queuedA, (list) => list.filter((q) => q.kind !== 'resume'))
+      ctx.isResumeTurn = false
       await syncChatModel($)
+      if (ctx.isInteractive) await checkChatFull($)
       await refresh($, ctx)
     }
     return result

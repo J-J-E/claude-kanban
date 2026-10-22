@@ -16,9 +16,12 @@ import {
   setCardField,
   retypeCardText,
   mergeCardText,
+  childrenOf,
   mergeRefusal,
+  parentRefusal,
   setOrder,
   setParent,
+  setParentCard,
   setStatus,
   setTitle,
   slugify,
@@ -632,6 +635,56 @@ describe('setParent', () => {
   })
   test('refuses what is not an ID', () => {
     expect(codeOf(setParent(CARD_EXAMPLE, 'kb-47'))).toBe('bad-value')
+  })
+})
+
+describe('childrenOf and parentRefusal', () => {
+  const cards = [
+    { id: 'KB-0001', parent: '' },
+    { id: 'KB-0002', parent: 'KB-0001' },
+    { id: 'KB-0003', parent: 'KB-0002' },
+    { id: 'KB-0004', parent: 'KB-0001' },
+    { id: 'KB-0005', parent: '' },
+  ]
+  test('childrenOf lists the cards naming the ID, in order', () => {
+    expect(childrenOf(cards, 'KB-0001')).toEqual(['KB-0002', 'KB-0004'])
+    expect(childrenOf(cards, 'KB-0005')).toEqual([])
+  })
+  test('a free pair is allowed, and so is a grandchild', () => {
+    expect(parentRefusal(cards[4], 'KB-0003', cards)).toBeUndefined()
+    expect(parentRefusal(cards[3], 'KB-0003', cards)).toBeUndefined()
+  })
+  test('refuses itself, a missing card, the same parent and a loop, each ending Nothing was changed.', () => {
+    const texts = [
+      parentRefusal(cards[0], 'KB-0001', cards),
+      parentRefusal(cards[0], 'KB-0099', cards),
+      parentRefusal(cards[1], 'KB-0001', cards),
+      parentRefusal(cards[0], 'KB-0002', cards),
+      parentRefusal(cards[0], 'KB-0003', cards),
+    ]
+    for (const t of texts) expect(t).toMatch(/Nothing was changed\.$/)
+    expect(texts[0]).toBe('KB-0001 cannot be its own parent. Nothing was changed.')
+    expect(texts[1]).toBe('No card KB-0099 on the board. Nothing was changed.')
+    expect(texts[2]).toBe('KB-0001 is already the parent of KB-0002. Nothing was changed.')
+  })
+})
+
+describe('setParentCard', () => {
+  const withParent = CARD_EXAMPLE.replace('parent:\n', 'parent: KB-0047\n').replace('updated: 2026-10-08', 'updated: 2026-10-09')
+  test('sets parent, bumps updated and appends one Log line, whole output compared', () => {
+    expect(must(setParentCard(CARD_EXAMPLE, 'KB-0047', NOW, 'John'))).toBe(withParent + '- 2026-10-09 14:05 John: parent set to KB-0047\n')
+  })
+  test('removing writes the old ID into the Log line; CRLF and BOM stay', () => {
+    const had = BOM + crlf(CARD_EXAMPLE.replace('parent:\n', 'parent: KB-0047\n'))
+    const expected = BOM + crlf(CARD_EXAMPLE.replace('updated: 2026-10-08', 'updated: 2026-10-09') + '- 2026-10-09 14:05 John: parent removed (was KB-0047)\n')
+    expect(must(setParentCard(had, '', NOW, 'John'))).toBe(expected)
+  })
+  test('the parent it already has, and removing none, change nothing', () => {
+    expect(must(setParentCard(withParent, 'KB-0047', NOW, 'John'))).toBe(withParent)
+    expect(must(setParentCard(CARD_EXAMPLE, '', NOW, 'John'))).toBe(CARD_EXAMPLE)
+  })
+  test('refuses what is not an ID', () => {
+    expect(codeOf(setParentCard(CARD_EXAMPLE, 'kb-47', NOW, 'John'))).toBe('bad-value')
   })
 })
 

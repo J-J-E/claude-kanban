@@ -4,6 +4,7 @@ import { test, expect, describe } from 'claude-code/testing'
 import {
   deleteAsk,
   managerNote,
+  NEEDS_YOU_CHAT_LINE,
   cardMenuRows,
   MENU_OPEN,
   MENU_COPY,
@@ -21,6 +22,7 @@ import {
   emptyBoardHand,
   emptyBoardRows,
   workingWords,
+  workerLine,
   waitingStartWords,
   WORKING_MARK,
   WAITING_START_MARK,
@@ -245,6 +247,8 @@ describe('the words of each lane role, third pass (spec 16)', () => {
     expect(WAITING_MARK).toBe('○ Waiting')
     expect(workingWords(1)).toBe('● 1 working')
     expect(workingWords(3)).toBe('● 3 working')
+    expect(workerLine('KB-0003', 'fix the date', true)).toBe('KB-0003 fix the date')
+    expect(workerLine('KB-0003', 'fix the date', false)).toBe('fix the date')
     expect(waitingStartWords(1)).toBe('○ 1 waiting to start')
     expect(waitingStartWords(2)).toBe('○ 2 waiting to start')
   })
@@ -334,6 +338,20 @@ describe('the manager note', () => {
   const HEAD =
     'Kanban board: this project has kanban/board.md (owner John). You are its manager. Before acting on a request that changes the project, or one that answers a waiting card, use the kanban skill ("Requests in chat").'
 
+  test('the chat-questions line: off or absent keeps the note byte for byte, on adds one line after the Waiting line, none waiting adds nothing', () => {
+    const waiting = [{ id: 'KB-0036', flag: 'PLAN READY' }]
+    expect(managerNote('John', waiting, [], { isNeedsYouInChat: false })).toBe(managerNote('John', waiting))
+    expect(managerNote('John', waiting)).toBe(HEAD + '\nWaiting on John: KB-0036 PLAN READY')
+    expect(managerNote('John', waiting, ['KB-0001'], { isNeedsYouInChat: true })).toBe(
+      HEAD + '\nWaiting on John: KB-0036 PLAN READY\n' + NEEDS_YOU_CHAT_LINE + '\nHanging in Auto: KB-0001',
+    )
+    expect(managerNote('John', [], [], { isNeedsYouInChat: true })).toBe(HEAD)
+    expect(NEEDS_YOU_CHAT_LINE).not.toContain('\n')
+    for (const word of ['PLAN READY: Approve -> Auto, Change the plan -> Plan, Drop it -> Discarded', 'QUESTION: Answer -> Auto', 'FAILED: Retry -> Auto, Drop it -> Discarded', 'GATE: Yes go ahead -> Auto, No -> stays in Needs You', 'READY TO MERGE: I merged it -> Auto, Not yet -> stays in Needs You', 'free-text reply']) {
+      expect(NEEDS_YOU_CHAT_LINE).toContain(word)
+    }
+  })
+
   test('with nothing waiting it is the one line', () => {
     expect(managerNote('John', [])).toBe(HEAD)
   })
@@ -347,6 +365,23 @@ describe('the manager note', () => {
     expect(managerNote('John', waiting)).toBe(
       HEAD + '\nWaiting on John: KB-0001 QUESTION: KB-0001; KB-0002 QUESTION: KB-0002; KB-0003 QUESTION: KB-0003; KB-0004 QUESTION: KB-0004; KB-0005 QUESTION: KB-0005',
     )
+  })
+
+  test('hanging Auto cards add a line: the first five IDs and a count, no titles', () => {
+    expect(managerNote('John', [], ['KB-0001'])).toBe(HEAD + '\nHanging in Auto: KB-0001')
+    const ids = [1, 2, 3, 4, 5, 6, 7].map((n) => 'KB-000' + n)
+    expect(managerNote('John', [{ id: 'KB-0036', flag: 'PLAN READY' }], ids)).toBe(
+      HEAD + '\nWaiting on John: KB-0036 PLAN READY\nHanging in Auto: KB-0001, KB-0002, KB-0003, KB-0004, KB-0005 and 2 more',
+    )
+  })
+
+  test('workers to message: one line each, the first five, agent and card IDs only; the compact line comes last, once', () => {
+    const workers = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ agent: 'ag' + n, id: 'KB-000' + n, time: '14:05' }))
+    const lines = managerNote('John', [], ['KB-0001'], { workers, isCompacted: true }).split('\n')
+    expect(lines.slice(2, 7)).toEqual(workers.slice(0, 5).map((w) => `Your worker ${w.agent} on ${w.id} finished or went idle 14:05; no step was logged. Message it for its report.`))
+    expect(lines).toHaveLength(8)
+    expect(lines[7]).toBe('The chat was compacted: re-read the kanban skill, then references/lanes.md, and lanes-auto.md for Auto cards, then reconcile your Auto cards.')
+    expect(managerNote('John', [], [], { isCompacted: false })).toBe(HEAD)
   })
 
   test('seven waiting cards name five and count two more', () => {

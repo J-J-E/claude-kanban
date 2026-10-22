@@ -101,9 +101,9 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: while held, Pending says `Drop to place it here.` and the lane says `Drop to put it between ... and ...`. On release the card sits where you dropped it. With any other sort, Pending says `Sorted by ... Change to Your order to place cards.`
 13a. Merge two cards by dropping one on the other. NOT VERIFIED: nobody has dragged a card onto another card in the real pane, so a failure here is a finding, not a mistake in your steps. Needs two cards in Pending (add them with `New card`) and a third in Auto (setup: drag a card to Auto and let it be worked).
     - Do: drag one Pending card (call it A) onto the rows of another Pending card (B), and look before you let go.
-    - Expect: while held, the lane says `Merge into <B ID>`. On release the card does not move and the top of the board tab reads `Merge <A ID> "<A title>" into <B ID> "<B title>"? <A ID> is deleted and its text moves into <B ID>.` with the buttons `Merge` and `Keep both`.
+    - Expect: while held, the lane says `Merge into <B ID>`. On release the card does not move and an orange box appears directly above the lanes (under `New card`; the pane scrolls to it, or a toast says `Merge <A ID> into <B ID>? Answer at the top of the board.`). Its first line is bold orange `? Nothing has been merged yet.`, then `Merge <A ID> "<A title>" into <B ID> "<B title>"? <A ID> would be deleted and its text moves into <B ID>.`, then the buttons `Keep both` (the main one, first) and `Merge`. While the box is open B has an orange outline with `◀ <A ID> would go into this card` and A is dim with `▶ would be deleted; goes into <B ID>`.
     - Do: press `Keep both`.
-    - Expect: the question goes; both cards are as they were and no Claude turn starts.
+    - Expect: the box and both marks go; both cards are as they were and no Claude turn starts.
     - Do: drag A onto B again, press `Merge`.
     - Expect: a toast `Claude is merging <A ID> into <B ID>.` and a chat prompt `Kanban: <you> asked to merge <A ID> "<A title>" into <B ID> "<B title>". Merge the cards with the kanban skill.` Claude then merges: B holds A's text under `## Merged from <A ID>: <A title>` and a Log line `merged <A ID> "<A title>" into <B ID>`, A's file is gone, and asking for A's old ID (`what is <A ID>?`) answers with B.
     - Do: drag a card and let go on the one-row gap between two cards (not on a card's rows).
@@ -120,6 +120,12 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: after `Save as defaults` a toast says `Saved as your defaults.` and `kanban/board.md` shows `default_workers: 3`. After the change to 4 the row shows `Default: 3`; `Reset` puts it back to 3 and removes the `workers` line. Other boards keep the original defaults.
     - Do: press `Restore original defaults`, then `Keep`; then `Restore original defaults` and `Restore`.
     - Expect: the question reads `Remove your saved defaults and put every setting back to the original?`. `Keep` changes nothing. `Restore` removes every `default_` line from `kanban/board.md`, shows `All settings are back to the original defaults.`, `Workers at once` reads 2, and `Restore original defaults` is gone.
+15a. Chat questions and Merge by. NOT VERIFIED: the Merge by row has not been looked at in the real pane.
+    - Do: press the `Settings` tab. Under `Workers at once` find `Chat questions` and `Merge by`. Set `Merge by` to `Owner`, then press `Reset` on that row; set it to `Owner` again, press `Save as defaults`, then `Restore original defaults` and `Restore`.
+    - Expect: `kanban/board.md` shows `merge_by: owner`, the row shows `Default: claude` and its `Reset`, and the toast says `Pull requests are merged by owner.` `Reset` removes the line (`Merge by is back to claude.`). `Save as defaults` writes `default_merge_by: owner` and removes `merge_by`; `Restore original defaults` removes both lines.
+15b. A change ready to merge is green. NOT VERIFIED: the colour `success` has not been seen in the real pane in the light and the dark theme, so a wrong or missing colour is a finding.
+    - Do: put a card in Needs You and give it the flag by hand: in its file set `status: Needs You` and `flag: READY TO MERGE` and add a Log line that starts `ready to merge:` and holds a command in backticks, written like the other Claude lines. Compare it with a card flagged `QUESTION: which colour?` beside it.
+    - Expect: the ready card's spine and its second line (`✓ Ready to merge. Open it for the link and the command`) are green, the question's are yellow or orange. The header counts it (`1 ready to merge`). Open it: a green box says to merge it yourself and then move the card to Auto, with no button that merges. The Log line has a `Copy command` button. Nothing was merged and no message was sent to Claude.
 16. Narrow pane. NOT VERIFIED: nobody has checked drag or the toolbar in a narrow pane since the pane was rebuilt, so a failure here is a finding, not a mistake in your steps.
     - Do: drag the pane edge until it is narrow. Press `New card`, then `Cancel`. Drag the footer card down to the Backlog lane, then up to the Pending lane.
     - Expect: the toolbar controls stay readable and pressable and nothing is cut off. The first drag moves the card to Backlog and starts no turn. The second moves it back to Pending and starts no turn.
@@ -152,6 +158,10 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Do: press the `Settings` tab and read the note under the settings. Then put the line `advisor_model: fable` in `kanban/board.md` (just under `owner:`), save, and press the `Settings` tab again.
     - Expect: the note reads `The Claude app has its own advisor, a stronger model it may consult in any chat, including the agents this board starts. It is set in your Claude settings (/advisor), not here. If it is on it uses your plan's limits (a Fable advisor can use a lot), and this board cannot see or change it. To turn it off, run /advisor off.` After the edit there is still no Advisor row and no error line; change `Workers at once` and press `Reset`: the `advisor_model: fable` line is still in the file.
 
+17d. The first-run setup check. NOT VERIFIED: it has run only against stubs, not on a real machine in the live app.
+    - Do: in a project whose `kanban/board.md` has no `setup_checked` line, start a new session. Note that nothing is typed.
+    - Expect: one toast beginning `Kanban setup check:` that names what is missing with a PowerShell command for each (or says git, gh and the merge permission look fine) and ends with the three machine-specific assumptions. `kanban/board.md` gained one line, `setup_checked: <date>`, and no other line; your own Claude settings files are unchanged (compare their dates). A second new session shows no toast. Delete the `setup_checked` line to see it again.
+
 ## C. Chat checks, in a fresh empty folder
 
 18. Make the folder.
@@ -179,7 +189,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: `Comment added to BUG-0001.` One new Log line `<you>: waiting on Sam`. `status:` is still Pending.
 23. List and what's next.
     - Do: type `list the board`, then `what's next`.
-    - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, and `Untriaged` with BUG-0001, ENH-0001 and CHORE-0001.
+    - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, `Untriaged` with BUG-0001, ENH-0001 and CHORE-0001, and `Left hanging` as `none`.
     - Also: put a card whose ID letters are no type on the board (for example `KB-0001-old.md` on a board with no KB type) into a board, read the pane's line above the lanes, then type `list the board`.
     - Expect: the pane shows `▲ 1 card has ID letters KB that are no type on this board. It still shows on the board. Ask Claude to retype the card.` in orange, wrapped in full, with `KB-0001` under it. The list ends with `Fix needed: KB-0001-old.md: unknown-type` and the next line `To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype KB-0001 as chore".` (with the board's own type names)
     - Also: with four such cards (`KB-0001` to `KB-0004`), read the pane's line again.

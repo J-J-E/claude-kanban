@@ -96,7 +96,7 @@ async function boot($: Engine, on: Parameters<typeof stubs>[0], files = defaultF
 
 test('session-start', async ($, on) => {
   const w = await boot($, on)
-  expect(w.registered).toEqual(['board'])
+  expect(w.registered).toEqual(['board', 'board-probe']) // /board-probe is a kept diagnostic
   expect(w.opened).toEqual([{ id: 'kanban', title: 'Kanban' }])
   // The chat is already on the manager model; nothing is ever switched.
   await w.clock.advance(2000)
@@ -349,6 +349,46 @@ test('the header names the plan of the first card Claude is on, and what the age
   expect(await headerState(ui)).toMatchObject({ who: 'Claude is on KB-0002', step: null })
 })
 
+test('every running worker shows: a header line each, the lane counts workers, and the card lists them', async ($, on) => {
+  const w = await boot($, on, defaultFiles())
+  w.put(BOARD_PATH, w.text(BOARD_PATH).replace('workers: 1', 'workers: 3'))
+  const ui = await mountPane($, 'desktop')
+  const text = async (key: string): Promise<string | null> => {
+    const found = await ui.find({ key })
+    return found === undefined ? null : found.text.replace(/\s+/g, ' ').trim()
+  }
+  const settle = async (): Promise<void> => {
+    await w.clock.advance(1000)
+    await w.clock.settle()
+  }
+  // One worker: one line, as before.
+  w.agents = [{ id: 'a1', description: 'KB-0003 step 3: fix the date', type: 'general-purpose', status: 'running' }]
+  await settle()
+  expect(await text('header-step-2')).toBeNull()
+  // Two workers on one card: a line each with no card ID; the lane says 2 working; the card has no extra count to guess at.
+  w.agents = [
+    { id: 'a1', description: 'KB-0003 step 3: fix the date', type: 'general-purpose', status: 'running' },
+    { id: 'a2', description: 'KB-0003 step 4: board probe', type: 'general-purpose', status: 'running' },
+  ]
+  await settle()
+  expect(await headerState(ui)).toMatchObject({ who: 'Claude is on KB-0003', step: 'fix the date', workers: { running: 2, limit: 3 } })
+  expect(await text('header-step-2')).toBe('board probe')
+  expect((await boardProps(ui)).lanes[3]?.cards[0]).toMatchObject({ id: 'KB-0003', isWorking: true, workers: 2 })
+  // The card's working box lists both.
+  await ui.press({ key: 'header-claude' })
+  const shown = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(shown).toContain('Worker 1: fix the date')
+  expect(shown).toContain('Worker 2: board probe')
+  // Workers on two cards: each line starts with its card ID, in board order (Inbox before Auto).
+  w.agents = [
+    { id: 'a1', description: 'KB-0003 fix the date', type: 'general-purpose', status: 'running' },
+    { id: 'a2', description: 'KB-0001 fix the footer', type: 'general-purpose', status: 'running' },
+  ]
+  await settle()
+  expect(await text('header-step')).toBe('KB-0001 fix the footer')
+  expect(await text('header-step-2')).toBe('KB-0003 fix the date')
+})
+
 test('the snapshot gives each card its labels, branch, pr and the facts of its plan and Log', async ($, on) => {
   const files = defaultFiles()
   files[SHIP] = planCard(
@@ -362,6 +402,7 @@ test('the snapshot gives each card its labels, branch, pr and the facts of its p
     .replace('labels: []', 'labels: [verify, later]')
     .replace('branch:' + '\n', 'branch: kb-3-ship-it' + '\n')
     .replace('pr:\n', 'pr: 14\n')
+    .replace('parent:\n', 'parent: KB-0001\n')
   const state = watchState(on)
   await boot($, on, files)
   const snapshot = state.wrote.snapshot
@@ -370,6 +411,7 @@ test('the snapshot gives each card its labels, branch, pr and the facts of its p
     labels: ['verify', 'later'],
     branch: 'kb-3-ship-it',
     pr: '14',
+    parent: 'KB-0001',
     facts: {
       total: 2,
       done: 1,
@@ -380,7 +422,7 @@ test('the snapshot gives each card its labels, branch, pr and the facts of its p
     },
   })
   const plain = snapshot.cards.find((c: { id: string }) => c.id === 'KB-0001')
-  expect(plain).toMatchObject({ labels: [], branch: '', pr: '', facts: { total: 0, done: 0, retry: null, waitingOn: [] } })
+  expect(plain).toMatchObject({ labels: [], branch: '', pr: '', parent: '', facts: { total: 0, done: 0, retry: null, waitingOn: [] } })
 })
 
 test('the tick bumps a minute counter when the minute changes, and only then', async ($, on) => {
@@ -457,6 +499,8 @@ async function drawnTexts(ui: Pane): Promise<string[]> {
 
 const SELECT_KEYS = [
   'set-workers',
+  'set-needs_you_in_chat',
+  'set-merge_by',
   'set-manager_model',
   'set-manager_thinking',
   'set-planner_model',
@@ -482,14 +526,14 @@ test('Settings tab, fresh install (spec check 10): the defaults, no Reset, nothi
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
   expect(await ui.find({ key: 'restore-all' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Button' })).filter((b) => !String(b.key).startsWith('header-'))).toEqual([])
-  // Seven Selects, all at the shipped defaults.
+  // Nine Selects, all at the shipped defaults.
   const selects = await ui.findAll({ type: 'Select' })
   expect(selects.map((s) => s.key)).toEqual(SELECT_KEYS)
-  expect(selects.map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
+  expect(selects.map((s) => s.props.value)).toEqual(['2', 'off', 'claude', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   const model = (k: string) => (selects.find((s) => s.key === k)?.props.options as { value: string; label?: string }[]).map((o) => o.value)
   expect(model('set-manager_model')).toEqual(['haiku', 'sonnet', 'opus', 'fable'])
   expect(model('set-workers')).toEqual(['1', '2', '3', '4', '5'])
-  expect((selects[2]?.props.options as { value: string; label?: string }[]).map((o) => o.label)).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
+  expect((selects[4]?.props.options as { value: string; label?: string }[]).map((o) => o.label)).toEqual(['Not set', 'low', 'medium (recommended)', 'high', 'extra', 'max'])
   // The labels, the defaults beside each row, the key and the three notes.
   const texts = await drawnTexts(ui)
   for (const t of ['Workers at once', 'Manager', 'Planner', 'Worker', 'Model', 'Thinking']) {
@@ -614,8 +658,76 @@ test('Settings tab (spec check 11): a changed row shows Reset and Restore all de
   await ui.press({ key: 'restore-yes' })
   expect(w.text(BOARD_PATH)).toBe(board)
   expect(w.toasts).toEqual(['All settings are back to their defaults.'])
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'off', 'claude', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
+})
+
+test('Settings tab: the Chat questions row is On or Off, writes needs_you_in_chat, has its Default and Reset, and Save/Restore carry it', async ($, on) => {
+  const w = await boot($, on, freshFiles())
+  const board = w.text(BOARD_PATH)
+  const ui = await mountPane($, 'desktop', 80)
+  await ui.press({ key: 'header-tab-settings' })
+  const chat = async () => (await ui.find({ key: 'set-needs_you_in_chat' }))?.props
+  expect((await chat())?.value).toBe('off')
+  expect(((await chat())?.options as { value: string; label?: string }[]).map((o) => [o.value, o.label])).toEqual([['on', 'On'], ['off', 'Off']])
+  expect(await drawnTexts(ui)).toContain('Chat questions')
+  w.toasts.length = 0
+  await ui.select({ key: 'set-needs_you_in_chat', value: 'on' })
+  expect(w.text(BOARD_PATH)).toContain('\nneeds_you_in_chat: on\n')
+  expect(w.toasts).toEqual(['Chat questions for Needs You cards are on.'])
+  expect((await chat())?.value).toBe('on')
+  expect(await drawnTexts(ui)).toContain('Default: off')
+  w.toasts.length = 0
+  await ui.press({ key: 'reset-chat' })
+  expect(w.text(BOARD_PATH)).toBe(board)
+  expect(w.toasts).toEqual(['Chat questions is back to off.'])
+  await ui.select({ key: 'set-needs_you_in_chat', value: 'on' })
+  await ui.press({ key: 'save-defaults' })
+  expect(w.text(BOARD_PATH)).toContain('\ndefault_needs_you_in_chat: on\n')
+  expect(w.text(BOARD_PATH)).not.toContain('\nneeds_you_in_chat: on\n')
+  expect((await chat())?.value).toBe('on')
+  await ui.select({ key: 'set-needs_you_in_chat', value: 'off' })
+  await ui.press({ key: 'restore-all' })
+  await ui.press({ key: 'restore-yes' })
+  expect((await chat())?.value).toBe('on')
+  await ui.press({ key: 'restore-original' })
+  await ui.press({ key: 'original-yes' })
+  expect(w.text(BOARD_PATH)).toBe(board)
+  expect((await chat())?.value).toBe('off')
+})
+
+test('Settings tab: the Merge by row is Claude or Owner, writes merge_by, has its Default and Reset, and Save/Restore carry it', async ($, on) => {
+  const w = await boot($, on, freshFiles())
+  const board = w.text(BOARD_PATH)
+  const ui = await mountPane($, 'desktop', 80)
+  await ui.press({ key: 'header-tab-settings' })
+  const merge = async () => (await ui.find({ key: 'set-merge_by' }))?.props
+  expect((await merge())?.value).toBe('claude')
+  expect(((await merge())?.options as { value: string; label?: string }[]).map((o) => [o.value, o.label])).toEqual([['claude', 'Claude'], ['owner', 'Owner']])
+  expect(await drawnTexts(ui)).toContain('Merge by')
+  w.toasts.length = 0
+  await ui.select({ key: 'set-merge_by', value: 'owner' })
+  expect(w.text(BOARD_PATH)).toContain('\nmerge_by: owner\n')
+  expect(w.toasts).toEqual(['Pull requests are merged by owner.'])
+  expect((await merge())?.value).toBe('owner')
+  expect(await drawnTexts(ui)).toContain('Default: claude')
+  w.toasts.length = 0
+  await ui.press({ key: 'reset-merge' })
+  expect(w.text(BOARD_PATH)).toBe(board)
+  expect(w.toasts).toEqual(['Merge by is back to claude.'])
+  await ui.select({ key: 'set-merge_by', value: 'owner' })
+  await ui.press({ key: 'save-defaults' })
+  expect(w.text(BOARD_PATH)).toContain('\ndefault_merge_by: owner\n')
+  expect(w.text(BOARD_PATH)).not.toContain('\nmerge_by: owner\n')
+  expect((await merge())?.value).toBe('owner')
+  await ui.select({ key: 'set-merge_by', value: 'claude' })
+  await ui.press({ key: 'restore-all' })
+  await ui.press({ key: 'restore-yes' })
+  expect((await merge())?.value).toBe('owner')
+  await ui.press({ key: 'restore-original' })
+  await ui.press({ key: 'original-yes' })
+  expect(w.text(BOARD_PATH)).toBe(board)
+  expect((await merge())?.value).toBe('claude')
 })
 
 test('Settings tab: a saved line equal to the default shows no Reset', async ($, on) => {
@@ -675,7 +787,7 @@ test('Settings tab: a snapshot saved before the thinking settings (no thinking, 
   state.seed('snapshot', { ...snapshot, settings: { owner, prefix, workers, managerModel, plannerModel, workerModel } })
   await redraw(ui)
   await ui.press({ key: 'header-tab-settings' })
-  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
+  expect((await ui.findAll({ type: 'Select' })).map((s) => s.props.value)).toEqual(['2', 'off', 'claude', 'opus', 'medium', 'opus', 'high', 'sonnet', 'medium'])
   expect(await ui.find({ type: 'Text', text: 'Everything is at its default' })).toBeDefined()
 })
 
@@ -2456,7 +2568,8 @@ test('a retype asked from the open card marks the card worked at turn.start; whe
 
 const DATE_FIX = cardPath('BUG-0012', 'fix-date')
 const DATE_BUG = cardPath('BUG-0008', 'date-bug')
-const MERGE_QUESTION = 'Merge BUG-0012 "Fix date" into BUG-0008 "Date bug"? BUG-0012 is deleted and its text moves into BUG-0008.'
+const MERGE_QUESTION = 'Merge BUG-0012 "Fix date" into BUG-0008 "Date bug"? BUG-0012 would be deleted and its text moves into BUG-0008.'
+const MERGE_HEAD = '? Nothing has been merged yet.'
 const MERGE_PROMPT = 'Kanban: John asked to merge BUG-0012 "Fix date" into BUG-0008 "Date bug". Merge the cards with the kanban skill.'
 
 function mergeFiles(): Record<string, string> {
@@ -2493,6 +2606,95 @@ test('a drop on another card shows the question with the exact words and the two
   expect(w.toasts).toEqual([])
   // The lanes are still drawn under the question.
   expect(await ui.find({ type: 'Client', key: 'board' })).toBeDefined()
+})
+
+/** The keys drawn in the pane, in drawing order. */
+function drawnKeys(n: unknown, out: string[] = []): string[] {
+  if (typeof n !== 'object' || n === null) return out
+  const node = n as { props?: { key?: string }; children?: unknown[] }
+  if (node.props?.key !== undefined) out.push(String(node.props.key))
+  for (const c of node.children ?? []) drawnKeys(c, out)
+  return out
+}
+
+test('the question is a box in the warning colour directly above the lanes, under the toolbar, with the first line, Keep both as the main button and then Merge', async ($, on) => {
+  await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  const keys = drawnKeys(await ui.drawn())
+  // Header, toolbar, the box, the lanes: nothing between the box and the board Client.
+  expect(keys.indexOf('toolbar-new')).toBeGreaterThan(-1)
+  expect(keys.indexOf('toolbar-new')).toBeLessThan(keys.indexOf('merge-ask'))
+  expect(keys.indexOf('merge-ask')).toBeLessThan(keys.indexOf('board'))
+  expect(keys.slice(keys.indexOf('merge-ask'), keys.indexOf('board')).filter((k) => !k.startsWith('merge-'))).toEqual([])
+  const box = await ui.find({ key: 'merge-ask' })
+  expect(box?.props).toMatchObject({ borderStyle: 'round', borderColor: 'warning', backgroundColor: 'userMessageBackground' })
+  const texts = (box?.children ?? []) as { type?: string; children?: unknown[]; props: Record<string, unknown> }[]
+  const head = texts.find((c) => c.type === 'Text')
+  expect(head?.children?.join('')).toBe(MERGE_HEAD)
+  expect(head?.props).toMatchObject({ bold: true, color: 'warning' })
+  // Keep both first and the main (primary) button, Merge second and the plain one.
+  expect(keys.indexOf('merge-no')).toBeLessThan(keys.indexOf('merge-yes'))
+  expect((await ui.find({ key: 'merge-no' }))?.props.variant).toBe('primary')
+  expect((await ui.find({ key: 'merge-yes' }))?.props.variant).toBe('secondary')
+})
+
+// The test kit has no scrolling site: the plugin's $.ui.scroll throws there ("no implementation for ui.scroll"), the same path as an engine without
+// scroll. That the engine scrolls the box by its key `merge-ask` is the live pane's to show (TESTING.md step 13a); `claude plugin validate` checks the call.
+test('when the pane cannot scroll the question into view, one toast says where it is, after the box had its two tries', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  // Nothing yet: the drop answers first, the scroll is tried a moment later and once more after that.
+  expect(w.toasts).toEqual([])
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.toasts).toEqual([])
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(w.toasts).toEqual(['Merge BUG-0012 into BUG-0008? Answer at the top of the board.'])
+  // The question is still there to answer, and nothing more is said.
+  expect(await mergeAsked(ui)).toBe(MERGE_QUESTION)
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  expect(w.toasts).toHaveLength(1)
+  expect(w.writes).toEqual([])
+  expect(w.sent).toEqual([])
+})
+
+test('a question answered before the scroll is tried says nothing', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  await dropOn(ui, 'BUG-0012', 'BUG-0008')
+  await ui.press({ key: 'merge-no' })
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  expect(w.toasts).toEqual([])
+})
+
+test('the board props carry the pair while the question is open, and not after Keep both, Merge, a tab change or a card going', async ($, on) => {
+  const w = await boot($, on, mergeFiles())
+  const ui = await mountPane($, 'desktop')
+  expect((await boardProps(ui)).mergeAsk).toBeUndefined()
+  const asked = async (): Promise<void> => {
+    await dropOn(ui, 'BUG-0012', 'BUG-0008')
+    expect((await boardProps(ui)).mergeAsk).toEqual({ id: 'BUG-0012', onto: 'BUG-0008' })
+  }
+  await asked()
+  await ui.press({ key: 'merge-no' })
+  expect((await boardProps(ui)).mergeAsk).toBeUndefined()
+  await asked()
+  await ui.press({ key: 'merge-yes' })
+  expect((await boardProps(ui)).mergeAsk).toBeUndefined()
+  await asked()
+  await ui.press({ key: 'header-tab-settings' })
+  await ui.press({ key: 'header-tab-board' })
+  expect((await boardProps(ui)).mergeAsk).toBeUndefined()
+  await asked()
+  w.files.delete(DATE_BUG)
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect((await boardProps(ui)).mergeAsk).toBeUndefined()
 })
 
 test('Keep both closes the question and writes nothing and sends nothing', async ($, on) => {
@@ -2600,7 +2802,7 @@ test('a second drop replaces the pending question', async ($, on) => {
   const ui = await mountPane($, 'desktop')
   await dropOn(ui, 'BUG-0012', 'BUG-0008')
   await dropOn(ui, 'BUG-0008', 'BUG-0021')
-  expect(await mergeAsked(ui)).toBe('Merge BUG-0008 "Date bug" into BUG-0021 "A parent"? BUG-0008 is deleted and its text moves into BUG-0021.')
+  expect(await mergeAsked(ui)).toBe('Merge BUG-0008 "Date bug" into BUG-0021 "A parent"? BUG-0008 would be deleted and its text moves into BUG-0021.')
   expect(await ui.findAll({ key: 'merge-ask' })).toHaveLength(1)
   await ui.press({ key: 'merge-yes' })
   expect(w.sent.map((s) => s.text)).toEqual(['Kanban: John asked to merge BUG-0008 "Date bug" into BUG-0021 "A parent". Merge the cards with the kanban skill.'])
@@ -2723,4 +2925,63 @@ test('with no board in the root or any parent folder the pane offers to set one 
   expect((await ui.find({ type: 'Text', text: 'This project has no board yet.' }))?.type).toBe('Text')
   await ui.press({ key: 'setup' })
   expect(w.sent.map((s) => s.text)).toEqual([SETUP_PROMPT])
+})
+
+// ---- long-chat hygiene (spec 21b): one toast asking for /compact when the chat is nearly full; nothing else happens
+const FULL_TOAST = 'Your chat is about 72% full. Run /compact to keep the board working well.'
+
+async function endTurn($: Engine, id: string): Promise<void> {
+  await $.turn.start({ text: 'hello', turnId: id })
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: id, reason: 'answer' })
+}
+
+test('chat fill below the threshold: no message', async ($, on) => {
+  const w = await boot($, on)
+  w.usagePercent = 69
+  await endTurn($, 't1')
+  expect(w.toasts).toEqual([])
+})
+
+test('chat fill above the threshold: one message, and nothing is sent or run', async ($, on) => {
+  const w = await boot($, on)
+  w.usagePercent = 72
+  await endTurn($, 't1')
+  expect(w.toasts).toEqual([FULL_TOAST])
+  expect(w.sent).toEqual([])
+  expect(w.ran).toEqual([])
+})
+
+test('the message is not repeated on later turns, and comes again after a compact brought the chat down', async ($, on) => {
+  const w = await boot($, on)
+  w.usagePercent = 72
+  await endTurn($, 't1')
+  w.usagePercent = 80
+  await endTurn($, 't2')
+  await endTurn($, 't3')
+  expect(w.toasts).toEqual([FULL_TOAST])
+  w.usagePercent = 10
+  await endTurn($, 't4')
+  w.usagePercent = 71
+  await endTurn($, 't5')
+  expect(w.toasts).toEqual([FULL_TOAST, 'Your chat is about 71% full. Run /compact to keep the board working well.'])
+})
+
+test('chat fill not known: no message', async ($, on) => {
+  const w = await boot($, on)
+  w.usagePercent = undefined
+  await endTurn($, 't1')
+  expect(w.toasts).toEqual([])
+})
+
+test('chat fill by tokens on a 1M window: 249K stays quiet, 250K toasts once and names the tokens', async ($, on) => {
+  const w = await boot($, on)
+  w.usagePercent = 24
+  w.usageTokens = 249_000
+  await endTurn($, 't1')
+  expect(w.toasts).toEqual([])
+  w.usagePercent = 25
+  w.usageTokens = 250_000
+  await endTurn($, 't2')
+  await endTurn($, 't3')
+  expect(w.toasts).toEqual(['Your chat is about 25% full (250K tokens). Run /compact to keep the board working well.'])
 })

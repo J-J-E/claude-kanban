@@ -12,6 +12,8 @@ describe('flagKind', () => {
     expect(flagKind('FAILED: step 2')).toBe('failed')
     expect(flagKind('GATE')).toBe('gate')
     expect(flagKind('GATE: merge touches package.json')).toBe('gate')
+    expect(flagKind('READY TO MERGE')).toBe('ready')
+    expect(flagKind('READY TO MERGE: PR 14')).toBe('ready')
   })
 
   test('anything else is other', () => {
@@ -25,6 +27,8 @@ describe('flagKind', () => {
     expect(flagKind('Question: why')).toBe('other')
     expect(flagKind('failed')).toBe('other')
     expect(flagKind('gate: x')).toBe('other')
+    expect(flagKind('ready to merge')).toBe('other')
+    expect(flagKind('NOT READY TO MERGE')).toBe('other')
   })
 
   test('an empty flag is no flag; a flag of spaces or a newline too', () => {
@@ -72,7 +76,13 @@ describe('flagReason', () => {
     expect(flagReason('line one\nline two')?.text).toBe('line one line two')
   })
 
-  test('only the failure is red', () => {
+  test('READY TO MERGE: a tick and the sentence, in the success (green) colour, not the warning one', () => {
+    expect(flagReason('READY TO MERGE')).toEqual({ glyph: '✓', text: 'Ready to merge: open it for the link and the command', colour: 'success' })
+  })
+
+  test('only the failure is red and only a change ready to merge is green', () => {
     for (const f of ['PLAN READY', 'QUESTION: x', 'GATE: x', 'other']) expect(flagReason(f)?.colour).toBe('warning')
+    expect(flagReason('FAILED')?.colour).toBe('error')
+    expect(flagReason('READY TO MERGE')?.colour).toBe('success')
   })
 })

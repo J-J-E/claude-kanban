@@ -7,7 +7,7 @@ import { registerReadTools } from './tools-read.ts'
 import { registerWriteTools } from './tools-write.ts'
 import { registerResources } from './resources.ts'
 
-const server = new McpServer({ name: 'kanban', version: '0.1.0' })
+const server = new McpServer({ name: 'kanban', version: '0.2.3' })
 const dir = (): string | undefined => findKanbanDir(process.cwd())
 
 registerReadTools(server, dir, NO_BOARD_TEXT)

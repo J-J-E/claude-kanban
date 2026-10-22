@@ -94,6 +94,8 @@ describe('parseBoard', () => {
       counters: { BUG: 1, ENH: 1, CHORE: 1 },
       owner: 'John',
       workers: 2,
+      needsYouInChat: false,
+      mergeBy: 'claude',
       managerModel: 'opus',
       plannerModel: 'opus',
       workerModel: 'sonnet',
@@ -165,6 +167,8 @@ describe('parseBoard', () => {
       'manager_model: gpt', 'planner_model: none', 'planner_model: gpt', 'worker_model: none',
       'next_bug: 0', 'next_bug: -3', 'next_bug: x',
       'workers:',
+      'needs_you_in_chat: yes', 'needs_you_in_chat: ON', 'needs_you_in_chat: true', 'needs_you_in_chat: 1', 'needs_you_in_chat:',
+      'merge_by: me', 'merge_by: Owner', 'merge_by: CLAUDE', 'merge_by:',
     ]) {
       expect(codeOf(parseBoard(withSetting(line)))).toBe('bad-setting')
     }
@@ -173,6 +177,10 @@ describe('parseBoard', () => {
   test('the allowed setting values parse', () => {
     const withSetting = (line: string) => lines('---', 'owner: John', line, 'lanes:', '  - Inbox (intake)', '---')
     expect(must(parseBoard(withSetting('workers: 5'))).workers).toBe(5)
+    expect(must(parseBoard(withSetting('needs_you_in_chat: on'))).needsYouInChat).toBe(true)
+    expect(must(parseBoard(withSetting('needs_you_in_chat: off'))).needsYouInChat).toBe(false)
+    expect(must(parseBoard(withSetting('merge_by: owner'))).mergeBy).toBe('owner')
+    expect(must(parseBoard(withSetting('merge_by: claude'))).mergeBy).toBe('claude')
     for (const m of ['haiku', 'sonnet', 'opus', 'fable']) expect(must(parseBoard(withSetting('planner_model: ' + m))).plannerModel).toBe(m)
     expect(must(parseBoard(withSetting('next_bug: 10000'))).counters.BUG).toBe(10000)
   })
@@ -347,6 +355,48 @@ describe('setBoardSetting', () => {
     )
     expect(must(parseBoard(must(setBoardSetting(text, 'worker_thinking', 'none')))).workerThinking).toBe('none')
     for (const bad of ['Not set', 'extreme', '', 'HIGH']) expect(codeOf(setBoardSetting(BOARD_EXAMPLE, 'manager_thinking', bad))).toBe('bad-setting')
+  })
+
+  test('needs_you_in_chat: absent is off, on and off are written, anything else is bad-setting', () => {
+    const text = boardWithLanes('Inbox (intake)')
+    expect(must(parseBoard(text)).needsYouInChat).toBe(false)
+    const on = must(setBoardSetting(text, 'needs_you_in_chat', 'on'))
+    expect(on).toBe(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'needs_you_in_chat: on', '---'))
+    expect(must(parseBoard(on)).needsYouInChat).toBe(true)
+    expect(must(setBoardSetting(on, 'needs_you_in_chat', 'off'))).toBe(on.replace('needs_you_in_chat: on', 'needs_you_in_chat: off'))
+    for (const bad of ['yes', 'ON', 'true', '', '1']) expect(codeOf(setBoardSetting(text, 'needs_you_in_chat', bad))).toBe('bad-setting')
+  })
+
+  test('needs_you_in_chat is saved as default_needs_you_in_chat only when on, and restored with the other lines', () => {
+    const text = boardWithLanes('Inbox (intake)')
+    const on = must(setBoardSetting(text, 'needs_you_in_chat', 'on'))
+    const saved = must(saveDefaults(on))
+    expect(saved).toBe(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_needs_you_in_chat: on', '---'))
+    const b = must(parseBoard(saved))
+    expect([b.needsYouInChat, b.defaults.needsYouInChat, b.savedDefaults]).toEqual([true, true, ['default_needs_you_in_chat']])
+    expect(must(clearSavedDefaults(saved))).toBe(text)
+    expect(must(saveDefaults(must(setBoardSetting(saved, 'needs_you_in_chat', 'off'))))).toBe(text)
+  })
+
+  test('merge_by: absent is claude, claude and owner are written, anything else is bad-setting', () => {
+    const text = boardWithLanes('Inbox (intake)')
+    expect(must(parseBoard(text)).mergeBy).toBe('claude')
+    const owner = must(setBoardSetting(text, 'merge_by', 'owner'))
+    expect(owner).toBe(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'merge_by: owner', '---'))
+    expect(must(parseBoard(owner)).mergeBy).toBe('owner')
+    expect(must(setBoardSetting(owner, 'merge_by', 'claude'))).toBe(owner.replace('merge_by: owner', 'merge_by: claude'))
+    for (const bad of ['me', 'Owner', 'CLAUDE', '', 'true']) expect(codeOf(setBoardSetting(text, 'merge_by', bad))).toBe('bad-setting')
+  })
+
+  test('merge_by is saved as default_merge_by only when owner, and restored with the other lines', () => {
+    const text = boardWithLanes('Inbox (intake)')
+    const owner = must(setBoardSetting(text, 'merge_by', 'owner'))
+    const saved = must(saveDefaults(owner))
+    expect(saved).toBe(lines('---', 'owner: John', 'lanes:', '  - Inbox (intake)', 'default_merge_by: owner', '---'))
+    const b = must(parseBoard(saved))
+    expect([b.mergeBy, b.defaults.mergeBy, b.savedDefaults]).toEqual(['owner', 'owner', ['default_merge_by']])
+    expect(must(clearSavedDefaults(saved))).toBe(text)
+    expect(must(saveDefaults(must(setBoardSetting(saved, 'merge_by', 'claude'))))).toBe(text)
   })
 
   test('the changed board still parses', () => {
@@ -729,6 +779,8 @@ describe('default_ lines in parseBoard', () => {
     for (const line of [
       'default_workers: 6',
       'default_workers: 0',
+      'default_needs_you_in_chat: maybe',
+      'default_merge_by: nobody',
       'default_workers: two',
       'default_manager_model: none',
       'default_worker_model: gpt',
@@ -765,6 +817,8 @@ describe('saveDefaults', () => {
     expect({ ...after, defaults: undefined, savedDefaults: undefined }).toEqual({ ...before, defaults: undefined, savedDefaults: undefined })
     expect(after.defaults).toEqual({
       workers: 4,
+      needsYouInChat: false,
+      mergeBy: 'claude',
       roles: {
         manager: { model: 'sonnet', thinking: 'medium' },
         planner: { model: 'opus', thinking: 'max' },

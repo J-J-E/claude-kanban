@@ -28,14 +28,19 @@ export type CardFacts = {
   retry: { n: number; of: number; text: string } | null
   /** The last Log line (text and `YYYY-MM-DD HH:MM`), null when the Log is empty. */
   last: LogEntry | null
-  /** The card IDs of the latest `waiting on <IDs>` Log line, in order, no repeats; empty when there is none. */
+  /** The card IDs of the latest `waiting on <IDs>` (or `queued behind <IDs>`) Log line, in order, no repeats; empty when there is none. */
   waitingOn: string[]
+  /** True when a `Claude: started` Log line comes after the newest `moved ... -> ...` line: the Auto flow began and has not been re-queued since. */
+  started: boolean
+  /** What the newest `Claude:` Log line waits on (the text after `waiting on`), null when that line does not start `waiting on`. */
+  waitThing: string | null
 }
 
 const STEP_LINE = /^ {0,3}(\d+)[.)][ \t]+(\S.*?)[ \t]*$/
 const STEP_DONE = /^step (\d+) done(?::|$)/
 const RETRY = /^retry (\d+) of (\d+)(?::[ \t]*(.*))?$/
-const WAITING_ON = /^waiting on\b/
+/** A deliberate hold: `waiting on <thing>` (the skill's wording) or `queued behind <ID>` (the scheduling hold); both read as a named wait. */
+const WAITING_ON = /^(?:waiting on|queued behind)\b/
 const ID_IN_TEXT = /\b[A-Z]{1,10}-\d{4,}\b/g
 
 /** `Format the date. Files: a.py. Check: pytest.` gives `Format the date`. */
@@ -72,7 +77,9 @@ export function cardFacts(text: string): Result<CardFacts> {
   let doneAt = -1
   let highest = 0
   let waitAt = -1
+  let movedAt = -1
   for (let i = 0; i < log.length; i++) {
+    if (/^moved .+ -> /.test(log[i].text)) movedAt = i
     const m = STEP_DONE.exec(log[i].text)
     if (m) {
       doneAt = i
@@ -95,6 +102,10 @@ export function cardFacts(text: string): Result<CardFacts> {
     for (const id of log[waitAt].text.match(ID_IN_TEXT) ?? []) if (waitingOn.indexOf(id) === -1) waitingOn.push(id)
   }
 
+  const started = log.some((e, i) => i > movedAt && e.who === 'Claude' && /^started\b/.test(e.text))
+  const newest = [...log].reverse().find((e) => e.who === 'Claude')
+  const waitThing = newest !== undefined && WAITING_ON.test(newest.text) ? newest.text.replace(/^(?:waiting on|queued behind)\b[ \t:]*/, '').trim() : null
+
   const total = steps.length
   return ok({
     steps,
@@ -103,6 +114,8 @@ export function cardFacts(text: string): Result<CardFacts> {
     retry,
     last: log.length === 0 ? null : log[log.length - 1],
     waitingOn,
+    started,
+    waitThing,
   })
 }
 
@@ -184,7 +197,7 @@ export function changedWord(updated: string, today: string): string {
 
 // ---------------------------------------------------------------- reason lines (spec 8, kind 3)
 
-export type ReasonLine = { kind: FlagKind; glyph: string; text: string; colour: 'warning' | 'error' }
+export type ReasonLine = { kind: FlagKind; glyph: string; text: string; colour: 'warning' | 'error' | 'success' }
 
 function cleaned(flag: string): string {
   return String(flag ?? '')
@@ -209,6 +222,7 @@ function stepsWord(n: number): string {
  * | `QUESTION: text` | `?` | `Text` (first letter capitalised) |
  * | `FAILED` | `✕` (error) | `A step failed 4 times. Open it to see why` |
  * | `GATE: reason` | `▲` | `Held: reason` |
+ * | `READY TO MERGE` | `✓` (success, green) | `Ready to merge. Open it for the link and the command` |
  * | anything else | `▲` | the flag as written |
  */
 export function reasonLine(flag: string, steps: number): ReasonLine | null {
@@ -234,15 +248,16 @@ export function reasonLine(flag: string, steps: number): ReasonLine | null {
     const why = afterColon(f)
     return { kind, glyph: '▲', text: why === '' ? 'Held' : 'Held: ' + why, colour: 'warning' }
   }
+  if (kind === 'ready') return { kind, glyph: '✓', text: 'Ready to merge. Open it for the link and the command', colour: 'success' }
   return { kind, glyph: '▲', text: f, colour: 'warning' }
 }
 
 // ---------------------------------------------------------------- the status of a card (spec 8, the table)
 
-export type StatusKind = 'queued' | 'working' | 'waiting' | 'children' | 'parked' | 'done' | 'idle' | 'plan' | 'new'
+export type StatusKind = 'queued' | 'working' | 'hanging' | 'waiting' | 'named' | 'children' | 'parked' | 'done' | 'between' | 'idle' | 'plan' | 'new'
 
-/** The colour word the pane maps to a token: `default` is the text colour, `claude` and `warning` and `error` are theme tokens, `dim` is `dimColor`. */
-export type StatusColour = 'default' | 'claude' | 'warning' | 'error' | 'dim'
+/** The colour word the pane maps to a token: `default` is the text colour, `claude`, `warning`, `error` and `success` (green) are theme tokens, `dim` is `dimColor`. */
+export type StatusColour = 'default' | 'claude' | 'warning' | 'error' | 'success' | 'dim'
 
 /**
  * A card's second line. `bar` is the plan's progress (raw step counts; draw it with barGlyphs / barText), null where the
@@ -269,8 +284,14 @@ export type StatusInput = {
   isWorking: boolean
   /** A turn is queued for the card, no worker is on it, and it is not the running turn. */
   isQueued: boolean
+  /** The running turn is about this card (no worker is on it). Absent reads as false. */
+  isTurn?: boolean
   /** Claude is in a running turn (about any card): decides the words of a queued card. */
   isClaudeBusy: boolean
+  /** A turn is running, about any card or none (review, verify, merge, a typed request): someone is on the card, so it is not hanging. Absent reads as false. */
+  isAnyTurn?: boolean
+  /** The card's only agents are idle or completed (between steps), the newest since this moment; `isNeutral` while the grace has not run out (betweenIsNeutral). Absent or null: no such agent. */
+  between?: { since: Stamp; isNeutral: boolean; isIdle?: boolean } | null
   /** The running agent's description as the Agent tool got it (`KB-0012 step 2: fix date format`), null when none. */
   agent: string | null
   /** The card's `branch:` and `pr:` lines ('' when empty). */
@@ -278,8 +299,67 @@ export type StatusInput = {
   pr: string
   /** Of `facts.waitingOn`, the IDs whose cards sit in a lane with role `done`. */
   doneChildren: readonly string[]
+  /** Of `facts.waitingOn`, the IDs with no card on the board (retyped or merged away); they count for nothing. Absent: none. */
+  goneChildren?: readonly string[]
   /** The local moment now, for the time words. */
   now: Stamp
+}
+
+/**
+ * True when the card waits on a named thing and nothing runs for it: its newest `Claude:` Log line starts `waiting on`, and that line names
+ * no card ID (John, a lead, hardware) or names at least one card that is not done. `doneChildren` are the done ones among `facts.waitingOn`.
+ * An ID with no card on the board (`goneChildren`: retyped or merged away) is ignored, and a wait whose IDs are all gone is not a wait.
+ * The same rule as `stillWaiting` in mcp/src/tools-read.ts.
+ */
+export function isNamedWait(facts: CardFacts, doneChildren: readonly string[], goneChildren: readonly string[] = []): boolean {
+  if (facts.waitThing === null) return false
+  if (facts.waitingOn.length === 0) return true
+  return facts.waitingOn.some((id) => goneChildren.indexOf(id) === -1 && doneChildren.indexOf(id) === -1)
+}
+
+/**
+ * True when nobody has the card: it is in a lane with role `auto`, the Auto flow started, no worker and no turn is on it, nothing is queued for
+ * it and it does not wait on a named thing. The chat or the PC restarted mid-work. Only a live pane can say this.
+ */
+export function isNobodyOn(
+  facts: CardFacts,
+  role: string,
+  o: { isWorking: boolean; isQueued: boolean; isTurn?: boolean; isAnyTurn?: boolean; isBetween?: boolean; doneChildren: readonly string[]; goneChildren?: readonly string[] },
+): boolean {
+  return role === 'auto' && facts.started && !o.isWorking && !o.isQueued && o.isTurn !== true && o.isAnyTurn !== true && o.isBetween !== true && !isNamedWait(facts, o.doneChildren, o.goneChildren)
+}
+
+/** How long after a worker finished (and after the card's newest Log line) the card still reads as between steps rather than as nobody on it. */
+export const BETWEEN_STEPS_GRACE_MS = 2 * 60 * 1000
+
+/**
+ * What an agent the app lists is to its card (BUG-0023): `working` for running, pending and waiting (held on background work it owns);
+ * `between` for idle and completed (it finished a step and may yet be resumed by message); `gone` for failed, killed and anything else.
+ */
+export function agentKind(status: string): 'working' | 'between' | 'gone' {
+  if (status === 'running' || status === 'pending' || status === 'waiting') return 'working'
+  return status === 'idle' || status === 'completed' ? 'between' : 'gone'
+}
+
+/**
+ * Whether a card whose only agents are between steps is still neutral. It warns (like nobody on it) only when BOTH the newest of those agents
+ * became idle or completed more than BETWEEN_STEPS_GRACE_MS ago AND the card's newest Log line is older than that too; either one recent keeps it neutral.
+ * `sinceMs` is when the pane first saw the agent in that status (the first sight after a reload when it was already finished).
+ */
+export function betweenIsNeutral(sinceMs: number, last: Stamp | null, nowMs: number): boolean {
+  if (nowMs - sinceMs < BETWEEN_STEPS_GRACE_MS) return true
+  if (last === null || !isDate(last.date) || !isTime(last.time)) return false
+  const at = new Date(Number(last.date.slice(0, 4)), Number(last.date.slice(5, 7)) - 1, Number(last.date.slice(8, 10)), Number(last.time.slice(0, 2)), Number(last.time.slice(3, 5))).getTime()
+  return nowMs - at < BETWEEN_STEPS_GRACE_MS
+}
+
+/** `14:05` the same day, `yesterday 14:05` the day before, else `Oct 6`: where the Log of a card nobody has stopped. */
+function sinceWords(then: Stamp, now: Stamp): string {
+  const a = dayNumber(then.date)
+  const b = dayNumber(now.date)
+  if (Number.isNaN(a) || Number.isNaN(b) || !isTime(then.time)) return ''
+  if (b - a <= 0) return then.time
+  return b - a === 1 ? 'yesterday ' + then.time : monthDay(then.date)
 }
 
 /** The running agent's text: its description without the card ID and the `step N:` or `plan:` after it. */
@@ -310,11 +390,14 @@ function prWords(pr: string): string {
  * | # | kind | when | text | colour | bar |
  * | 1 | queued | `isQueued` and no worker | `Waiting for Claude to start. It is busy with another turn.` (`Claude is starting this.` when `isClaudeBusy` is false) | claude | the done steps, if any |
  * | 2 | working | `isWorking` | `Step 3 of 5: text`; `Step 3 of 5, retry 2 of 3: what failed`; no plan `Working: text` | default | yes |
+ * | 2a | between | role `auto`, an idle or completed agent and no other, the grace (2 minutes from the agent's finish and from the newest Log line) not run out, no turn | `Worker finished 1 min ago; next step not started` (completed) or `Worker idle since 14:05; waiting for a message` (idle; both kinds: idle) | dim | the done steps, if a plan |
+ * | 2b | hanging | role `auto`, `started`, no worker, no turn, not queued, not waiting on a named thing | `Nobody on this since 14:05` (`Nobody on this` with an empty Log) | warning | the done steps, if a plan |
  * | 3 | waiting | a flag and `isClaudeOnly` | the reason line | warning or error | a held (`GATE`) card with a plan |
  * | 4 | children | a `waiting on` line with a child not done | `Waiting on KB-0017 and KB-0018: 1 of 2 done` | default | no |
+ * | 4b | named | the newest `Claude:` line is `waiting on <thing>` and names no card ID | `Waiting on John` | default | no |
  * | 5 | parked | role `parked` | `Parked at step 3: text` | dim | no |
  * | 6 | done | role `done` | `Merged kb-0003, PR 14` | dim | no |
- * | 7 | idle | role `auto` or `manual`, a plan | `3 of 5 steps done. No worker running.` (manual: `... Say which step is next.`) | dim | yes |
+ * | 7 | idle | role `auto` or `manual`, a plan, and no `started` Log line | `3 of 5 steps done. No worker running.` (manual: `... Say which step is next.`) | dim | yes |
  * | 8 | plan | a plan, any other lane | `Plan: 4 steps` | dim | no |
  * | 9 | new | none of the above | no text | | no |
  *
@@ -351,6 +434,20 @@ export function cardStatus(i: StatusInput): CardStatus {
     return make('working', text, 'default', bar())
   }
 
+  // 2a. between steps: a worker finished, nothing runs, and the grace has not run out. Not working, and not yet a warning.
+  if (i.between?.isNeutral === true && i.role === 'auto' && i.isTurn !== true && i.isAnyTurn !== true) {
+    const when = timeWords(i.between.since, i.now)
+    // An idle worker is waiting for a message, not finished; a card with both kinds reads as idle.
+    const text = i.between.isIdle === true ? 'Worker idle since ' + sinceWords(i.between.since, i.now) + '; waiting for a message' : 'Worker finished ' + when + '; next step not started'
+    return make('between', text, 'dim', hasPlan ? bar() : null, when)
+  }
+
+  // 2b. nobody has it: the Auto flow started and nothing runs for it
+  if (isNobodyOn(f, i.role, { isWorking: i.isWorking, isQueued: i.isQueued, isTurn: i.isTurn, isAnyTurn: i.isAnyTurn, isBetween: i.between?.isNeutral === true, doneChildren: i.doneChildren, goneChildren: i.goneChildren })) {
+    const since = f.last === null ? '' : sinceWords({ date: f.last.date, time: f.last.time }, i.now)
+    return make('hanging', since === '' ? 'Nobody on this' : 'Nobody on this since ' + since, 'warning', hasPlan ? bar() : null)
+  }
+
   // 3. waiting on him: a flag, in a Claude-only lane
   if (i.isClaudeOnly) {
     const reason = reasonLine(i.flag, f.total)
@@ -360,11 +457,17 @@ export function cardStatus(i: StatusInput): CardStatus {
   }
 
   // 4. children
-  if (f.waitingOn.length > 0) {
-    const done = f.waitingOn.filter((id) => i.doneChildren.indexOf(id) !== -1).length
-    if (done < f.waitingOn.length) {
-      return make('children', 'Waiting on ' + listWords(f.waitingOn) + ': ' + done + ' of ' + f.waitingOn.length + ' done', 'default', null)
+  const live = f.waitingOn.filter((id) => (i.goneChildren ?? []).indexOf(id) === -1)
+  if (live.length > 0) {
+    const done = live.filter((id) => i.doneChildren.indexOf(id) !== -1).length
+    if (done < live.length) {
+      return make('children', 'Waiting on ' + listWords(live) + ': ' + done + ' of ' + live.length + ' done', 'default', null)
     }
+  }
+
+  // 4b. a named wait (John, a lead, hardware)
+  if (f.waitingOn.length === 0 && f.waitThing !== null) {
+    return make('named', f.waitThing === '' ? 'Waiting' : 'Waiting on ' + f.waitThing, 'default', null)
   }
 
   // 5. parked
@@ -386,7 +489,7 @@ export function cardStatus(i: StatusInput): CardStatus {
   }
 
   // 7. idle
-  if ((i.role === 'auto' || i.role === 'manual') && hasPlan) {
+  if ((i.role === 'auto' || i.role === 'manual') && hasPlan && !f.started) {
     const steps = f.done + ' of ' + f.total + (f.total === 1 ? ' step done. ' : ' steps done. ')
     return make('idle', steps + (i.role === 'manual' ? 'Say which step is next.' : 'No worker running.'), 'dim', bar())
   }

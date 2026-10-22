@@ -37,6 +37,8 @@ import {
   WORKING_MARK,
   dropLook,
   emptyBoardRows,
+  mergeNoteGone,
+  mergeNoteInto,
   mergeVerdict,
   needsYouWords,
   placeVerdict,
@@ -63,6 +65,8 @@ const TILE_BG = 'composerSidebarBackground'
 const TILE_HOVER_BORDER = 'inactive'
 /** The outline of the card whose view is open (its fill is any card's, so the outline marks it). */
 const TILE_SELECTED_BORDER = 'subtle'
+/** The outline of the card a merge question is about to merge into (the warning colour, as the card that waits on him has its spine in it; spec 14.7). */
+const TILE_MERGE_BORDER = 'warning'
 /** The outline of the card's own place while it is held (or moving): no fill, so the place reads as a hole. */
 const TILE_SOURCE_BORDER = 'subtle'
 /** The fill of a menu row under the pointer: a mid grey of the theme, under text of the default colour. */
@@ -340,28 +344,41 @@ function drawTitleBar(p: Parts, panel: LanePanel): RenderElement {
   )
 }
 
+/** The pair the open merge question is about (props that are not two IDs: none). */
+function askOf(p: Parts): { id: string; onto: string } | undefined {
+  const ask = p.effective.mergeAsk
+  return ask !== undefined && ask !== null && typeof ask.id === 'string' && typeof ask.onto === 'string' ? ask : undefined
+}
+
+/** The part a card plays in the open merge question: the one dropped on, the one dropped, or neither. */
+type MergeMark = 'into' | 'gone' | null
+
 /**
  * How a card looks. No outline at rest: a card is a fill, and its border is the same colour as its fill. A card that waits on him has a
- * spine (a one-cell strip in the warning colour, or the error colour for a failure, at its left edge). The card in the hand's place and a
+ * spine (a one-cell strip in the warning colour, the error colour for a failure, or the success colour (green) for a change ready to merge, at its left edge). The card in the hand's place and a
  * card in flight are dim; the open card has a lighter fill; a card under the pointer lightens (a hover, no code).
  */
-function lookOf(p: Parts, panel: LanePanel, card: BoardCard): { fill: string | undefined; border: string; hovers: boolean; isSource: boolean; spine: string | null } {
+function lookOf(p: Parts, panel: LanePanel, card: BoardCard): { fill: string | undefined; border: string; hovers: boolean; isSource: boolean; spine: string | null; merge: MergeMark } {
   const d = p.state.drag
   const dragging = !!d && d.isMoved && p.looks !== null
   const waits = panel.isClaudeOnly && String(card.flag ?? '').trim() !== ''
   const reason = waits ? flagReason(card.flag) : null
-  const own = waits ? (card.status?.kind === 'waiting' && (card.status.colour === 'warning' || card.status.colour === 'error') ? card.status.colour : (reason?.colour ?? 'warning')) : null
-  if (dragging && d !== null && d.id === card.id) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: true, spine: null }
-  if (dragging) return { fill: TILE_BG, border: TILE_BG, hovers: false, isSource: false, spine: own }
-  if (card.id === p.pendingId) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: false, spine: own }
-  if (card.id === p.selected) return { fill: TILE_BG, border: TILE_SELECTED_BORDER, hovers: false, isSource: false, spine: own }
-  return { fill: TILE_BG, border: TILE_BG, hovers: true, isSource: false, spine: own }
+  const own = waits ? (card.status?.kind === 'waiting' && (card.status.colour === 'warning' || card.status.colour === 'error' || card.status.colour === 'success') ? card.status.colour : (reason?.colour ?? 'warning')) : null
+  if (dragging && d !== null && d.id === card.id) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: true, spine: null, merge: null }
+  if (dragging) return { fill: TILE_BG, border: TILE_BG, hovers: false, isSource: false, spine: own, merge: null }
+  if (card.id === p.pendingId) return { fill: undefined, border: TILE_SOURCE_BORDER, hovers: false, isSource: false, spine: own, merge: null }
+  // While the merge question is open (spec 14.7) the card dropped on is outlined in the warning colour and the card dropped is dim.
+  const ask = askOf(p)
+  if (ask !== undefined && card.id === ask.onto) return { fill: TILE_BG, border: TILE_MERGE_BORDER, hovers: false, isSource: false, spine: own, merge: 'into' }
+  if (ask !== undefined && card.id === ask.id) return { fill: TILE_BG, border: TILE_SOURCE_BORDER, hovers: false, isSource: false, spine: own, merge: 'gone' }
+  if (card.id === p.selected) return { fill: TILE_BG, border: TILE_SELECTED_BORDER, hovers: false, isSource: false, spine: own, merge: null }
+  return { fill: TILE_BG, border: TILE_BG, hovers: true, isSource: false, spine: own, merge: null }
 }
 
-/** A text style from a status colour: `claude`, `warning` and `error` are colours, `dim` is dimmed, `default` is plain. */
+/** A text style from a status colour: `claude`, `warning`, `error` and `success` are colours, `dim` is dimmed, `default` is plain. */
 function styleOfColour(colour: string, isSource: boolean): { color?: string; dimColor?: boolean } {
   if (isSource || colour === 'dim') return { dimColor: true }
-  return colour === 'claude' || colour === 'warning' || colour === 'error' ? { color: colour } : {}
+  return colour === 'claude' || colour === 'warning' || colour === 'error' || colour === 'success' ? { color: colour } : {}
 }
 
 /**
@@ -403,6 +420,23 @@ function drawStatusRow(p: Parts, t: CardTile, card: BoardCard, isSource: boolean
           <Text dimColor>{s.time}</Text>
         </Box>
       ) : null}
+    </Box>
+  )
+}
+
+/**
+ * The note a card carries while the merge question is open (spec 14.7): on row 2 in place of its status line, or, on a one-row card, on row 1 in place
+ * of the pin, labels and Changed (the title gives way). The card dropped on has it in the warning colour, the card dropped dim.
+ */
+function drawMergeNote(p: Parts, merge: MergeMark): RenderElement | null {
+  const ask = askOf(p)
+  if (merge === null || ask === undefined) return null
+  const { Box, Text } = p.el
+  return (
+    <Box height={1} flexShrink={0} marginLeft={1} overflow="hidden">
+      <Text wrap="truncate-end" {...(merge === 'into' ? { color: 'warning' } : { dimColor: true })}>
+        {merge === 'into' ? mergeNoteInto(ask.id) : mergeNoteGone(ask.onto)}
+      </Text>
     </Box>
   )
 }
@@ -457,12 +491,15 @@ function drawTile(p: Parts, panel: LanePanel, t: CardTile, card: BoardCard): Ren
   const r = t.rect
   const o = lookOf(p, panel, card)
   const isPending = card.id === p.pendingId
-  const titleDim = o.isSource || isPending || panel.role === 'done' || panel.role === 'scrapped'
+  const titleDim = o.isSource || isPending || o.merge === 'gone' || panel.role === 'done' || panel.role === 'scrapped'
   const scope = 'tile-' + card.id
   const title = titleOf(card)
   const hasZone = !p.isReadOnly
   const labels = Array.isArray(card.labels) ? card.labels.filter((x) => typeof x === 'string' && x !== '') : []
   const labelText = labels.join(' ')
+  // The merge note takes row 2 in place of the status line; a one-row card has no row 2, so it takes the right side of row 1 (pin, labels, Changed).
+  const note = drawMergeNote(p, o.merge)
+  const isNoteInRow = note !== null && t.statusRect === null
   return (
     <Box
       key={scope}
@@ -491,26 +528,32 @@ function drawTile(p: Parts, panel: LanePanel, t: CardTile, card: BoardCard): Ren
             </Text>
           </Box>
           {drawMarks(p, card, o.isSource)}
-          {t.hasPin ? (
+          {isNoteInRow ? note : null}
+          {t.showsLink && !isNoteInRow ? (
+            <Box height={1} marginLeft={1} flexShrink={0}>
+              <Text dimColor>{String(card.link)}</Text>
+            </Box>
+          ) : null}
+          {t.hasPin && !isNoteInRow ? (
             <Box height={1} marginLeft={1} flexShrink={0}>
               <Text dimColor>{String(card.pin).trim()}</Text>
             </Box>
           ) : null}
-          {t.showsLabels && labelText !== '' ? (
+          {t.showsLabels && labelText !== '' && !isNoteInRow ? (
             <Box height={1} marginLeft={PADDING} flexShrink={0}>
               <Text dimColor wrap="truncate-end">
                 {clip(labelText, LABEL_CLIP)}
               </Text>
             </Box>
           ) : null}
-          {t.labelRect !== null ? (
+          {t.labelRect !== null && !isNoteInRow ? (
             <Box width={t.labelRect.w} height={1} flexShrink={0} paddingLeft={1} overflow="hidden">
               <Text dimColor wrap="truncate-end">
                 {labelText}
               </Text>
             </Box>
           ) : null}
-          {t.changedRect !== null ? (
+          {t.changedRect !== null && !isNoteInRow ? (
             <Box width={t.changedRect.w} height={1} flexShrink={0} justifyContent="flex-end">
               <Text dimColor wrap="truncate-end">
                 {card.changed ?? ''}
@@ -525,7 +568,13 @@ function drawTile(p: Parts, panel: LanePanel, t: CardTile, card: BoardCard): Ren
             ) : null}
           </Box>
         </Box>
-        {drawStatusRow(p, t, card, o.isSource)}
+        {note !== null && !isNoteInRow ? (
+          <Box height={1} marginLeft={p.lay.idWidth - 1} overflow="hidden">
+            {note}
+          </Box>
+        ) : (
+          drawStatusRow(p, t, card, o.isSource)
+        )}
       </Box>
       {o.spine !== null ? <Box key={'spine-' + card.id} position="absolute" top={0} left={0} width={1} height={r.h} backgroundColor={o.spine} /> : null}
     </Box>

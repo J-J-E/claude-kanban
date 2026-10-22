@@ -238,6 +238,16 @@ describe('waiting box by flag kind', () => {
     expect(waiting(view(file({ status: 'Needs You', flag: 'GATE: drop the table.' }))).text).toBe('Held: drop the table. Claude will not go on until you approve.')
   })
 
+  test('ready to merge: green, says to merge it yourself, and has no button (the pane never merges)', () => {
+    const box = waiting(view(file({ status: 'Needs You', flag: 'READY TO MERGE' })))
+    expect(box.flagKind).toBe('ready')
+    expect(box.colour).toBe('success')
+    expect(box.glyph).toBe('✓')
+    expect(box.text).toContain('merge it yourself')
+    expect(box.buttons).toEqual([])
+    expect(box.hint).toBeNull()
+  })
+
   test('any other flag: shown as written, no buttons, no hint', () => {
     const box = waiting(view(file({ status: 'Needs You', flag: 'Check the invoice' })))
     expect(box.flagKind).toBe('other')
@@ -471,6 +481,35 @@ describe('cardView', () => {
   test('a card that cannot be read fails with the parse error and does not throw', () => {
     const r = cardView(input('not a card'))
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('the parent and the children', () => {
+  const cards = [
+    { id: 'KB-0014', title: 'Board', status: 'Auto', parent: 'KB-0010' },
+    { id: 'KB-0010', title: 'Epic', status: 'Plan', parent: '' },
+    { id: 'KB-0016', title: 'Kid B', status: 'Inbox', parent: 'KB-0014' },
+    { id: 'KB-0015', title: 'Kid A', status: 'Done', parent: 'KB-0014' },
+  ]
+  const text = file().replace('parent:\n', 'parent: KB-0010\n')
+
+  test('the parent with its title and lane, and the children by ID with how many are done', () => {
+    const v = view(text, { cards })
+    expect(v.parent).toEqual({ id: 'KB-0010', title: 'Epic', lane: 'Plan', isDone: false })
+    expect(v.kids?.head).toBe('Children (2): 1 of 2 done')
+    expect(v.kids?.children).toEqual([
+      { id: 'KB-0015', title: 'Kid A', lane: 'Done', isDone: true },
+      { id: 'KB-0016', title: 'Kid B', lane: 'Inbox', isDone: false },
+    ])
+  })
+
+  test('a card with no link has neither line; a parent not on the board has no lane; the waiting-on box stays', () => {
+    const plain = view(file(), { cards })
+    expect(plain.parent).toBeNull()
+    expect(view(file(), { cards: [] }).kids).toBeNull()
+    expect(view(text, { cards: [] }).parent).toEqual({ id: 'KB-0010', title: '', lane: null, isDone: false })
+    const waits = view(file({ log: ['- 2026-10-08 10:00 Claude: waiting on KB-0016'] }), { cards, childLanes: { 'KB-0016': 'Inbox' } })
+    expect(waits.box?.kind).toBe('children')
   })
 })
 

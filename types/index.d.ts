@@ -17,6 +17,10 @@ export type KanbanSettings = {
   /** The board's ticket types in order, as board.md lists them. Absent in a snapshot saved before types: read as the library's default types. */
   types?: { name: string; prefix: string }[]
   workers: number
+  /** Whether each Needs You card is put to the owner in chat (`needs_you_in_chat: on`). Absent in an old snapshot: off. */
+  needsYouInChat?: boolean
+  /** Who merges a card's pull request (`merge_by`: `claude` or `owner`). Absent in an old snapshot: `claude`. */
+  mergeBy?: string
   managerModel: string
   plannerModel: string
   workerModel: string
@@ -27,7 +31,7 @@ export type KanbanSettings = {
   /** Which settings lines board.md holds (a line equal to its default counts), so Reset and Restore know what to remove. Absent in an old snapshot: read as none. */
   saved?: string[]
   /** The board's effective defaults (its saved `default_` lines, else the built-in): what Reset and the Default text mean. Absent in an old snapshot: read as the built-in defaults. */
-  defaults?: { workers: number; roles: { [role: string]: { model: string; thinking: string } } }
+  defaults?: { workers: number; needsYouInChat?: boolean; mergeBy?: string; roles: { [role: string]: { model: string; thinking: string } } }
   /** Which `default_` keys board.md holds. Absent in an old snapshot: read as none. */
   savedDefaults?: string[]
 }
@@ -41,6 +45,10 @@ export type KanbanFacts = {
   retry: { n: number; of: number; text: string } | null
   last: { date: string; time: string; who: string; text: string } | null
   waitingOn: string[]
+  /** True when a `Claude: started` Log line comes after the newest `moved` line. Absent in a snapshot saved before ENH-0063: read as false. */
+  started?: boolean
+  /** The text after `waiting on` in the newest `Claude:` Log line, null when that line is not a wait. Absent in an old snapshot: read as null. */
+  waitThing?: string | null
 }
 
 /** One card file that parsed. */
@@ -60,6 +68,8 @@ export type KanbanCard = {
   /** The `branch:` and `pr:` lines ('' when empty). Absent in an old snapshot. */
   branch?: string
   pr?: string
+  /** The `parent:` line (a card ID, or '' when empty). Absent in an old snapshot: read as none. */
+  parent?: string
   /** The facts of its plan and Log; null when the file has none to give. Absent in an old snapshot. */
   facts?: KanbanFacts | null
   /** The card's own model and thinking level (an allowed word, or '' for Auto). Absent in a snapshot saved before the card fields: read as Auto. */
@@ -104,7 +114,7 @@ export type KanbanQueued = {
   /** The card the prompt is about. */
   id: string
   /** 'move': a card dropped in a lane; 'create': a card made in a lane that has an action; 'delete': asked to be deleted; 'retype': asked to be given another type (a new ID); 'merge': asked to be merged into another card (this is the card that goes away). */
-  kind: 'move' | 'create' | 'delete' | 'retype' | 'merge'
+  kind: 'move' | 'create' | 'delete' | 'retype' | 'merge' | 'resume'
   /** The prompt text, to match turn.start against. */
   text: string
   /** Milliseconds since the epoch. */
@@ -112,7 +122,7 @@ export type KanbanQueued = {
 }
 
 /** One running or pending agent whose description starts with a card ID. */
-export type KanbanWorking = { id: string; description: string }
+export type KanbanWorking = { id: string; description: string; /** When the pane first saw the agent in its present status (ms), for an agent between steps. */ since?: number; /** The app's status of a between-steps agent: idle or completed. */ status?: string; /** The app's id of a between-steps agent, for the manager note. */ agentId?: string }
 
 /** What he folded and opened on the lanes: lane name to his fold choice, lane name to true when its `+ N more` is open, and the one sort of the whole board (`boardSort`, a sort key of hooks/lib/sort.ts; absent is Your order). A sort is a view: it is kept here and never written to a card. */
 export type KanbanLanesView = {
@@ -130,12 +140,16 @@ declare module 'claude-code' {
       snapshot: KanbanSnapshot | null
       /** One entry per running or pending agent (its description starts with the card ID, kept beside it), so a card with two agents appears twice. */
       working: KanbanWorking[]
+      /** One entry per idle or completed agent (between steps): a worker that finished and may be resumed by message, with `since` set. */
+      between: KanbanWorking[]
       /** The card the running turn is about, when it began with a move prompt from the pane. */
       turnCard: string | null
       /** True from any main-session turn start to its turn.complete (a chat turn has no card): Claude is busy. */
       inTurn: boolean
       /** The model the chat is really on, as the engine names it ('' = not known); the pane says it and never switches it. */
       chatModel: string
+      /** True once the chat has been asked to run /compact (hooks/lib/hygiene.ts): the message comes once per chat; cleared when a session starts. */
+      chatWarned: boolean
       queued: KanbanQueued[]
       /** The card ID whose view takes the place of the lanes; null: the lanes. Cleared when the card goes. */
       selected: string | null

@@ -2,6 +2,8 @@
 // the table of docs/design/spec.md section 8 (one test per row and per reason line). Pure functions, no engine.
 import { test, expect, describe } from 'claude-code/testing'
 import {
+  agentKind,
+  betweenIsNeutral,
   agentText,
   barGlyphs,
   barText,
@@ -9,6 +11,7 @@ import {
   cardStatus,
   changedWord,
   reasonLine,
+  isNobodyOn,
   stepInHand,
   stepShort,
   statusWords,
@@ -310,6 +313,10 @@ describe('the reason lines (spec 8)', () => {
     expect(reasonLine('GATE', 0)?.text).toBe('Held')
   })
 
+  test('READY TO MERGE gives `✓ Ready to merge. Open it for the link and the command`, success (green)', () => {
+    expect(reasonLine('READY TO MERGE', 5)).toEqual({ kind: 'ready', glyph: '✓', text: 'Ready to merge. Open it for the link and the command', colour: 'success' })
+  })
+
   test('anything else gives `▲ ` and the flag as written, warning', () => {
     expect(reasonLine('check the staging key', 0)).toEqual({ kind: 'other', glyph: '▲', text: 'check the staging key', colour: 'warning' })
   })
@@ -492,6 +499,42 @@ describe('the status of a card: the table of spec 8', () => {
     expect(s.time).toBe('')
   })
 
+  test('row 2b, nobody on it: `started` in Auto, no worker, no turn, not queued, not waiting; with or without a plan', () => {
+    const started = ['- 2026-10-08 09:10 John: moved Needs You -> Auto', '- 2026-10-08 09:11 Claude: started: kb-14-x', '- 2026-10-08 13:55 Claude: step 1 done: a']
+    const s = cardStatus(input({ facts: facts(PLAN5, started) }))
+    expect(s).toEqual({ kind: 'hanging', text: 'Nobody on this since 13:55', colour: 'warning', bar: { done: 1, total: 5 }, time: '10 min ago' })
+    expect(cardStatus(input({ facts: facts(null, started) }))).toMatchObject({ kind: 'hanging', bar: null })
+    expect(cardStatus(input({ facts: facts(PLAN5, ['- 2026-10-07 20:00 Claude: started: in place']) })).text).toBe('Nobody on this since yesterday 20:00')
+  })
+
+  test('row 2b does not apply with a worker, a turn on the card, a queued prompt, a lane that is not Auto, or no `started` after the last move', () => {
+    const f = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x'])
+    expect(cardStatus(input({ facts: f })).kind).toBe('hanging')
+    expect(cardStatus(input({ facts: f, isWorking: true })).kind).toBe('working')
+    expect(cardStatus(input({ facts: f, isTurn: true })).kind).not.toBe('hanging')
+    expect(cardStatus(input({ facts: f, isQueued: true })).kind).toBe('queued')
+    expect(cardStatus(input({ facts: f, role: 'plan' })).kind).not.toBe('hanging')
+    const again = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x', '- 2026-10-08 09:20 John: moved Auto -> Pending', '- 2026-10-08 09:30 John: moved Pending -> Auto'])
+    expect(again.started).toBe(false)
+    expect(cardStatus(input({ facts: again })).kind).toBe('idle')
+  })
+
+  test('row 7 no longer shows once `started` exists: a started card with a turn on it reads as its plan', () => {
+    const f = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x'])
+    expect(cardStatus(input({ facts: f, isTurn: true }))).toMatchObject({ kind: 'plan', text: 'Plan: 5 steps' })
+  })
+
+  test('row 4b, a named wait: `Waiting on John` (the newest Claude line), not hanging; a wait on a card IDs keeps row 4', () => {
+    const f = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x', '- 2026-10-08 12:00 Claude: waiting on John: which colour'])
+    expect(f.waitThing).toBe('John: which colour')
+    expect(cardStatus(input({ facts: f }))).toMatchObject({ kind: 'named', text: 'Waiting on John: which colour', colour: 'default', bar: null })
+    const kids = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x', '- 2026-10-08 12:00 Claude: waiting on KB-0017'])
+    expect(cardStatus(input({ facts: kids })).kind).toBe('children')
+    expect(cardStatus(input({ facts: kids, doneChildren: ['KB-0017'] })).kind).toBe('hanging')
+    const later = facts(PLAN5, ['- 2026-10-08 12:00 Claude: waiting on John', '- 2026-10-08 13:00 Claude: step 2 done: x'])
+    expect(later.waitThing).toBeNull()
+  })
+
   test('first match wins: queued over working-less waiting, waiting over children, children over parked, parked over idle', () => {
     const kids = facts(PLAN5, ['- 2026-10-08 14:00 Claude: waiting on KB-0017'])
     expect(cardStatus(input({ role: 'needs-you', isClaudeOnly: true, flag: 'FAILED', facts: kids })).kind).toBe('waiting')
@@ -537,5 +580,80 @@ describe('statusWords: the second line beside its bar and count', () => {
     expect(statusWords({ kind: 'waiting', text: '? Which repo?' })).toBe('? Which repo?')
     expect(statusWords({ kind: 'working', text: 'Working: panels' })).toBe('Working: panels')
     expect(statusWords({ kind: 'new', text: '' })).toBe('')
+  })
+})
+
+describe('which agents count as someone on a card (BUG-0023)', () => {
+  const MIN = 60 * 1000
+  const nowMs = new Date(2026, 9, 8, 14, 5).getTime()
+  const logAt = (time: string) => ({ date: '2026-10-08', time })
+  test('running, pending and waiting are working; idle and completed are between steps; failed, killed and anything else are gone', () => {
+    for (const s of ['running', 'pending', 'waiting']) expect(agentKind(s)).toBe('working')
+    for (const s of ['idle', 'completed']) expect(agentKind(s)).toBe('between')
+    for (const s of ['failed', 'killed', 'whatever']) expect(agentKind(s)).toBe('gone')
+  })
+  test('between steps is neutral for 2 minutes from the agent, or from the newest Log line, whichever is later', () => {
+    expect(betweenIsNeutral(nowMs - 30 * 1000, logAt('13:00'), nowMs)).toBe(true) // finished 30 s ago
+    expect(betweenIsNeutral(nowMs - 5 * MIN, logAt('13:00'), nowMs)).toBe(false) // 5 min ago, stale Log: warns
+    expect(betweenIsNeutral(nowMs - 5 * MIN, logAt('14:04'), nowMs)).toBe(true) // 5 min ago but a Log line 1 min old
+    expect(betweenIsNeutral(nowMs - 5 * MIN, logAt('14:03'), nowMs)).toBe(false) // a Log line 2 min old is over the grace
+    expect(betweenIsNeutral(nowMs - 5 * MIN, null, nowMs)).toBe(false)
+    expect(betweenIsNeutral(nowMs - 119 * 1000, null, nowMs)).toBe(true)
+    expect(betweenIsNeutral(nowMs - 120 * 1000, null, nowMs)).toBe(false)
+  })
+  test('the between row: a worker finished and nothing runs, not working; it warns like nobody once the grace is over', () => {
+    const f = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x'])
+    const neutral = cardStatus(input({ facts: f, between: { since: NOW, isNeutral: true } }))
+    expect(neutral).toMatchObject({ kind: 'between', text: 'Worker finished just now; next step not started', colour: 'dim' })
+    expect(cardStatus(input({ facts: f, between: { since: { date: '2026-10-08', time: '14:03' }, isNeutral: true } })).text).toBe('Worker finished 2 min ago; next step not started')
+    expect(cardStatus(input({ facts: f, between: { since: { date: '2026-10-08', time: '14:03' }, isNeutral: true, isIdle: true } })).text).toBe('Worker idle since 14:03; waiting for a message')
+    expect(cardStatus(input({ facts: f, between: { since: NOW, isNeutral: false } })).kind).toBe('hanging')
+    expect(cardStatus(input({ facts: f, isWorking: true, between: { since: NOW, isNeutral: true } })).kind).toBe('working')
+    expect(cardStatus(input({ facts: f, isAnyTurn: true, between: { since: NOW, isNeutral: true } })).kind).not.toBe('between')
+    expect(isNobodyOn(f, 'auto', { isWorking: false, isQueued: false, isBetween: true, doneChildren: [] })).toBe(false)
+  })
+  test('any running turn (isAnyTurn) means someone is on the card, so it is not hanging', () => {
+    const f = facts(PLAN5, ['- 2026-10-08 09:11 Claude: started: kb-14-x'])
+    expect(isNobodyOn(f, 'auto', { isWorking: false, isQueued: false, doneChildren: [] })).toBe(true)
+    expect(isNobodyOn(f, 'auto', { isWorking: false, isQueued: false, isAnyTurn: true, doneChildren: [] })).toBe(false)
+    expect(cardStatus(input({ facts: f, isAnyTurn: true })).kind).not.toBe('hanging')
+  })
+})
+
+describe('a deliberate hold (BUG-0023)', () => {
+  const started = '- 2026-10-08 09:11 Claude: started: kb-14-x'
+  test('`queued behind <ID>` reads as a named wait on that card, like `waiting on <ID>`', () => {
+    const held = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: queued behind KB-0017'])
+    expect(held.waitingOn).toEqual(['KB-0017'])
+    expect(cardStatus(input({ facts: held }))).toMatchObject({ kind: 'children', text: 'Waiting on KB-0017: 0 of 1 done' })
+    expect(cardStatus(input({ facts: held, doneChildren: ['KB-0017'] })).kind).toBe('hanging')
+    const asked = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: waiting on KB-0017: queued behind it, one card\'s workers at a time'])
+    expect(cardStatus(input({ facts: asked })).kind).toBe('children')
+  })
+  test('`queued behind John` is a named wait too; prose that does not start with either phrase stays hanging', () => {
+    const named = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: queued behind John'])
+    expect(cardStatus(input({ facts: named })).kind).toBe('named')
+    const prose = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: workers wait for KB-0017'])
+    expect(prose.waitingOn).toEqual([])
+    expect(cardStatus(input({ facts: prose })).kind).toBe('hanging')
+  })
+})
+
+describe('a wait on an ID with no card (CHORE-0018)', () => {
+  const started = '- 2026-10-08 09:11 Claude: started: kb-14-x'
+  test('an ID retyped or merged away is ignored: a wait whose IDs are all gone is not a wait, so the card is hanging', () => {
+    const f = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: waiting on KB-0099'])
+    expect(cardStatus(input({ facts: f })).kind).toBe('children')
+    expect(cardStatus(input({ facts: f, goneChildren: ['KB-0099'] })).kind).toBe('hanging')
+    expect(isNobodyOn(f, 'auto', { isWorking: false, isQueued: false, doneChildren: [], goneChildren: ['KB-0099'] })).toBe(true)
+  })
+  test('a gone ID next to an open one still waits, and the text names only the live one; next to a done one the card is hanging', () => {
+    const f = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: waiting on KB-0099, KB-0017'])
+    expect(cardStatus(input({ facts: f, goneChildren: ['KB-0099'] }))).toMatchObject({ kind: 'children', text: 'Waiting on KB-0017: 0 of 1 done' })
+    expect(cardStatus(input({ facts: f, goneChildren: ['KB-0099'], doneChildren: ['KB-0017'] })).kind).toBe('hanging')
+  })
+  test('a wait on John stays a wait; an open ID with no gone IDs is unchanged', () => {
+    const john = facts(PLAN5, [started, '- 2026-10-08 12:00 Claude: waiting on John: which colour'])
+    expect(cardStatus(input({ facts: john, goneChildren: ['KB-0099'] })).kind).toBe('named')
   })
 })

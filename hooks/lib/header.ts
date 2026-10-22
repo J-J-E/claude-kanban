@@ -4,10 +4,12 @@
 // nothing. The only things decided here from `columns` are which words are used and which rows a part sits on: the full
 // sentence or its short form, the kinds beside the count or under it, the turn from 100 cells.
 
+import { workerLine } from './strings.ts'
+
 /** What the header is given (all counts are whole numbers; a bad one reads as 0). */
 export type HeaderProps = {
   /** Cards waiting on him (spec 9), by how their flag starts. `total` is how many; `other` counts under "held" with `gate`. */
-  waiting: { total: number; plan: number; question: number; failed: number; gate: number; other: number }
+  waiting: { total: number; plan: number; question: number; failed: number; gate: number; other: number; ready?: number }
   /** The chosen tab. */
   tab: 'board' | 'settings'
   /** A card is open on the Board tab: a press on the chosen Board tab closes it. */
@@ -18,7 +20,13 @@ export type HeaderProps = {
    * card the detail describes (the only card, or the first), null when it has no plan; `step` is what the agent is doing
    * there (`lane panels and spacing`), '' when unknown.
    */
-  claude: { cards: readonly string[]; plan: { done: number; total: number } | null; step: string }
+  claude: {
+    cards: readonly string[]
+    plan: { done: number; total: number } | null
+    step: string
+    /** Every running worker's own text (`id` the card it is on), in board order; without it the header has the one `step` line. */
+    agents?: readonly { id: string; text: string }[]
+  }
   /** Agents running and the limit (the board's `workers`). */
   workers: { running: number; limit: number }
   /** Cards waiting to start (spec 9). */
@@ -64,6 +72,8 @@ export type HeaderWords = {
     card: string | null
     /** What the agent is doing (`lane panels and spacing`, without a leading `step 5b:`); null when Claude is idle or says nothing. The step count is on the card. */
     detail: string | null
+    /** With two or more workers saying something: one line per worker (up to the worker limit), each with its card ID in front when they are on different cards. Empty otherwise (`detail` is the line). */
+    notes: string[]
     /** `1 of 3 workers`, only when Claude is active and the limit is above 1. */
     workers: string | null
     /** `○ 1 waiting to start` (`○ 1 waiting` below 60 cells), only when above 0. */
@@ -94,7 +104,7 @@ function whole(n: unknown): number {
   return Number.isFinite(v) && v > 0 ? v : 0
 }
 
-/** `1 plan ready, 2 questions, 1 failed, 1 held`, in that order, zeros left out; `other` counts under held. */
+/** `1 plan ready, 2 questions, 1 failed, 1 held, 1 ready to merge`, in that order, zeros left out; `other` counts under held. */
 export function kindsText(w: HeaderProps['waiting']): string {
   const held = whole(w.gate) + whole(w.other)
   const plan = whole(w.plan)
@@ -105,6 +115,8 @@ export function kindsText(w: HeaderProps['waiting']): string {
   if (question > 0) parts.push(question + (question === 1 ? ' question' : ' questions'))
   if (failed > 0) parts.push(failed + ' failed')
   if (held > 0) parts.push(held + ' held')
+  const ready = whole(w.ready)
+  if (ready > 0) parts.push(ready + ' ready to merge')
   return parts.join(', ')
 }
 
@@ -151,6 +163,11 @@ export function headerWords(props: HeaderProps, columns: number): HeaderWords {
   }
 
   const limit = whole(props.workers.limit)
+  const said = (props.claude.agents ?? [])
+    .map((a) => ({ id: String(a.id), text: String(a.text ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/^step\s+\d+[a-z]?\s*:\s*/i, '').trim() }))
+    .filter((a) => a.text !== '')
+  const isWithId = new Set(said.map((a) => a.id)).size > 1
+  const notes = said.length > 1 && isActive ? said.slice(0, Math.max(1, limit)).map((a) => workerLine(a.id, a.text, isWithId)) : []
   const queued = whole(props.queued)
   const turnId = props.turnCard === null || props.turnCard === undefined ? '' : String(props.turnCard)
 
@@ -169,6 +186,7 @@ export function headerWords(props: HeaderProps, columns: number): HeaderWords {
       who,
       card: cards.length > 0 ? (cards[0] as string) : null,
       detail,
+      notes,
       workers: isActive && limit > 1 ? whole(props.workers.running) + ' of ' + limit + ' workers' : null,
       waiting: queued > 0 ? '○ ' + queued + (W < SHORT_WAITING_BELOW ? ' waiting' : ' waiting to start') : null,
       turn: turnId !== '' && W >= TURN_FROM ? '▶ this turn: ' + turnId : null,

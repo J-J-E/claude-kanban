@@ -19,7 +19,7 @@ Status: experimental. Everything here was derived by reading Obsidian's behaviou
 
 ## The `.base` format
 
-A `.base` file is YAML. Obsidian writes a view's keys in the order `type`, `name`, `filters`, `groupBy`, `groupOrder`, `order`, `limit`... and `sort` (app code), and `buildBaseText` follows that order. For the board:
+A `.base` file is YAML. Obsidian writes a view's keys in the order `type`, `name`, `filters`, `groupBy`, `groupOrder`, `order`, `limit`... and `sort` (app code), and the "set up the Obsidian view" steps in the skill follow that order. For the board:
 
 - `groupBy: {property: note.status, direction: ASC}` makes each distinct `status` value a column.
 - `groupOrder` lists the column values in the order shown; this is how lane order survives (a plain sort would put the columns in alphabetical order). Obsidian rewrites it when a person reorders columns in the app.

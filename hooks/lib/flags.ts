@@ -1,9 +1,9 @@
 // What a card's `flag:` line means, in one place: which kind it is (the top zone counts them by kind) and the one
 // line a flagged tile shows under its title (spec 4.2). Pure and dependency-free. The flag formats are in
-// skills/kanban/references/format.md: `PLAN READY`, `QUESTION: <question>`, `FAILED`, `GATE: <reason>`, or any other
+// skills/kanban/references/format.md: `PLAN READY`, `QUESTION: <question>`, `FAILED`, `GATE: <reason>`, `READY TO MERGE`, or any other
 // free text a person wrote.
 
-export type FlagKind = 'plan' | 'question' | 'failed' | 'gate' | 'other'
+export type FlagKind = 'plan' | 'question' | 'failed' | 'gate' | 'ready' | 'other'
 
 /** One line, no leading or trailing blanks: a flag is free text and may carry a newline. */
 function cleaned(flag: string): string {
@@ -20,6 +20,7 @@ export function flagKind(flag: string): FlagKind | null {
   if (f.startsWith('QUESTION')) return 'question'
   if (f.startsWith('FAILED')) return 'failed'
   if (f.startsWith('GATE')) return 'gate'
+  if (f.startsWith('READY TO MERGE')) return 'ready'
   return 'other'
 }
 
@@ -35,17 +36,18 @@ function capitalised(text: string): string {
 }
 
 /**
- * The reason line of a flagged tile: a glyph, the sentence, and the colour of both (`warning`, or `error` for a
- * failure). The tile draws `glyph + ' ' + text`; the card view draws the same sentence in full. Null for no flag.
+ * The reason line of a flagged tile: a glyph, the sentence, and the colour of both (`warning`, `error` for a
+ * failure, or `success` (green) for a change that is ready to merge). The tile draws `glyph + ' ' + text`; the card view draws the same sentence in full. Null for no flag.
  *
  * | flag starts with | glyph | text |
  * | `PLAN READY` | `◆` | `Plan ready: open it to approve or change it` |
  * | `QUESTION: text` | `?` | `Text` (first letter capitalised) |
  * | `FAILED` | `✕` | `A step failed 4 times: open it to see why` |
  * | `GATE: reason` | `▲` | `Held: reason` |
+ * | `READY TO MERGE` | `✓` | `Ready to merge: open it for the link and the command` |
  * | anything else | `▲` | the flag as written |
  */
-export function flagReason(flag: string): { glyph: string; text: string; colour: 'warning' | 'error' } | null {
+export function flagReason(flag: string): { glyph: string; text: string; colour: 'warning' | 'error' | 'success' } | null {
   const f = cleaned(flag)
   const kind = flagKind(f)
   if (kind === null) return null
@@ -59,5 +61,6 @@ export function flagReason(flag: string): { glyph: string; text: string; colour:
     const why = afterColon(f)
     return { glyph: '\u25b2', text: why === '' ? 'Held' : 'Held: ' + why, colour: 'warning' }
   }
+  if (kind === 'ready') return { glyph: '\u2713', text: 'Ready to merge: open it for the link and the command', colour: 'success' }
   return { glyph: '\u25b2', text: f, colour: 'warning' }
 }

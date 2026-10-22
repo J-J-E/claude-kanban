@@ -17,7 +17,7 @@ import {
   splitLines,
   stripBom,
 } from './frontmatter.ts'
-import { DEFAULT_KEYS, DEFAULTS, MODELS, SAVED_KEYS, THINKING_VALUES, WORKERS_MAX, WORKERS_MIN } from './settings.ts'
+import { CHAT_KEY, CHAT_OFF, CHAT_ON, DEFAULT_KEYS, DEFAULTS, MERGE_KEY, MERGE_VALUES, MODELS, SAVED_KEYS, THINKING_VALUES, WORKERS_MAX, WORKERS_MIN } from './settings.ts'
 import type { Defaults } from './settings.ts'
 import { appendLog, compareIds, ID_PATTERN, isCardFileName, isDate, parseCard, setOrder, setStatus } from './cards.ts'
 
@@ -63,6 +63,10 @@ export type Board = {
   counters: Record<string, number>
   owner: string
   workers: number
+  /** Whether each card waiting in Needs You is put to the owner in chat (`needs_you_in_chat: on`). An absent line is off. */
+  needsYouInChat: boolean
+  /** Who merges a card's pull request (`merge_by: claude` or `owner`). An absent line is `claude`. */
+  mergeBy: string
   managerModel: string
   plannerModel: string
   workerModel: string
@@ -94,6 +98,10 @@ function settingProblem(key: string, value: string): string | undefined {
       return undefined
     case 'workers':
       return /^[1-5]$/.test(value) && Number(value) >= WORKERS_MIN && Number(value) <= WORKERS_MAX ? undefined : '"workers" must be a whole number from 1 to 5.'
+    case CHAT_KEY:
+      return value === CHAT_ON || value === CHAT_OFF ? undefined : `"${key}" must be ${CHAT_ON} or ${CHAT_OFF}.`
+    case MERGE_KEY:
+      return MERGE_VALUES.indexOf(value) !== -1 ? undefined : `"${key}" must be ${MERGE_VALUES.join(' or ')}.`
     case 'manager_model':
     case 'worker_model':
     case 'planner_model':
@@ -115,7 +123,7 @@ export function parseBoard(text: string): Result<Board> {
   const parsed = parseFrontmatter(text)
   if (!parsed.ok) return parsed
   const fm = parsed.value
-  // The built-in value of each of the seven settings, by key. Any other key (an older `advisor_model` line, say) is not read.
+  // The built-in value of each of the nine settings, by key. Any other key (an older `advisor_model` line, say) is not read.
   const raw: Record<string, string> = {
     owner: '',
     ...builtInValues(),
@@ -192,6 +200,8 @@ export function parseBoard(text: string): Result<Board> {
     counters,
     owner: raw.owner,
     workers: Number(raw.workers),
+    needsYouInChat: raw[CHAT_KEY] === CHAT_ON,
+    mergeBy: raw[MERGE_KEY],
     managerModel: raw.manager_model,
     plannerModel: raw.planner_model,
     workerModel: raw.worker_model,
@@ -253,10 +263,12 @@ function readTypes(fm: Frontmatter): Result<TicketType[]> {
   return ok(types)
 }
 
-/** The built-in value of each of the seven settings, as the text of a board.md line. */
+/** The built-in value of each of the nine settings, as the text of a board.md line. */
 function builtInValues(): Record<string, string> {
   return {
     workers: String(DEFAULTS.workers),
+    [CHAT_KEY]: DEFAULTS.needsYouInChat ? CHAT_ON : CHAT_OFF,
+    [MERGE_KEY]: DEFAULTS.mergeBy,
     manager_model: DEFAULTS.roles.manager.model,
     planner_model: DEFAULTS.roles.planner.model,
     worker_model: DEFAULTS.roles.worker.model,
@@ -266,10 +278,12 @@ function builtInValues(): Record<string, string> {
   }
 }
 
-/** A Defaults from the seven setting values by key. */
+/** A Defaults from the nine setting values by key. */
 function defaultsFrom(v: Record<string, string>): Defaults {
   return {
     workers: Number(v.workers),
+    needsYouInChat: v[CHAT_KEY] === CHAT_ON,
+    mergeBy: v[MERGE_KEY],
     roles: {
       manager: { model: v.manager_model, thinking: v.manager_thinking },
       planner: { model: v.planner_model, thinking: v.planner_thinking },
@@ -278,10 +292,12 @@ function defaultsFrom(v: Record<string, string>): Defaults {
   }
 }
 
-/** The seven settings' current values by key, as parseBoard reads them. */
+/** The nine settings' current values by key, as parseBoard reads them. */
 function currentValues(b: Board): Record<string, string> {
   return {
     workers: String(b.workers),
+    [CHAT_KEY]: b.needsYouInChat ? CHAT_ON : CHAT_OFF,
+    [MERGE_KEY]: b.mergeBy,
     manager_model: b.managerModel,
     planner_model: b.plannerModel,
     worker_model: b.workerModel,
@@ -342,9 +358,9 @@ export function setCounter(text: string, prefix: string, n: number): Result<stri
 }
 
 /**
- * Save the seven settings' current values as the board's defaults: a value that differs from the built-in goes
+ * Save the nine settings' current values as the board's defaults: a value that differs from the built-in goes
  * in its `default_` line (added before the closing ---, or replaced in place), one that equals it removes that
- * line, then the seven setting lines are removed. Any other key, such as an older `advisor_model`, is left alone. The board reads the same values; every other byte is kept.
+ * line, then the nine setting lines are removed. Any other key, such as an older `advisor_model`, is left alone. The board reads the same values; every other byte is kept.
  */
 export function saveDefaults(text: string): Result<string> {
   const parsed = parseBoard(text)

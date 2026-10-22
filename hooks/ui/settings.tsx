@@ -8,6 +8,7 @@ import type { EngineInterface } from 'claude-code'
 
 import {
   ALL_AT_DEFAULT,
+  CHAT_KEY,
   HEAD_DEFAULT,
   HEAD_MODEL,
   HEAD_THINKING,
@@ -24,13 +25,17 @@ import {
   USAGE_SENTENCE,
   USAGE_ULTRACODE,
   WORKERS_LABEL,
+  MERGE_KEY,
+  chatChoices,
+  chatWord,
+  mergeChoices,
   modelChoices,
   settingKey,
   settingsRows,
   thinkingChoices,
   workersChoices,
 } from '../lib/settings.ts'
-import type { Defaults, RoleRow, SettingsRow, SettingsTarget, SettingsValues, WorkersRow } from '../lib/settings.ts'
+import type { ChatRow, Defaults, MergeRow, RoleRow, SettingsRow, SettingsTarget, SettingsValues, WorkersRow } from '../lib/settings.ts'
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -128,6 +133,56 @@ function workersRow(el: Els, row: WorkersRow, isWide: boolean, gap: number, act:
   )
 }
 
+/** The Needs You chat row under Workers: its name, an On/Off Select and, when it differs, its default and Reset. */
+function chatRow(el: Els, row: ChatRow, isWide: boolean, gap: number, act: SettingsActions) {
+  const { Box, Text } = el
+  const share = isWide ? WIDE : NARROW
+  return (
+    <Box key="settings-chat" flexDirection="column" marginTop={1}>
+      <Box key="settings-chat-line" flexDirection="row" alignItems="center" columnGap={gap}>
+        <Box key="settings-chat-name" width={NAME_W} flexShrink={0}>
+          <Text>{row.label}</Text>
+        </Box>
+        {pickOf(el, CHAT_KEY, chatChoices(), chatWord(row.value), share.model, act)}
+        <Box key="settings-chat-skip" width={share.thinking} flexShrink={1} minWidth={0} />
+        <Box key="settings-chat-room" flexGrow={1} flexShrink={1} minWidth={0}>
+          {isWide && row.differs && (
+            <Box key="settings-chat-default" flexDirection="row" alignItems="center" columnGap={2} flexGrow={1} minWidth={0}>
+              {defaultOf(el, row, DEFAULT_W_WIDE, act)}
+            </Box>
+          )}
+        </Box>
+      </Box>
+      {!isWide && row.differs && defaultLine(el, row, gap, act)}
+    </Box>
+  )
+}
+
+/** The merge row under the chat row: its name, a Claude/Owner Select and, when it differs, its default and Reset. */
+function mergeRow(el: Els, row: MergeRow, isWide: boolean, gap: number, act: SettingsActions) {
+  const { Box, Text } = el
+  const share = isWide ? WIDE : NARROW
+  return (
+    <Box key="settings-merge" flexDirection="column" marginTop={1}>
+      <Box key="settings-merge-line" flexDirection="row" alignItems="center" columnGap={gap}>
+        <Box key="settings-merge-name" width={NAME_W} flexShrink={0}>
+          <Text>{row.label}</Text>
+        </Box>
+        {pickOf(el, MERGE_KEY, mergeChoices(), row.value, share.model, act)}
+        <Box key="settings-merge-skip" width={share.thinking} flexShrink={1} minWidth={0} />
+        <Box key="settings-merge-room" flexGrow={1} flexShrink={1} minWidth={0}>
+          {isWide && row.differs && (
+            <Box key="settings-merge-default" flexDirection="row" alignItems="center" columnGap={2} flexGrow={1} minWidth={0}>
+              {defaultOf(el, row, DEFAULT_W_WIDE, act)}
+            </Box>
+          )}
+        </Box>
+      </Box>
+      {!isWide && row.differs && defaultLine(el, row, gap, act)}
+    </Box>
+  )
+}
+
 function roleRow(el: Els, row: RoleRow, isWide: boolean, gap: number, act: SettingsActions) {
   const { Box, Text } = el
   const share = isWide ? WIDE : NARROW
@@ -177,7 +232,9 @@ export function settingsTree(
   const { Box, Text, Button } = el
   const rows = settingsRows(values, defaults)
   const workers = rows[0] as WorkersRow
-  const roles = rows.slice(1) as RoleRow[]
+  const roles = rows.filter((r) => r.target !== 'workers' && r.target !== 'chat' && r.target !== 'merge') as RoleRow[]
+  const chat = rows.find((r) => r.target === 'chat') as ChatRow
+  const merge = rows.find((r) => r.target === 'merge') as MergeRow
   const differs = rows.some((r) => r.differs)
   const isWide = columns >= WIDE_FROM
   const share = isWide ? WIDE : NARROW
@@ -223,6 +280,8 @@ export function settingsTree(
       </Box>
       <Box key="settings-workers-block" flexDirection="column" marginTop={1}>
         {workersRow(el, workers, isWide, gap, act)}
+        {chatRow(el, chat, isWide, gap, act)}
+        {mergeRow(el, merge, isWide, gap, act)}
       </Box>
       <Box key="settings-captions" flexDirection="row" columnGap={gap} marginTop={1}>
         <Box key="settings-caption-name" width={NAME_W} flexShrink={0} />

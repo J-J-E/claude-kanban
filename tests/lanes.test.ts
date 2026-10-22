@@ -481,6 +481,19 @@ test('a card with a worker: the Working mark in the accent colour with no fill a
   expect(all(turn, (n) => n.type === 'Text' && textOf(n) === '▶')[0]?.props).toMatchObject({ bold: true, color: 'claude' })
 })
 
+test('two workers on one card: the lane says 2 working, not 1', async ($, on) => {
+  const { w, ui } = await setup($, on)
+  w.agents = [
+    { id: 'a1', description: 'KB-0003 step 1: fix the date', type: 'general-purpose', status: 'running' },
+    { id: 'a2', description: 'KB-0003 step 2: board probe', type: 'general-purpose', status: 'running' },
+  ]
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  const tree = await drawn(ui)
+  expect(textOf(titleNode(tree, 'Auto'))).toContain('● 2 working')
+  expect(textOf(titleNode(tree, 'Auto'))).not.toContain('● 1 working')
+})
+
 test('cards in a finished lane draw a dim title; the other lanes draw it plain', async ($, on) => {
   const { ui } = await setup($, on)
   // Open Done with a click on its line.
@@ -514,6 +527,21 @@ test('the pin chip and the labels: a plain card shows its labels on row 1, a car
   const headings = all(titleNode(tree, 'Inbox'), (n) => n.type === 'Text' && ['Label', 'Changed'].includes(textOf(n)))
   expect(headings.map((n) => textOf(n))).toEqual(['Label', 'Changed'])
   expect(headings.every((n) => n.props.dimColor === true)).toBe(true)
+})
+
+test('the link mark: a child shows its parent, a parent its children done of all, drawn dim on row 1', async ($, on) => {
+  const files = defaultFiles()
+  files[FOOTER] = (files[FOOTER] as string).replace('parent:\n', 'parent: KB-0002\n')
+  files[cardPath('KB-0003', 'ship-it')] = (files[cardPath('KB-0003', 'ship-it')] as string).replace('parent:\n', 'parent: KB-0002\n')
+  files[cardPath('KB-0004', 'old-work')] = (files[cardPath('KB-0004', 'old-work')] as string).replace('parent:\n', 'parent: KB-0002\n')
+  const { ui } = await setup($, on, files, 80)
+  const props = await boardProps(ui)
+  const mark = (id: string): string | undefined => props.lanes.flatMap((l) => l.cards).find((c) => c.id === id)?.link
+  expect(mark('KB-0001')).toBe('↑KB-0002')
+  expect(mark('KB-0002')).toBe('1/3')
+  expect(mark('KB-0004')).toBe('↑KB-0002')
+  expect(textOf(tileNode(await drawn(ui), 'KB-0002'))).toContain('1/3')
+  expect(mark('KB-0003')).toBe('↑KB-0002')
 })
 
 test('an empty board draws the Inbox panel with three rows, and every other lane as its one line', async ($, on) => {

@@ -4,12 +4,15 @@ import type { EngineInterface } from 'claude-code'
 
 import type { KanbanSnapshot } from '../../types'
 import type { CardView as CardModel, StatusBox } from '../lib/cardview.ts'
-import { LOG_COPY_ALL, LOG_COPY_COMMAND } from '../lib/strings.ts'
+import { LOG_COPY_ALL, LOG_COPY_COMMAND, PARENT_LABEL, PARENT_NONE } from '../lib/strings.ts'
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
 /** The surface fill of a status box (spec 1). */
 const SURFACE = 'userMessageBackground'
+/** The outline of the Lane group (the one that acts) and of the other two groups: theme keys, as the board's cards use for their hover and open outlines. */
+const OUTLINE_LANE = 'inactive'
+const OUTLINE_QUIET = 'subtle'
 /** The words under the open card's Model and Thinking Selects for "no choice": the first option of each. */
 const AUTO = 'Auto'
 /** Below this many cells the three groups (Lane; Model and Thinking; Type) stack, and Model and Thinking stack inside theirs. */
@@ -59,6 +62,8 @@ export type CardActions = {
   /** Shows (true) or hides (false) every plan step in full. */
   setDetails: (isOpen: boolean) => void
   rename: (id: string, value: string) => void
+  /** The Parent list picked a card ID, or None: the pane writes the card's `parent:` line. */
+  setParent: (id: string, choice: string) => void
 }
 
 /** Everything the open card draws, worked out by the pane. */
@@ -87,6 +92,8 @@ export type CardProps = {
   retypePick: string
   /** The Rename field: whether it is open and the title typed in it. */
   renaming: { isOpen: boolean; title: string }
+  /** The Parent list's choices (value written, label shown): None first, then the cards the pane offers. */
+  parentChoices: { value: string; label: string }[]
   /** `Show details` is on: every plan step is drawn in full, not only the step in hand. */
   showDetails: boolean
   /** Where the card stands among the cards the board shows (1-based), or null when it is not among them (Find hides it). */
@@ -144,11 +151,13 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
       />
     </Box>
   )
-  // Each group is a bold heading over a round outline: bright for Lane (the action), dim for the other two. No colour is added.
+  // Each group is a bold heading over a round outline: lighter for Lane (the action), fainter for the other two. `borderDimColor` did not make the
+  // difference show on the desktop (the three looked alike), so the outlines are theme keys, the way the board's cards set theirs: `inactive` (the
+  // card under the pointer) and `subtle` (the open card's). Neither is `warning` or `claude`, whose meanings are fixed.
   const laneGroup = (
     <Box key="card-group-lane" flexDirection="column" flexGrow={isWide ? 0 : 1} flexShrink={1} minWidth={0}>
       <Text bold wrap="truncate-end">{HEAD_LANE}</Text>
-      <Box borderStyle="round" borderDimColor={false} flexDirection="row" paddingX={1}>
+      <Box borderStyle="round" borderColor={OUTLINE_LANE} flexDirection="row" paddingX={1}>
         {moveBox}
       </Box>
     </Box>
@@ -156,7 +165,7 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
   const claudeGroup = (
     <Box key="card-group-claude" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
       <Text bold wrap="truncate-end">{HEAD_CLAUDE}</Text>
-      <Box borderStyle="round" borderDimColor flexDirection="column" paddingX={1}>
+      <Box borderStyle="round" borderColor={OUTLINE_QUIET} flexDirection="column" paddingX={1}>
         <Box key="card-claude-lists" flexDirection={isNarrow ? 'column' : 'row'} columnGap={2}>
           {modelBox}
           {thinkingBox}
@@ -183,7 +192,7 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
   const typeGroup = (
     <Box key="card-group-type" flexDirection="column" flexGrow={isWide ? 0 : 1} flexShrink={1} minWidth={0}>
       <Text bold wrap="truncate-end">{HEAD_TYPE}</Text>
-      <Box borderStyle="round" borderDimColor flexDirection="row" paddingX={1}>
+      <Box borderStyle="round" borderColor={OUTLINE_QUIET} flexDirection="row" paddingX={1}>
         {typeBox}
       </Box>
     </Box>
@@ -317,6 +326,32 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
                 />
               </Box>
             </Box>
+            {view.parent !== null && (
+              <Box key="card-parent" marginTop={1} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                <Text dimColor>Parent:</Text>
+                {view.parent.lane === null ? (
+                  <Text>{view.parent.id}</Text>
+                ) : (
+                  <Button key="card-parent-open" label={view.parent.id} plain onPress={() => act.select(view.parent?.id ?? '')} />
+                )}
+                <Text dimColor wrap="wrap">
+                  {view.parent.lane === null ? 'not on the board' : `${view.parent.title} (in ${view.parent.lane})`}
+                </Text>
+              </Box>
+            )}
+            {view.kids !== null && (
+              <Box key="card-kids" marginTop={view.parent === null ? 1 : 0} flexDirection="column">
+                <Text dimColor>{view.kids.head}</Text>
+                {view.kids.children.map((c) => (
+                  <Box key={`card-kid-${c.id}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                    <Button key={`card-kid-open-${c.id}`} label={c.id} plain onPress={() => act.select(c.id)} />
+                    <Text dimColor wrap="wrap">
+                      {c.lane === null ? c.title : `${c.title} (${c.isDone ? 'done' : `in ${c.lane}`})`}
+                    </Text>
+                  </Box>
+                ))}
+              </Box>
+            )}
             {box !== null && (
               <Box
                 key="card-box"
@@ -369,6 +404,11 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
                         </Text>
                       </Box>
                     </Box>
+                    {box.workers.map((text, k) => (
+                      <Text key={`card-worker-${k}`} dimColor wrap="wrap">
+                        {'Worker ' + (k + 1) + ': ' + text}
+                      </Text>
+                    ))}
                     {box.bar !== null && (
                       <Box flexDirection="row" columnGap={1}>
                         <Text color="claude">{'▰'.repeat(box.bar.done)}</Text>
@@ -428,6 +468,17 @@ export function cardTree(el: Els, p: CardProps, act: CardActions) {
                     claudeGroup,
                   ]
                 )}
+              </Box>
+            )}
+            {!snap.isReadOnly && (
+              <Box key="card-parent-pick-box" marginTop={1} flexShrink={1} minWidth={0}>
+                <Select
+                  key="card-parent-pick"
+                  label={PARENT_LABEL}
+                  options={p.parentChoices}
+                  value={view.parent === null ? PARENT_NONE : view.parent.id}
+                  onSelect={(v: string) => act.setParent(view.id, v)}
+                />
               </Box>
             )}
             {(snap.isReadOnly || isWide) && typeNotes}

@@ -13,6 +13,9 @@ import { newCardText } from '../hooks/lib/cards.ts'
 import { BOARD_EXAMPLE, GATED_BOARD_EXAMPLE, INIT_BOARD_EXAMPLE, must } from './examples.ts'
 
 /** A local moment (no Z), so the Log line the pane writes reads 2026-10-08 14:05 in any time zone. */
+/** The statuses the app gives an agent (seen live in BUG-0023: running, completed; the app's own text names waiting and idle). */
+export type AgentStatus = 'running' | 'pending' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
+
 export const START = Date.parse('2026-10-08T14:05:00')
 
 export const BOARD_PATH = 'kanban/board.md'
@@ -90,8 +93,12 @@ export type World = {
   writes: string[]
   /** What `$.session.model()` answers. */
   model: string
-  /** What `$.agent.list()` answers. */
-  agents: { id: string; description: string; type: string; status: string }[]
+  /** What `$.session.usage()` answers as `context.percent`; undefined = not known yet. */
+  usagePercent: number | undefined
+  /** What `$.session.usage()` answers as `context.tokens`; undefined = not known. */
+  usageTokens: number | undefined
+  /** What `$.agent.list()` answers. The statuses are the app's: failed and killed are the only ones that are over for good. */
+  agents: { id: string; description: string; type: string; status: AgentStatus }[]
   /** Parks every tool call until `hold()`'s release function is called; null when nothing is held. */
   gate: Promise<void> | null
   hold: () => () => void
@@ -139,6 +146,8 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     startCwd: '',
     writes: [],
     model: 'opus',
+    usagePercent: undefined,
+    usageTokens: undefined,
     agents: [],
     gate: null,
     afterList: null,
@@ -225,6 +234,7 @@ export function stubs(on: On, initial: Record<string, string> = defaultFiles()):
     return { value: undefined }
   })
   on('session.model', () => ({ value: w.model }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, ...(w.usagePercent === undefined ? {} : { percent: w.usagePercent }), ...(w.usageTokens === undefined ? {} : { tokens: w.usageTokens }) } } }))
   on('session.start', ($, e) => {
     w.startCwd = e.cwd
     return { cwd: e.cwd }

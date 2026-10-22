@@ -572,6 +572,15 @@ describe('the Label and Changed columns when wide', () => {
     expect(at(108)).toBe(false) // the column shows them instead
   })
 
+  test('the link mark (a parent or children) is drawn from a text width of 44 and dropped below it; a card with none has no mark', () => {
+    const marked = (W: number, link?: string): boolean =>
+      (panelLayout(props([lane('Inbox', 'intake', { cards: [card('KB-0001', link === undefined ? {} : { link })] })]), W).panels[0] as LanePanel).cards[0]?.showsLink === true
+    expect(marked(56, '2/3')).toBe(true) // text 44
+    expect(marked(55, '2/3')).toBe(false) // text 43
+    expect(marked(80, '')).toBe(false)
+    expect(marked(80)).toBe(false)
+  })
+
   test('`Waiting to start` shortens to `Waiting` below a text width of 40', () => {
     expect(panelLayout(busyDay(), 52).shortWaiting).toBe(false)
     expect(panelLayout(busyDay(), 51).shortWaiting).toBe(true)

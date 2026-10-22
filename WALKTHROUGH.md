@@ -170,11 +170,11 @@ A plan can end with a "To settle when you approve" list: questions with the answ
 
 **Run it.** Not happy with the plan? Type `comment on <ID>: ...`, then drag the card back to Plan. Happy? Drag the card from Needs You to Auto. Claude does the Auto flow:
 1. Clears `PLAN READY`, makes the branch `<letters>-<n>-<slug>` (for the hello world enhancement, `enh-1-hello-world-app`) from your default branch (`main` if there is no `origin/HEAD`), writes it in `branch:`.
-2. Starts one worker per plan step. The card shows `● Working`, the header says `Claude is on <ID>` and, with `Workers at once` above 1, `1 of 2 workers`.
+2. Starts a worker for the plan's steps (one worker may take several in a row). The card shows `● Working`, the header says `Claude is on <ID>` and, with `Workers at once` above 1, `1 of 2 workers`.
 3. Reviews each worker's diff, then commits that step on the branch.
 4. Verifies: the checks the plan names pass on the branch with your default branch merged in, and the manager reads the whole diff. It Logs `reviewed: <n> files, <checks> pass, nothing outside the plan`.
 5. Checks the changed files for a gate (section 6). An ordinary source file and its test hit none.
-6. Merges. With no GitHub remote it is a local merge into the default branch. With a GitHub remote and a signed-in `gh` it opens a pull request and squash-merges it.
+6. Merges. With no GitHub remote it is a local merge into the default branch. With a GitHub remote and a signed-in `gh` it opens a pull request and squash-merges it. If the Settings tab's `Merge by` is `Owner`, or the merge is refused (the app's safety check in auto mode, say) or `gh` cannot run, Claude stops before the merge instead: the card goes to Needs You flagged `READY TO MERGE`, drawn green, with the link and the one command in its Log. You merge it yourself, then drag the card to Auto and Claude finishes it.
 7. Moves the card to Done and commits the board.
 
 Expect the normal permission prompts for Edit, Write and Bash. The `Kanban:` message arrives as your own words, so nothing is pre-approved. Approve them.
@@ -251,7 +251,7 @@ Discarded (0)
 
 If a card file has a problem, the list ends with one `Fix needed:` line that names it by code (`unknown-lane`, `duplicate-id`, `unknown-type`) and nothing is fixed. For `unknown-type` a second line follows: `To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype KB-0001 as chore".`
 
-- **What's next.** `what's next`. Three headings, each item as `ID title [flag]`; an empty one says `none`:
+- **What's next.** `what's next`. Four headings, each item as `ID title [flag]` (Left hanging: `ID title - last Log <age> ago`); an empty one says `none`:
 ```
 Queued for Claude
   none
@@ -259,6 +259,8 @@ Waiting on you
   <ID> Add a dependency [GATE: merge touches <manifest file>]
 Untriaged
   <ID> <title>
+Left hanging
+  none
 ```
 
 - **Move.** `move enhancement 1 to Auto`. Claude replies `ENH-0001 moved Pending -> Auto.`, then runs the lane's action. It is the same go-ahead as a drag. `Needs You` is refused: `"Needs You" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.` An unknown lane gets `Unknown lane "Nowhere". Lanes on this board: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. Nothing was changed.`
@@ -306,7 +308,7 @@ Press a card (or choose `Open card` in the menu under its `⋯`) and the pane sh
 
 ## 9. Watch the board in Obsidian
 
-Status: experimental. The `Board.base` file and the pane's handling of a move made in Obsidian are covered by tests, but this section has not yet been tried in a real Obsidian; what follows is what should happen, read from Obsidian's behaviour.
+Status: experimental. The pane's handling of a move made in Obsidian is covered by tests, but the `Board.base` file is not (Claude writes it from the steps in the skill's verbs), and this section has not yet been tried in a real Obsidian; what follows is what should happen, read from Obsidian's behaviour.
 
 Obsidian 1.14 or later (read from 1.14.4) can show the board as a Kanban view of one file, `kanban/Board.base`, with no plugin. A drag there should change only the card's `status:`; the pane should then add the Log line `moved A -> B in Obsidian`. By design a drag cannot place a card between two others, a card whose `flag:` holds a colon (such as `GATE: ...` or `QUESTION: ...`) cannot be dragged there, and whether empty lanes show as columns is unknown (details in `docs/obsidian.md`).
 
@@ -319,7 +321,7 @@ If your vault is somewhere else, link the project's `kanban/` folder into it (a 
 
 ## 10. The MCP server
 
-The plugin also starts an MCP server, so any agent (Claude, Gemini CLI) can list, add and move cards without the pane. It edits only the card files and starts no work. Tools (`board_list`, `whats_next`, `card_get`, `lanes`, `types`, `card_add`, `card_move`, `card_retype`, `card_merge`, `card_comment`, `decision_add`) and the Gemini setup block are in `README.md`, section "MCP server (optional)"; the end-to-end check is `TESTING.md` step 26. In a session, `/mcp` shows `kanban` connected.
+The plugin also starts an MCP server, so any agent (Claude, Gemini CLI) can list, add and move cards without the pane. It edits only the card files and starts no work. Tools (`board_list`, `whats_next`, `card_get`, `lanes`, `types`, `card_add`, `card_move`, `card_retype`, `card_merge`, `card_parent`, `card_comment`, `decision_add`) and the Gemini setup block are in `README.md`, section "MCP server (optional)"; the end-to-end check is `TESTING.md` step 26. In a session, `/mcp` shows `kanban` connected.
 
 ## 11. Where everything lives
 

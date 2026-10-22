@@ -59,6 +59,12 @@ describe('the attention words', () => {
     expect(kindsText({ ...NONE, total: 1, question: 1 })).toBe('1 question')
   })
 
+  test('a change ready to merge reads last, and an old count without the field reads as none', () => {
+    expect(kindsText({ ...NONE, total: 3, question: 1, gate: 1, ready: 1 })).toBe('1 question, 1 held, 1 ready to merge')
+    expect(kindsText({ ...NONE, total: 1, ready: 1 })).toBe('1 ready to merge')
+    expect(kindsText({ ...NONE, total: 1, question: 1 })).toBe('1 question')
+  })
+
   test('nothing waiting: no label, no kinds, no sentence', () => {
     const a = headerWords(quiet(), 64).attention
     expect(a).toEqual({ total: 0, label: '', kinds: '', idle: '' })
@@ -107,7 +113,30 @@ describe('the Claude line', () => {
 
   test('nothing runs: `Claude is idle`, no card, no step, no workers', () => {
     const c = headerWords(quiet({ workers: { running: 0, limit: 3 } }), 64).claude
-    expect(c).toEqual({ isActive: false, who: 'Claude is idle', card: null, detail: null, workers: null, waiting: null, turn: null })
+    expect(c).toEqual({ isActive: false, who: 'Claude is idle', card: null, detail: null, notes: [], workers: null, waiting: null, turn: null })
+  })
+
+  test('one worker: no per-worker lines, the one note is the detail', () => {
+    const c = headerWords(busy({ claude: { cards: ['KB-0014'], plan: { done: 2, total: 5 }, step: 'a', agents: [{ id: 'KB-0014', text: 'lane panels' }] } }), 64).claude
+    expect(c.notes).toEqual([])
+    expect(c.detail).toBe('a')
+  })
+
+  test('two workers on one card: a line each, no card ID in front', () => {
+    const agents = [{ id: 'KB-0014', text: 'step 3: header' }, { id: 'KB-0014', text: 'board probe' }]
+    const c = headerWords(busy({ claude: { cards: ['KB-0014'], plan: null, step: '', agents }, workers: { running: 2, limit: 3 } }), 64).claude
+    expect(c.notes).toEqual(['header', 'board probe'])
+  })
+
+  test('workers on two cards: each line starts with its card ID; the lines stop at the worker limit', () => {
+    const agents = [{ id: 'KB-0006', text: 'one' }, { id: 'KB-0003', text: 'two' }, { id: 'KB-0003', text: 'three' }]
+    const c = headerWords(busy({ claude: { cards: ['KB-0006', 'KB-0003'], plan: null, step: '', agents }, workers: { running: 3, limit: 2 } }), 64).claude
+    expect(c.notes).toEqual(['KB-0006 one', 'KB-0003 two'])
+  })
+
+  test('a worker with no text leaves no line', () => {
+    const agents = [{ id: 'KB-0006', text: '' }, { id: 'KB-0003', text: 'two' }]
+    expect(headerWords(busy({ claude: { cards: ['KB-0006', 'KB-0003'], plan: null, step: '', agents } }), 64).claude.notes).toEqual([])
   })
 
   test('the note is what the agent is doing, with no step count and no leading `step 5b:`; an empty one leaves none', () => {

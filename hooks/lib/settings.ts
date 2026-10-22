@@ -8,7 +8,7 @@ import { fail, ok, parseFrontmatter, removeKey } from './frontmatter.ts'
 
 export type Role = 'manager' | 'planner' | 'worker'
 /** Where a Reset points: the Workers row or one role (both its lines). */
-export type SettingsTarget = 'workers' | Role
+export type SettingsTarget = 'workers' | 'chat' | 'merge' | Role
 
 export const ROLES: readonly Role[] = ['manager', 'planner', 'worker']
 export const ROLE_NAMES: { readonly [r in Role]: string } = { manager: 'Manager', planner: 'Planner', worker: 'Worker' }
@@ -25,10 +25,31 @@ export const WORKERS_MAX = 5
 export const WORKERS_CHOICES: readonly number[] = [1, 2, 3, 4, 5]
 
 /** What the plugin ships. A saved line overrides one entry; change a default here and nowhere else. */
-export type Defaults = { readonly workers: number; readonly roles: { readonly [r in Role]: { readonly model: string; readonly thinking: string } } }
+export type Defaults = {
+  readonly workers: number
+  /** Whether each card waiting in Needs You is put to the owner in chat as a question (the `needs_you_in_chat` line: `on` or `off`). */
+  readonly needsYouInChat: boolean
+  /** Who merges a card's pull request (the `merge_by` line: `claude` or `owner`). */
+  readonly mergeBy: string
+  readonly roles: { readonly [r in Role]: { readonly model: string; readonly thinking: string } }
+}
+
+/** The board.md key of the Needs You chat questions setting. */
+export const CHAT_KEY = 'needs_you_in_chat'
+/** The two words that line may hold. */
+export const CHAT_ON = 'on'
+export const CHAT_OFF = 'off'
+
+/** The board.md key of the merge setting (ENH-0065), and the two words that line may hold. */
+export const MERGE_KEY = 'merge_by'
+export const MERGE_CLAUDE = 'claude'
+export const MERGE_OWNER = 'owner'
+export const MERGE_VALUES: readonly string[] = [MERGE_CLAUDE, MERGE_OWNER]
 
 export const DEFAULTS: Defaults = {
   workers: 2,
+  needsYouInChat: false,
+  mergeBy: MERGE_CLAUDE,
   roles: {
     manager: { model: 'opus', thinking: 'medium' },
     planner: { model: 'opus', thinking: 'high' },
@@ -45,6 +66,8 @@ export function settingKey(role: Role, field: 'model' | 'thinking'): string {
 export const SAVED_KEYS: readonly string[] = [
   'workers',
   ...ROLES.flatMap((r) => [settingKey(r, 'model'), settingKey(r, 'thinking')]),
+  CHAT_KEY,
+  MERGE_KEY,
 ]
 
 /** The board.md keys of a board's saved defaults: `default_` + each settings key, in the same order. */
@@ -97,6 +120,22 @@ export function workersChoices(): Choice[] {
   return WORKERS_CHOICES.map((n) => ({ value: String(n), label: String(n) }))
 }
 
+/** The chat row's Select: On and Off, written as `on` and `off`. */
+export function chatChoices(): Choice[] {
+  return [
+    { value: CHAT_ON, label: 'On' },
+    { value: CHAT_OFF, label: 'Off' },
+  ]
+}
+
+/** The merge row's Select: Claude and Owner, written as `claude` and `owner`. */
+export function mergeChoices(): Choice[] {
+  return [
+    { value: MERGE_CLAUDE, label: 'Claude' },
+    { value: MERGE_OWNER, label: 'Owner' },
+  ]
+}
+
 // ---------------------------------------------------------------- the words of the tab (spec 4)
 
 export const RESTORE_ALL = 'Restore all defaults'
@@ -106,6 +145,10 @@ export const SAVE_DEFAULTS = 'Save as defaults'
 export const RESTORE_ORIGINAL = 'Restore original defaults'
 export const RESTORE_ORIGINAL_QUESTION = 'Remove your saved defaults and put every setting back to the original?'
 export const WORKERS_LABEL = 'Workers at once'
+/** The label of the Needs You chat row: no longer than WORKERS_LABEL, so the columns line up. */
+export const CHAT_LABEL = 'Chat questions'
+/** The label of the merge row: no longer than WORKERS_LABEL, so the columns line up. */
+export const MERGE_LABEL = 'Merge by'
 export const HEAD_MODEL = 'Model'
 export const HEAD_THINKING = 'Thinking'
 export const HEAD_DEFAULT = 'Default'
@@ -119,6 +162,14 @@ export const NOTES: readonly string[] = [
 
 export function workersToast(n: number | string): string {
   return `Workers at once set to ${n}.`
+}
+
+export function chatToast(isOn: boolean): string {
+  return `Chat questions for Needs You cards are ${isOn ? CHAT_ON : CHAT_OFF}.`
+}
+
+export function mergeBySetToast(by: string): string {
+  return `Pull requests are merged by ${by === MERGE_OWNER ? MERGE_OWNER : MERGE_CLAUDE}.`
 }
 
 export function modelToast(role: Role, value: string): string {
@@ -151,9 +202,13 @@ export type SettingsValues = {
   plannerThinking: string
   workerModel: string
   workerThinking: string
+  needsYouInChat: boolean
+  mergeBy: string
 }
 
 export type WorkersRow = { target: 'workers'; label: string; value: number; defaultValue: number; defaultText: string; differs: boolean }
+export type ChatRow = { target: 'chat'; label: string; value: boolean; defaultValue: boolean; defaultText: string; differs: boolean }
+export type MergeRow = { target: 'merge'; label: string; value: string; defaultValue: string; defaultText: string; differs: boolean }
 export type RoleRow = {
   target: Role
   label: string
@@ -166,7 +221,7 @@ export type RoleRow = {
   thinkingDiffers: boolean
   differs: boolean
 }
-export type SettingsRow = WorkersRow | RoleRow
+export type SettingsRow = WorkersRow | RoleRow | ChatRow | MergeRow
 
 function roleValues(v: SettingsValues, role: Role): { model: string; thinking: string } {
   switch (role) {
@@ -179,7 +234,12 @@ function roleValues(v: SettingsValues, role: Role): { model: string; thinking: s
   }
 }
 
-/** The four rows in the tab's order, each with its default and whether it differs. A saved value equal to the default does not differ. */
+/** The word the chat setting is shown and written as. */
+export function chatWord(isOn: boolean): string {
+  return isOn ? CHAT_ON : CHAT_OFF
+}
+
+/** The six rows (Workers, the three roles, then the chat and merge rows, which the tab draws under Workers), each with its default and whether it differs. A saved value equal to the default does not differ. */
 export function settingsRows(v: SettingsValues, defaults: Defaults = DEFAULTS): SettingsRow[] {
   const rows: SettingsRow[] = [
     {
@@ -209,17 +269,27 @@ export function settingsRows(v: SettingsValues, defaults: Defaults = DEFAULTS): 
       differs: modelDiffers || thinkingDiffers,
     })
   }
+  const isOn = v.needsYouInChat === true
+  const defaultOn = defaults.needsYouInChat === true
+  rows.push({ target: 'chat', label: CHAT_LABEL, value: isOn, defaultValue: defaultOn, defaultText: chatWord(defaultOn), differs: isOn !== defaultOn })
+  const by = v.mergeBy === MERGE_OWNER ? MERGE_OWNER : MERGE_CLAUDE
+  const defaultBy = defaults.mergeBy === MERGE_OWNER ? MERGE_OWNER : MERGE_CLAUDE
+  rows.push({ target: 'merge', label: MERGE_LABEL, value: by, defaultValue: defaultBy, defaultText: defaultBy, differs: by !== defaultBy })
   return rows
 }
 
 /** The board.md keys a Reset on this target removes. */
 export function resetKeys(target: SettingsTarget): string[] {
-  return target === 'workers' ? ['workers'] : [settingKey(target, 'model'), settingKey(target, 'thinking')]
+  if (target === 'workers') return ['workers']
+  if (target === 'chat') return [CHAT_KEY]
+  if (target === 'merge') return [MERGE_KEY]
+  return [settingKey(target, 'model'), settingKey(target, 'thinking')]
 }
 
 /** The toast for a Reset: names only the part that differed, `Planner thinking is back to high.` */
 export function resetToast(row: SettingsRow): string {
   if (row.target === 'workers') return `Workers at once is back to ${row.defaultValue}.`
+  if (row.target === 'chat' || row.target === 'merge') return `${row.label} is back to ${row.defaultText}.`
   const name = row.label
   if (row.modelDiffers && row.thinkingDiffers) return `${name} is back to ${row.defaultText}.`
   if (row.thinkingDiffers) return `${name} thinking is back to ${thinkingLabel(row.defaultThinking)}.`

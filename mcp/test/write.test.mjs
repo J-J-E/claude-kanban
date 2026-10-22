@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { addCard, commentOn, decide, mergeCards, moveCardTo, retypeCard } from '../src/store.ts'
+import { addCard, commentOn, decide, mergeCards, moveCardTo, retypeCard, setCardParent } from '../src/store.ts'
 import { boardList, cardGet } from '../src/tools-read.ts'
 import { cardFile, makeBoard, NOW, read } from './helpers.mjs'
 
@@ -257,4 +257,28 @@ test('a merge is refused, changing nothing, for Auto, work, child cards, a paren
   assert.equal(ask('1', 'bug 9').message, 'No card BUG-0009 in kanban/. Nothing was changed.')
   assert.equal(mergeCards(dir, { id: '1', onto: '3', who: '' }, NOW).ok, false)
   assert.deepEqual(files(), before)
+})
+
+test('card_parent sets and removes a parent with one Log line, and refuses a loop, itself, a repeat, a missing card and Auto, changing nothing', () => {
+  const dir = makeBoard()
+  for (const t of ['one', 'two', 'three']) addCard(dir, { title: t, type: 'bug', who: 'G' }, NOW)
+  const ask = (id, parent) => setCardParent(dir, { id, parent, who: 'Gemini' }, NOW)
+  const set = ask('2', 'bug 1')
+  assert.equal(set.ok, true)
+  assert.equal(set.message, 'BUG-0002 is now a child of BUG-0001.')
+  const text = read(dir, cardFile(dir, 'BUG-0002'))
+  assert.match(text, /\nparent: BUG-0001\n/)
+  assert.match(text, /\n- 2026-10-09 14:05 Gemini: parent set to BUG-0001\n$/)
+  assert.equal(ask('3', '2').ok, true)
+  const before = readdirSync(dir).map((n) => [n, read(dir, n)])
+  assert.equal(ask('1', '3').message, 'BUG-0001 is above BUG-0003, so it cannot become its child (a loop). Nothing was changed.')
+  assert.equal(ask('1', '1').message, 'BUG-0001 cannot be its own parent. Nothing was changed.')
+  assert.equal(ask('2', '1').message, 'BUG-0001 is already the parent of BUG-0002. Nothing was changed.')
+  assert.equal(ask('2', 'bug 9').message, 'No card BUG-0009 in kanban/. Nothing was changed.')
+  assert.equal(ask('1', '').message, 'BUG-0001 has no parent. Nothing was changed.')
+  assert.equal(setCardParent(dir, { id: '1', parent: '2', who: '' }, NOW).ok, false)
+  assert.deepEqual(readdirSync(dir).map((n) => [n, read(dir, n)]), before)
+  const gone = ask('2', '')
+  assert.equal(gone.message, 'Removed the parent of BUG-0002.')
+  assert.match(read(dir, cardFile(dir, 'BUG-0002')), /\nparent:\n[\s\S]*parent removed \(was BUG-0001\)\n$/)
 })

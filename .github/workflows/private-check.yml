@@ -1,0 +1,36 @@
+# Runs the repo's private-text check on every pull request and on pushes to main,
+# so contributors without the local hook are covered.
+#
+# The private word list is kept outside the repo, so on GitHub the check runs
+# the other six classes only.
+name: private-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  private-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Check lines added by the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node tools/private-check.mjs --diff "origin/${BASE_REF}...HEAD"
+
+      - name: Check tracked files
+        if: github.event_name == 'push'
+        run: node tools/private-check.mjs

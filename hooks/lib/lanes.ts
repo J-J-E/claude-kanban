@@ -31,7 +31,7 @@ export type { Rect } from './layout.ts'
 export type PanelStatus = {
   kind: string
   text: string
-  colour: 'default' | 'claude' | 'warning' | 'error' | 'dim'
+  colour: 'default' | 'claude' | 'warning' | 'error' | 'success' | 'dim'
   /** The plan's progress, null where the table says no bar. */
   bar: { done: number; total: number } | null
   /** The time words (`4 min ago`), '' when none. */
@@ -45,6 +45,8 @@ export type PanelCard = {
   /** Free text from the card's `flag:` line; '' when none. */
   flag: string
   isWorking: boolean
+  /** How many workers are on it (the lane's "N working" counts workers); absent: one when `isWorking`. */
+  workers?: number
   isQueued: boolean
   isTurn: boolean
   order: number
@@ -56,6 +58,8 @@ export type PanelCard = {
   status?: PanelStatus | null
   /** The gray pin chip's text (` opus, medium `), '' until a card has its own model or thinking. */
   pin?: string
+  /** The short dim mark of the card's parent or children (`↑ENH-0025`, `2/3`); absent when it has neither. */
+  link?: string
 }
 
 /** One lane: every card (a size budget may cut it), `total` the true count. `sort` is the lane's sort key (`order` or absent: Your order), the one the toolbar set. */
@@ -108,6 +112,8 @@ export const GHOST_H = 1
 export const SHORT_WAITING_BELOW = 40
 /** A plain card shows its labels from this `text` width (spec 7.1). */
 export const LABELS_FROM = 56
+/** The link mark (a child's parent, a parent's `2/3`) is drawn from this `text` width; below it the mark is dropped first. */
+export const LINK_FROM = 44
 /** Blank rows after a card, and after a lane (design review 2: lanes are told apart from cards by a bigger gap). */
 export const CARD_GAP = 1
 export const LANE_GAP = 2
@@ -181,6 +187,8 @@ export type CardTile = {
   showsLabels: boolean
   /** The card has a pin chip. */
   hasPin: boolean
+  /** The card's link mark is drawn on row 1: it has one and `text >= LINK_FROM`. */
+  showsLink: boolean
   /** The small menu under this card (its `⋯` is open), null on every other tile: `rect` is (4, tile bottom, iw, rows), rows 3 at `first` and 4 at `delete`, each row one high and as wide as the block. */
   menu: CardTileMenu | null
 }
@@ -216,7 +224,7 @@ export type LanePanel = {
   hasCards: boolean
   /** Cards waiting on him: a flag, in a Claude-only lane (spec 9). */
   waiting: number
-  /** Cards a worker is on; cards waiting to start (queued and no worker). */
+  /** Workers running on the lane's cards (two on one card count two); cards waiting to start (queued and no worker). */
   working: number
   queued: number
   isFinished: boolean
@@ -434,6 +442,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
           changedRect,
           showsLabels: !w.isWide && tall === 1 && text >= LABELS_FROM && !hasPin && Array.isArray(card.labels) && card.labels.length > 0,
           hasPin,
+          showsLink: text >= LINK_FROM && typeof card.link === 'string' && card.link !== '',
           menu: null,
         })
         y += tall
@@ -471,7 +480,7 @@ export function panelLayout(props: PanelProps, columns: number, view: PanelLayou
       total,
       hasCards,
       waiting,
-      working: cards.filter((c) => c.isWorking === true).length,
+      working: cards.reduce((n, c) => n + (c.isWorking === true ? Math.max(1, Math.floor(Number(c.workers)) || 1) : 0), 0),
       queued: cards.filter((c) => c.isQueued === true && c.isWorking !== true).length,
       isFinished: isFinishedRole(lane.role),
       isOpen,
