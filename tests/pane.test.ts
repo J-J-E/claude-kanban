@@ -1535,6 +1535,7 @@ test('no-board', async ($, on) => {
   expect(w.opened).toEqual([])
   const ui = await mountPane($, 'desktop', 100, false)
   expect((await ui.find({ type: 'Text', text: 'This project has no board yet.' }))?.type).toBe('Text')
+  expect((await ui.find({ type: 'Text', text: 'Your first card will be a short tour: drag it to Plan to start.' }))?.type).toBe('Text')
   expect(await ui.findAll({ type: 'Client' })).toEqual([])
   expect(await ui.find({ key: 'add' })).toBeUndefined()
   await ui.press({ key: 'setup' })

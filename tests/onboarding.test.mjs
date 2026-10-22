@@ -55,7 +55,7 @@ test('the tour card is labelled tour, sits in Pending and has a checklist and a 
   assert.equal(c.status, 'Pending')
   assert.equal(c.title, 'Run through the sample workflow')
   assert.deepEqual(c.log, [{ date: '2026-10-10', time: '09:30', who: 'Sam', text: 'created in Pending' }])
-  assert.equal(text.match(/^- \[ \] \d\. /gm).length, 6)
+  assert.equal(text.match(/^- \[ \] \d\. /gm).length, 5)
   assert.match(text, /drag this card to Plan or Auto/)
   assert.match(text, /start the tour/)
   assert.match(text, /skip the tour/)
@@ -81,7 +81,20 @@ test('the tour card repeats both checks with the default lines', () => {
 })
 
 test('the template holds a chat script for every step', () => {
-  for (const s of ['Tour started.', 'Made {A} and {B}', 'has a plan', 'passed test case 1', 'passed test case 2', 'Tour done.', 'Tour skipped.']) {
+  for (const s of ['Tour started.', 'tour: made {A} and {B}', 'has a plan', 'passed test case 1', 'passed test case 2', 'Tour done.', 'Tour skipped.']) {
     assert.ok(TEMPLATE.includes(s), s)
   }
+})
+
+test('the tour is led from the board: every chat line names a lane, wait lines hold no card ID', () => {
+  const say = TEMPLATE.slice(TEMPLATE.indexOf('## What Claude says at each step'))
+  assert.ok(!/design a simple thing/i.test(TEMPLATE))
+  assert.ok(!/tour step \d/.test(TEMPLATE))
+  assert.ok(say.includes('On the board, look in Pending: two tickets are there. Drag "Add kanban-sample/hello.txt" from Pending to Plan.'))
+  const says = [...say.matchAll(/Say `([^`]*)`/g)].map((m) => m[1]).filter((t) => !/^Tour (done|skipped)/.test(t))
+  assert.equal(says.length, 4)
+  for (const t of says) assert.match(t, /\b(Pending|Needs You|Plan|Auto|Done)\b/, t)
+  const waits = [...say.matchAll(/`(waiting on [^`]*)`/g)].map((m) => m[1])
+  assert.ok(waits.length >= 4)
+  for (const w of waits) assert.ok(!/[A-Z]+-\d{4}/.test(w) && !/\{[AB]\}|\{TOUR\}/.test(w), w)
 })

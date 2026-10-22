@@ -4,6 +4,19 @@ A guided tour of the `kanban` plugin: set up a board in a scratch project, plan 
 
 What you need (versions, git, Node.js, what Auto does): `README.md`, section "Before you start". Install the plugin first (`README.md`, section "Install"), or load it from a clone (`README.md`, section "Dev loop").
 
+**Short path for a desktop-app newcomer.** Everything happens in the Code tab and on the board; the chat tells you which lane to look in.
+
+1. **Install.** In the Claude desktop app, open the Code tab and the project folder. Try this first: in the chat box type these two lines, one at a time. This has **not yet been tried in the desktop chat box**; it is the documented session route.
+   ```
+   /plugin marketplace add J-J-E/claude-kanban
+   /plugin install kanban@kanban-board
+   ```
+   Then press the `+` next to the chat box, choose `Add plugins` and check that `kanban` is listed and on (that menu lists only marketplaces already added, so it confirms the install; it is not known to add this one). The route known to work is a terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`.
+2. **Open a new session** in the project folder (Code tab, new session). Sessions opened before the install do not have the plugin.
+3. **Open the board.** Press the `Board` chip above the chat box, or type `/board`. The pane says `This project has no board yet.` Press `Set up a board` (or type `/kanban:setup`). Claude replies `Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.`
+4. **Start or skip the tour.** The board shows `ENH-0001 Run through the sample workflow` in Pending. Drag it to `Plan` to start the tour, or to `Discarded` to skip it.
+5. **The tour, as board actions.** Claude makes two tickets in Pending. Drag `Add kanban-sample/hello.txt` to `Plan`; read its plan in `Needs You`; drag it to `Auto` to approve it. Drag `Add kanban-sample/goodbye.txt` straight to `Auto`. Each runs its test: the file holds exactly its one line. Then drag the tour card to `Done`. The chat tells you which lane to look in at each step; you never need to type.
+
 Your output will differ from the examples in small ways. It shows your own name, your own dates and times (written `<date> <time>` below), your own commit hashes (`<hash>`) and whatever wording the planning agent picks for a plan. Card IDs below are `<ID>` (for example `ENH-0003`: the letters of the card's type, then its number) and `<n>` is the ID number without padding. Match the shape, not the exact text. Quoted messages in `backticks` that come from the skill or the pane are exact.
 
 ## 1. What you are looking at
@@ -67,7 +80,7 @@ If the commit says it does not know who you are, run `git config user.name "<you
 
 Card numbers: each type counts from 1 on its own. On this hand-made repo your first bug is `BUG-0001` and your first enhancement is `ENH-0002` (`ENH-0001` is the tour card). The demo has two enhancements and a chore, `ENH-0001`, `ENH-0002` and `CHORE-0001`, so a bug you add is `BUG-0001`, an enhancement `ENH-0003` and a chore `CHORE-0002`.
 
-Now start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
+Install first. In the Code tab chat box type `/plugin marketplace add J-J-E/claude-kanban`, then `/plugin install kanban@kanban-board` (not yet tried in the desktop chat box), then press `+` next to the chat box > `Add plugins` to confirm `kanban` is on. The route known to work is the terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`. Then start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
 - Type `/`. The menu lists `kanban:kanban` and `kanban:setup`.
 - Type `/board`. With the demo, the pane opens on the board. On the hand-made repo it says `This project has no board yet.` with a `Set up a board` button. Once a project has a board, a `Board` chip also shows above the chat box while the pane is closed; pressing it opens the pane the same way.
 
@@ -77,9 +90,9 @@ If `kanban:kanban` or `kanban:setup` is missing, quit the desktop app and reopen
 
 Skip to the pane tour below if you made the demo: its board is already set up. Typing `/kanban:kanban` there runs `what's next`, and `/kanban:setup` or `set up the kanban board` only answers `Board already set up at <path of board.md> (3 cards). /board opens it.`
 
-On the hand-made repo, type: `/kanban:setup`. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
+On the hand-made repo, press `Board` above the chat box (or type `/board`); the pane says `This project has no board yet.` and `Your first card will be a short tour: drag it to Plan to start.` Press `Set up a board` (or type `/kanban:setup`). The pane says the same until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
 ```
-Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong. Open ENH-0001 to take the tour.
+Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.
 ```
 
 If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up at <path of board.md> (0 cards). /board opens it.` and creates nothing. That holds from a subfolder or from inside `kanban/` too: a board is never made inside another.
@@ -142,7 +155,7 @@ Each Thinking list marks the level the app recommends for the role's model; chan
 
 A new board starts with one card in Pending, `ENH-0001 Run through the sample workflow` (label `tour`). It is a guided run through Plan and Auto, so you can try the board before using it on real work. Nothing is made until you decide:
 
-- **Accept:** drag it to Plan or Auto, or say `start the tour`. Claude asks what the simple thing should say (the default is `Hello from the board.` and `Goodbye from the board.`; say `go` to keep them), then makes two tickets in Pending, `Add kanban-sample/hello.txt` and `Add kanban-sample/goodbye.txt`, each with a test case. You drag the first to Plan, read its plan in Needs You and approve it by dragging it to Auto; you drag the second straight to Auto. The tour card's checklist is ticked as you go, and its Log says where the tour stands, so a later session picks it up where it stopped.
+- **Accept:** drag it to Plan (Auto also works), or say `start the tour`. Claude makes two tickets (the files will say `Hello from the board.` and `Goodbye from the board.`; tell Claude before you drag the first ticket if you want other wording) in Pending, `Add kanban-sample/hello.txt` and `Add kanban-sample/goodbye.txt`, each with a test case. You drag the first to Plan, read its plan in Needs You and approve it by dragging it to Auto; you drag the second straight to Auto. The tour card's checklist is ticked as you go, and its Log says where the tour stands, so a later session picks it up where it stopped.
 - **Reject:** drag it to Discarded, or say `skip the tour`. Claude replies `Tour skipped. Nothing was created.`
 - **Finish:** drag the tour card to Done. Claude says `Tour done. kanban-sample/ can be deleted.` What is left: two Done tickets, their merged commits and the `kanban-sample/` folder with two one-line files. Nothing is deleted for you.
 

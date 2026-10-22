@@ -70,6 +70,7 @@ export type DropKind = 'place' | 'same' | 'plain' | 'acts' | 'refuse'
  * acts, `error` where the drop is refused, none (the default colour) otherwise. */
 export type DropLook = { kind: DropKind; text: string; colour: 'claude' | 'error' | undefined }
 
+export const NO_BOARD_TOUR = 'Your first card will be a short tour: drag it to Plan to start.'
 export const DRAG_HERE = '· It is already here.'
 /** The own lane in `Your order`: a drop places the card there (spec 14.2). */
 export const DRAG_PLACE = 'Drop to place it here.'
