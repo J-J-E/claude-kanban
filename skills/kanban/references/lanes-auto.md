@@ -4,7 +4,7 @@ The Auto flow and what hangs on it: gate approval, gates, resuming, running/wait
 
 ## Auto flow
 
-Runs on a person's move into an `auto` lane, or a card created there from the pane or from a request in chat (the card file and its `created in` Log line are already written; step 0 is the first Claude Log line). If the card came from a `needs-you` lane and its `flag` starts with `GATE`, do the Gate approval first (below), which says where to continue; otherwise start at step 0.
+Runs on a person's move into an `auto` lane, or a card created there from the pane or from a request in chat (the card file and its `created in` Log line are already written; step 0 is the first Claude Log line). If the card came from a `needs-you` lane and its `flag` starts with `GATE`, do the Gate approval first (below), which says where to continue; otherwise start at step 0. A card labelled `tour` is the exception: run the tour verb (`references/verbs.md`) instead of this flow; it makes no branch and starts no worker.
 
 0. Start. Re-read the card. If its `flag` is `READY TO MERGE`, run Ready to merge (below) instead of steps 1 to 7. Otherwise clear a `flag` of `PLAN READY`, `QUESTION: ...` or `FAILED`: the drag answered it (a question's answer is the person's newest comment). Make this the flow's first Log line: `started: <branch>`, the branch name step 3 uses, or `started: in place` when the project is not a git repo. "What's next" reads `Claude: started` to tell a started card from a queued one.
 

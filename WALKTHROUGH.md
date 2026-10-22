@@ -65,7 +65,7 @@ git commit --allow-empty -m "Initial commit"
 
 If the commit says it does not know who you are, run `git config user.name "<your git name>"` and `git config user.email "<you@example.com>"` in that folder, then repeat the commit.
 
-Card numbers: each type counts from 1 on its own. On this hand-made repo your first bug is `BUG-0001` and your first enhancement is `ENH-0001`. The demo has two enhancements and a chore, `ENH-0001`, `ENH-0002` and `CHORE-0001`, so a bug you add is `BUG-0001`, an enhancement `ENH-0003` and a chore `CHORE-0002`.
+Card numbers: each type counts from 1 on its own. On this hand-made repo your first bug is `BUG-0001` and your first enhancement is `ENH-0002` (`ENH-0001` is the tour card). The demo has two enhancements and a chore, `ENH-0001`, `ENH-0002` and `CHORE-0001`, so a bug you add is `BUG-0001`, an enhancement `ENH-0003` and a chore `CHORE-0002`.
 
 Now start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
 - Type `/`. The menu lists `kanban:kanban` and `kanban:setup`.
@@ -79,7 +79,7 @@ Skip to the pane tour below if you made the demo: its board is already set up. T
 
 On the hand-made repo, type: `/kanban:setup`. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. Claude takes the first word of your git name as the owner and asks nothing (it asks `Whose board is this?` only when git has no name). It replies:
 ```
-Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong.
+Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong. Open ENH-0001 to take the tour.
 ```
 
 If the pane does not open, type `/board`. If `<owner>` is wrong, say `the owner is <name>` and Claude replies `Owner is now <name>.` (The `Set up a board` button in the pane, `/kanban:kanban` and `set up the kanban board` do the same thing as `/kanban:setup` here.) Two files appear in `kanban/`: `board.md` and `DECISIONS.md`. Nothing is committed yet. Type `/kanban:kanban` again and Claude prints the `what's next` list; saying `set up the kanban board` again replies `Board already set up at <path of board.md> (0 cards). /board opens it.` and creates nothing. That holds from a subfolder or from inside `kanban/` too: a board is never made inside another.
@@ -137,6 +137,16 @@ Each Thinking list marks the level the app recommends for the role's model; chan
 - `manager_model`: the model the board suggests for your chat. Default opus, medium. The board never switches the chat's model: the header says which model the chat is on and offers `Change to opus` (copies `/model opus`) and `Keep sonnet` (makes the chat's model the board's Manager model).
 - `planner_model`: what the planning agents run on. They write the plans; the manager reviews each plan and writes it into the card. Default opus, high.
 - `worker_model`: what each worker runs on. Default sonnet, medium.
+
+### The tour card
+
+A new board starts with one card in Pending, `ENH-0001 Run through the sample workflow` (label `tour`). It is a guided run through Plan and Auto, so you can try the board before using it on real work. Nothing is made until you decide:
+
+- **Accept:** drag it to Plan or Auto, or say `start the tour`. Claude asks what the simple thing should say (the default is `Hello from the board.` and `Goodbye from the board.`; say `go` to keep them), then makes two tickets in Pending, `Add kanban-sample/hello.txt` and `Add kanban-sample/goodbye.txt`, each with a test case. You drag the first to Plan, read its plan in Needs You and approve it by dragging it to Auto; you drag the second straight to Auto. The tour card's checklist is ticked as you go, and its Log says where the tour stands, so a later session picks it up where it stopped.
+- **Reject:** drag it to Discarded, or say `skip the tour`. Claude replies `Tour skipped. Nothing was created.`
+- **Finish:** drag the tour card to Done. Claude says `Tour done. kanban-sample/ can be deleted.` What is left: two Done tickets, their merged commits and the `kanban-sample/` folder with two one-line files. Nothing is deleted for you.
+
+Because the tour card is the board's first enhancement, your own first enhancement on a new board is `ENH-0002`.
 
 ## 5. Plan a card and let Claude run it
 

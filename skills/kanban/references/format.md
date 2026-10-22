@@ -43,7 +43,7 @@ Written in this order. Required: `id`, `status`. Every other field is written on
 | `branch` | free text | empty | skill | Branch name. |
 | `pr` | free text | empty | skill | PR number or URL. |
 | `parent` | card ID | empty | pane or skill | Parent card's ID on a child card. A retype of the parent repoints it. The pane's Parent list and the skill's `parent` verb set or remove it (section 11), refused for the card itself, a card not on the board and a loop. |
-| `labels` | inline list | `[]` | skill | `claude` marks Claude's own suggestions. Readers also accept a block list. |
+| `labels` | inline list | `[]` | skill | `claude` marks Claude's own suggestions; `tour` marks the onboarding tour card, and `tour-sample` its two sample tickets, which are ordinary cards (verbs.md, tour). Readers also accept a block list. |
 | `model` | `haiku` `sonnet` `opus` `fable` | absent (Auto) | pane, or skill when asked | The card's own model. Absent, empty or any other word means Auto: the board's setting applies. Written only when set, removed on Auto, never written as `auto`. |
 | `thinking` | `low` `medium` `high` `xhigh` `max` | absent (Auto) | pane, or skill when asked | The card's own thinking level, with the same rules as `model`. A card can pin one and leave the other on Auto. |
 
