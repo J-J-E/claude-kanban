@@ -176,20 +176,20 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
     - Expect: the pane says `This project has no board yet.` and shows a `Set up a board` button.
 19. Set up the board.
     - Do: type `/kanban:setup`. Then type `/kanban:kanban`. Then make a second empty folder the same way as in step 18, start a new Code tab session there and type `kanban: add a card: x`.
-    - Expect: the pane opens by itself, without typing `/board`, as soon as you press Enter, saying `This project has no board yet.` until it swaps to seven empty lanes. `/kanban:setup` gives one reply starting `Board ready for <you>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded.` and asking no question (git has a name). `kanban/board.md` and `kanban/DECISIONS.md` are on disk and uncommitted. Then `/kanban:kanban` prints the three `what's next` headings: `Queued for Claude`, `Waiting on you`, `Untriaged`. In the second folder the reply is `No kanban/board.md here. Say "set up the kanban board" to create it.` and no file is written. In the first folder `kanban/board.md` has 7 lanes, no `types:` list and no counter lines, `owner: <you>`, no settings lines (every setting takes its default: workers 2; manager opus, medium; planner opus, high; worker sonnet, medium). `kanban/DECISIONS.md` holds only `# Decisions`. The pane swaps to the board within about 10 seconds.
+    - Expect: the pane opens by itself, without typing `/board`, as soon as you press Enter, saying `This project has no board yet.` until it swaps to seven empty lanes. `/kanban:setup` gives one reply starting `Board ready for <you>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded.` and asking no question (git has a name). `kanban/board.md` and `kanban/DECISIONS.md` are on disk and uncommitted. Then `/kanban:kanban` prints the three `what's next` headings: `Queued for Claude`, `Waiting on you`, `Untriaged`. In the second folder the reply is `No kanban/board.md here. Say "set up the kanban board" to create it.` and no file is written. In the first folder `kanban/board.md` has 7 lanes, no `types:` list and one counter line, `next_enh: 2`, `owner: <you>`, no settings lines (every setting takes its default: workers 2; manager opus, medium; planner opus, high; worker sonnet, medium). `kanban/DECISIONS.md` holds only `# Decisions`. `kanban/ENH-0001-run-through-the-sample-workflow.md` is in Pending with `labels: [tour]` and the reply ends `Open ENH-0001 to take the tour.` No `kanban-sample/` folder exists. The pane swaps to the board within about 10 seconds.
     - Also: `make me a kanban board` typed in a fresh empty folder (another new session) also sets up, with the same `Board ready for` reply.
 20. Add three cards.
     - Do: type `add a bug: fix the morning summary date`, then `add an enhancement: second card`, then `add a chore: third card`.
-    - Expect: `BUG-0001 added to Pending: ...` (with the title), then `ENH-0001`, `CHORE-0001`. `kanban/BUG-0001-fix-the-morning-summary-date.md` has `status: Pending`, `order: 1000`, today's dates and one Log line `created in Pending`.
+    - Expect: `BUG-0001 added to Pending: ...` (with the title), then `ENH-0002` (`ENH-0001` is the tour card init made), `CHORE-0001`. `kanban/BUG-0001-fix-the-morning-summary-date.md` has `status: Pending`, `order: 1000`, today's dates and one Log line `created in Pending`.
 21. Two refusals.
-    - Do: type `move enhancement 1 to Nowhere`. Then `move enhancement 1 to Needs You`.
+    - Do: type `move enhancement 2 to Nowhere`. Then `move enhancement 2 to Needs You`.
     - Expect: `Unknown lane "Nowhere". Lanes on this board: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. Nothing was changed.` Then `"Needs You" can only be entered by Claude (it holds a question, a plan to approve or a held action). Nothing was changed.` Neither changes a file.
 22. Comment.
     - Do: type `comment on bug 1: waiting on Sam`.
     - Expect: `Comment added to BUG-0001.` One new Log line `<you>: waiting on Sam`. `status:` is still Pending.
 23. List and what's next.
     - Do: type `list the board`, then `what's next`.
-    - Expect: the list prints the seven lanes in order, Pending (3) with three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, `Untriaged` with BUG-0001, ENH-0001 and CHORE-0001, and `Left hanging` as `none`.
+    - Expect: the list prints the seven lanes in order, Pending (4) with the tour card and three cards and every other lane with (0), no `Fix needed:` line. What's next prints `Queued for Claude` and `Waiting on you` as `none`, `Untriaged` with ENH-0001 (the tour card), BUG-0001, ENH-0002 and CHORE-0001, and `Left hanging` as `none`.
     - Also: put a card whose ID letters are no type on the board (for example `KB-0001-old.md` on a board with no KB type) into a board, read the pane's line above the lanes, then type `list the board`.
     - Expect: the pane shows `▲ 1 card has ID letters KB that are no type on this board. It still shows on the board. Ask Claude to retype the card.` in orange, wrapped in full, with `KB-0001` under it. The list ends with `Fix needed: KB-0001-old.md: unknown-type` and the next line `To fix unknown-type: retype each card to a type on this board (bug, enhancement or chore here), e.g. "retype KB-0001 as chore".` (with the board's own type names)
     - Also: with four such cards (`KB-0001` to `KB-0004`), read the pane's line again.
@@ -218,7 +218,7 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 25e. Skipping the card.
    - Do: type `no card: fix the typo in the README`.
    - Expect: Claude does the work and makes no card: `git status` shows no new file in `kanban/` and no counter line changed.
-25f. Retype from chat. Use the fresh folder of step 18 (it holds `BUG-0001`, `ENH-0001`, `CHORE-0001` and, from 25a, `BUG-0005`).
+25f. Retype from chat. Use the fresh folder of step 18 (it holds `BUG-0001`, `ENH-0001` (the tour card), `ENH-0002`, `CHORE-0001` and, from 25a, `BUG-0005`).
    - Do: type `retype bug 1 as enhancement`.
    - Expect: `BUG-0001 is now ENH-0002.` The file `kanban/BUG-0001-fix-the-morning-summary-date.md` is gone and `kanban/ENH-0002-fix-the-morning-summary-date.md` exists with `id: ENH-0002`, a new last Log line `retyped from BUG-0001 to ENH-0002`, and `board.md` has `next_enh: 3`. Nothing else in the card changed. Now type `retype bug 5 as widget`: `Unknown type "widget". Types on this board: bug, enhancement, chore. Nothing was changed.`
 25g. An old ID is followed.
@@ -234,7 +234,14 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
    - Do: type `delete chore 1`, then `add a chore: again`.
    - Expect: `CHORE-0001 deleted.` and the file is gone. The new chore is `CHORE-0002`, not `CHORE-0001` again.
 
-Steps 25a to 25j test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
+25k. Tour, accept. Use a new empty git repo with one commit (as in step 18), a new session, and `/kanban:setup`.
+   - Do: drag `ENH-0001` to Plan. Answer `go` when Claude asks for the wording. Drag the first sample ticket (`Add kanban-sample/hello.txt`) to Plan, read the plan in Needs You, drag it to Auto. When it is Done, drag the second ticket (`Add kanban-sample/goodbye.txt`) to Auto. When it is Done, drag `ENH-0001` to Done.
+   - Expect: Claude says `Tour started.` and asks for the wording; the tour card's Log gets `tour started` and `waiting on <you>: tour step 1`; `ENH-0002` and `ENH-0003` appear in Pending (`labels: [tour-sample]`) and `next_enh` is 4; the first ticket gets a plan and `PLAN READY`; after the approval `kanban-sample/hello.txt` holds exactly `Hello from the board.` on a branch that is merged; the second runs straight through and `kanban-sample/goodbye.txt` holds exactly `Goodbye from the board.`; the checklist in the tour card is ticked step by step; finishing replies `Tour done. kanban-sample/ can be deleted.` and the tour card's Log ends `tour finished: kanban-sample/ can be deleted`. Nothing is deleted. Also: in a second run answer with new wording (for example `Hi there.` and `Bye now.`) instead of `go` and check the files hold it; close the session part-way and open a new one: Claude carries on from the first unticked step and makes no second pair of tickets.
+25l. Tour, reject. A new empty git repo with one commit, a new session, `/kanban:setup`.
+   - Do: drag `ENH-0001` to Discarded (or say `skip the tour`).
+   - Expect: `Tour skipped. Nothing was created.` No sample ticket and no `kanban-sample/` folder exist; the board holds only the tour card in Discarded. Also: run `/kanban:setup` in a project that already has a board: it replies `Board already set up at <path> (N cards). /board opens it.` and no tour card is added.
+
+Steps 25a to 25l test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
 
 ## D. The MCP server
 
