@@ -42,7 +42,7 @@ import { cardView } from './lib/cardview.ts'
 import { findWords, matchesFind } from './lib/find.ts'
 import type { CardView as CardModel, StatusBox } from './lib/cardview.ts'
 import { flagKind } from './lib/flags.ts'
-import { hangingStripText, isGateApproval, linkMark, managerNote, PARENT_MAX, PARENT_NONE, MERGE_HEAD, MERGE_NO, MERGE_YES, mergeQuestion, mergeScrollToast, RESUME_LABEL } from './lib/strings.ts'
+import { hangingStripText, isGateApproval, NO_BOARD_TOUR, linkMark, managerNote, PARENT_MAX, PARENT_NONE, MERGE_HEAD, MERGE_NO, MERGE_YES, mergeQuestion, mergeScrollToast, RESUME_LABEL } from './lib/strings.ts'
 import type { NoteWorker } from './lib/strings.ts'
 import type { NoteCard } from './lib/strings.ts'
 import { getScalar, parseFrontmatter, setScalar } from './lib/frontmatter.ts'
@@ -3324,6 +3324,7 @@ export const register: Register = (on) => {
         return (
           <Box flexDirection="column">
             <Text>This project has no board yet.</Text>
+            <Text dimColor>{NO_BOARD_TOUR}</Text>
             <Button key="setup" label="Set up a board" onPress={() => submitPrompt($, SETUP_PROMPT)} />
           </Box>
         )

@@ -6,13 +6,20 @@ A kanban board for Claude Code. Each card is a markdown file in your project's o
 
 ## Try it in a minute
 
-You need the Claude desktop app (Code tab) and a project that is a git repo with one commit. In a terminal, once:
+You need the Claude desktop app (Code tab) and a project that is a git repo with one commit. Five steps, all in the app:
 
-```
-claude plugin install kanban --marketplace J-J-E/claude-kanban
-```
+1. **Install.** In the Claude desktop app, open the Code tab and the project folder. Try this first: in the chat box type these two lines, one at a time. This has **not yet been tried in the desktop chat box**; it is the documented session route.
+   ```
+   /plugin marketplace add J-J-E/claude-kanban
+   /plugin install kanban@kanban-board
+   ```
+   Then press the `+` next to the chat box, choose `Add plugins` and check that `kanban` is listed and on (that menu lists only marketplaces already added, so it confirms the install; it is not known to add this one). The route known to work is a terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`.
+2. **Open a new session** in the project folder (Code tab, new session). Sessions opened before the install do not have the plugin.
+3. **Open the board.** Press the `Board` chip above the chat box, or type `/board`. The pane says `This project has no board yet.` Press `Set up a board` (or type `/kanban:setup`). Claude replies `Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.`
+4. **Start or skip the tour.** The board shows `ENH-0001 Run through the sample workflow` in Pending. Drag it to `Plan` to start the tour, or to `Discarded` to skip it.
+5. **The tour, as board actions.** Claude makes two tickets in Pending. Drag `Add kanban-sample/hello.txt` to `Plan`; read its plan in `Needs You`; drag it to `Auto` to approve it. Drag `Add kanban-sample/goodbye.txt` straight to `Auto`. Each runs its test: the file holds exactly its one line. Then drag the tour card to `Done`. The chat tells you which lane to look in at each step; you never need to type.
 
-Then open a **new** session in the project and type `/kanban:setup`. Claude writes `kanban/board.md` and the board pane opens. Press `New card`, type what needs doing and drag the card to `Plan`: Claude writes a plan into the card and asks you to approve it. Dragging a card to `Auto` makes Claude build it, commit it and merge it, so read "What Auto does on its own" below first, or try everything in the scratch project under "First run".
+After the tour, press `New card`, type what needs doing and drag the card to `Plan`: Claude writes a plan into the card and asks you to approve it. Dragging a card to `Auto` makes Claude build it, commit it and merge it, so read "What Auto does on its own" below first. The tour runs in a `kanban-sample/` folder; try everything in a scratch project (see "First run").
 
 ## Before you start
 
@@ -39,7 +46,7 @@ To stop a running card, drag it out of Auto to Pending or Backlog. Plan is gentl
 
 ## Install
 
-One command, in a terminal:
+In the desktop app, the order is: add the marketplace and install in the Code tab chat box (not yet tried there), confirm under `+` > `Add plugins`, then start a new session (steps 1 and 2 above). The terminal route is the one known to work. One command, in a terminal:
 
 ```
 claude plugin install kanban --marketplace J-J-E/claude-kanban
@@ -64,11 +71,11 @@ To remove it: `claude plugin uninstall kanban@kanban-board`, then `claude plugin
 
 In your project (a git repo with one commit works best):
 
-1. Open a new Claude session in the project folder.
-2. Type `/kanban:setup`. (`/kanban:kanban` and `set up the kanban board` do the same.)
-3. The pane opens the moment you press Enter and says `This project has no board yet.` until the lanes appear. The board is created in one turn. Claude replies `Board ready for <owner>: Needs You, Pending, Plan, Auto, Backlog, Done, Discarded. /board opens it. Say "the owner is <name>" if <owner> is wrong. Open ENH-0001 to take the tour.` If the pane does not open, type `/board`.
+1. Open a new Claude session in the project folder (Code tab).
+2. Press the `Board` chip above the chat box or type `/board`. The pane says `This project has no board yet.` Press `Set up a board`. (Typing `/kanban:setup`, `/kanban:kanban` or `set up the kanban board` does the same.)
+3. The board is created in one turn and the pane swaps to the lanes. Claude replies `Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.` If the pane does not open, type `/board`.
 
-The owner is the first word of your git name; Claude asks `Whose board is this?` only when git has no name. A new board also gets one card in Pending, `ENH-0001 Run through the sample workflow`, a tour of the board built on two tiny tickets. Accept it by dragging it to Plan or Auto (or say `start the tour`): Claude asks what to write, makes `Add kanban-sample/hello.txt` and `Add kanban-sample/goodbye.txt` with a test case each, and walks you through running one through Plan and one straight through Auto. Reject it by dragging it to Discarded (or say `skip the tour`): nothing else is made. Finishing leaves the two tickets in Done and a `kanban-sample/` folder with two one-line files, which you can delete; the tour never deletes it. An existing board never gets a tour card. The new files, `kanban/board.md`, `kanban/DECISIONS.md` and the tour card, are not committed. Typing `/kanban:kanban` in a project that already has a board runs `what's next` instead, and `/kanban:setup` or `set up the kanban board` there only replies `Board already set up at <path> (N cards). /board opens it.` A board is also never made inside another: if a folder above yours already has `kanban/board.md`, that is the board.
+The owner is the first word of your git name; Claude asks `Whose board is this?` only when git has no name. A new board also gets one card in Pending, `ENH-0001 Run through the sample workflow`, a tour of the board built on two tiny tickets. Accept it by dragging it to Plan (or Auto; or say `start the tour`): Claude asks what to write, makes `Add kanban-sample/hello.txt` and `Add kanban-sample/goodbye.txt` with a test case each, and walks you through running one through Plan and one straight through Auto. Reject it by dragging it to Discarded (or say `skip the tour`): nothing else is made. Finishing leaves the two tickets in Done and a `kanban-sample/` folder with two one-line files, which you can delete; the tour never deletes it. An existing board never gets a tour card. The new files, `kanban/board.md`, `kanban/DECISIONS.md` and the tour card, are not committed. Typing `/kanban:kanban` in a project that already has a board runs `what's next` instead, and `/kanban:setup` or `set up the kanban board` there only replies `Board already set up at <path> (N cards). /board opens it.` A board is also never made inside another: if a folder above yours already has `kanban/board.md`, that is the board.
 
 **Setup check.** The first time the pane opens a board, it runs a read-only check once and shows one line (a toast) naming what is missing, with the exact PowerShell command for each fix: no git remote named `origin` (`git remote add origin <the repo URL>`), `gh` not installed (`winget install --id GitHub.cli`), `gh` not signed in (`gh auth login`), and no allow rule `Bash(gh pr merge *)` in your Claude settings (open them with `notepad $HOME\.claude\settings.json`). With no such rule the app's safety check may refuse Claude's merge in auto mode, so the line recommends `Merge by: Owner` in Settings. The check changes no setting of yours and writes one line, `setup_checked: <date>`, to `kanban/board.md` so it does not run again on that board; delete that line to see it again. The same line lists what in this plug-in is still built for one machine: the advisor note in Settings, the agents worktree folder paths in the skill text, and a single owner per board.
 
