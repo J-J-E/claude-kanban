@@ -6,13 +6,12 @@ What you need (versions, git, Node.js, what Auto does): `README.md`, section "Be
 
 **Short path for a desktop-app newcomer.** Everything happens in the Code tab and on the board; the chat tells you which lane to look in.
 
-1. **Install.** In the Claude desktop app, open the Code tab and the project folder. Try this first: in the chat box type these two lines, one at a time. This has **not yet been tried in the desktop chat box**; it is the documented session route.
+1. **Install.** In the Claude desktop app, open the Code tab. Click the `>_` button at the top right of the window to open the terminal panel. Paste this and press Enter; it reports that kanban was installed:
    ```
-   /plugin marketplace add J-J-E/claude-kanban
-   /plugin install kanban@kanban-board
+   claude plugin install kanban --marketplace J-J-E/claude-kanban
    ```
-   Then press the `+` next to the chat box, choose `Add plugins` and check that `kanban` is listed and on (that menu lists only marketplaces already added, so it confirms the install; it is not known to add this one). The route known to work is a terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`.
-2. **Open a new session** in the project folder (Code tab, new session). Sessions opened before the install do not have the plugin.
+   Typing `/plugin marketplace add ...` in the desktop chat box does not add the marketplace; it only opens the plugin window, and this plugin does not show in that window's search.
+2. **Start a new session** in the project folder (Code tab, new session). A session opened before the install does not have the plugin.
 3. **Open the board.** Press the `Board` chip above the chat box, or type `/board`. The pane says `This project has no board yet.` Press `Set up a board` (or type `/kanban:setup`). Claude replies `Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.`
 4. **Start or skip the tour.** The board shows `ENH-0001 Run through the sample workflow` in Pending. Drag it to `Plan` to start the tour, or to `Discarded` to skip it.
 5. **The tour, as board actions.** Claude makes two tickets in Pending. Drag `Add kanban-sample/hello.txt` to `Plan`; read its plan in `Needs You`; drag it to `Auto` to approve it. Drag `Add kanban-sample/goodbye.txt` straight to `Auto`. Each runs its test: the file holds exactly its one line. Then drag the tour card to `Done`. The chat tells you which lane to look in at each step; you never need to type.
@@ -80,7 +79,7 @@ If the commit says it does not know who you are, run `git config user.name "<you
 
 Card numbers: each type counts from 1 on its own. On this hand-made repo your first bug is `BUG-0001` and your first enhancement is `ENH-0002` (`ENH-0001` is the tour card). The demo has two enhancements and a chore, `ENH-0001`, `ENH-0002` and `CHORE-0001`, so a bug you add is `BUG-0001`, an enhancement `ENH-0003` and a chore `CHORE-0002`.
 
-Install first. In the Code tab chat box type `/plugin marketplace add J-J-E/claude-kanban`, then `/plugin install kanban@kanban-board` (not yet tried in the desktop chat box), then press `+` next to the chat box > `Add plugins` to confirm `kanban` is on. The route known to work is the terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`. Then start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
+Install first. In the Code tab, click the `>_` button at the top right to open the terminal panel and run `claude plugin install kanban --marketplace J-J-E/claude-kanban` (typing `/plugin marketplace add ...` in the chat box does not add the marketplace). Then start a new session in the project folder: in the Claude Code desktop app, the Code tab with that folder chosen. Sessions open before the plugin was installed do not have it. Then check:
 - Type `/`. The menu lists `kanban:kanban` and `kanban:setup`.
 - Type `/board`. With the demo, the pane opens on the board. On the hand-made repo it says `This project has no board yet.` with a `Set up a board` button. Once a project has a board, a `Board` chip also shows above the chat box while the pane is closed; pressing it opens the pane the same way.
 

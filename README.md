@@ -8,13 +8,12 @@ A kanban board for Claude Code. Each card is a markdown file in your project's o
 
 You need the Claude desktop app (Code tab) and a project that is a git repo with one commit. Five steps, all in the app:
 
-1. **Install.** In the Claude desktop app, open the Code tab and the project folder. Try this first: in the chat box type these two lines, one at a time. This has **not yet been tried in the desktop chat box**; it is the documented session route.
+1. **Install.** In the Claude desktop app, open the Code tab. Click the `>_` button at the top right of the window to open the terminal panel. Paste this and press Enter; it reports that kanban was installed:
    ```
-   /plugin marketplace add J-J-E/claude-kanban
-   /plugin install kanban@kanban-board
+   claude plugin install kanban --marketplace J-J-E/claude-kanban
    ```
-   Then press the `+` next to the chat box, choose `Add plugins` and check that `kanban` is listed and on (that menu lists only marketplaces already added, so it confirms the install; it is not known to add this one). The route known to work is a terminal: `claude plugin install kanban --marketplace J-J-E/claude-kanban`.
-2. **Open a new session** in the project folder (Code tab, new session). Sessions opened before the install do not have the plugin.
+   Typing `/plugin marketplace add ...` in the desktop chat box does not add the marketplace; it only opens the plugin window, and this plugin does not show in that window's search.
+2. **Start a new session** in the project folder (Code tab, new session). A session opened before the install does not have the plugin.
 3. **Open the board.** Press the `Board` chip above the chat box, or type `/board`. The pane says `This project has no board yet.` Press `Set up a board` (or type `/kanban:setup`). Claude replies `Board ready for <owner>. On the board, drag ENH-0001 "Run through the sample workflow" from Pending to Plan to start the tour, or to Discarded to skip it. Say "the owner is <name>" if <owner> is wrong.`
 4. **Start or skip the tour.** The board shows `ENH-0001 Run through the sample workflow` in Pending. Drag it to `Plan` to start the tour, or to `Discarded` to skip it.
 5. **The tour, as board actions.** Claude makes two tickets in Pending. Drag `Add kanban-sample/hello.txt` to `Plan`; read its plan in `Needs You`; drag it to `Auto` to approve it. Drag `Add kanban-sample/goodbye.txt` straight to `Auto`. Each runs its test: the file holds exactly its one line. Then drag the tour card to `Done`. The chat tells you which lane to look in at each step; you never need to type.
@@ -46,7 +45,7 @@ To stop a running card, drag it out of Auto to Pending or Backlog. Plan is gentl
 
 ## Install
 
-In the desktop app, the order is: add the marketplace and install in the Code tab chat box (not yet tried there), confirm under `+` > `Add plugins`, then start a new session (steps 1 and 2 above). The terminal route is the one known to work. One command, in a terminal:
+In the desktop app, open the Code tab, click the `>_` button at the top right to open the terminal panel, and run the commands below there; then start a new session in the project folder (steps 1 and 2 above). Typing `/plugin marketplace add ...` in the desktop chat box does not add the marketplace; it only opens the plugin window, and this plugin does not show in that window's search. One command, in the panel (or any terminal):
 
 ```
 claude plugin install kanban --marketplace J-J-E/claude-kanban
@@ -54,18 +53,18 @@ claude plugin install kanban --marketplace J-J-E/claude-kanban
 
 It adds this repo as a marketplace named `kanban-board` and installs the plugin `kanban` from it.
 
-Or, as two commands (in a terminal, or inside a session as `/plugin marketplace add ...` and `/plugin install ...`). The first adds the marketplace; the second installs the plugin from it:
+Or, as two commands, run in the same panel. The first adds the marketplace; the second installs the plugin from it:
 
 ```
 claude plugin marketplace add J-J-E/claude-kanban
 claude plugin install kanban@kanban-board
 ```
 
-Start a **new** session afterwards: sessions opened before the install do not have it. To confirm: `claude plugin list` shows `kanban@kanban-board`, `/board` opens the pane, and `kanban:kanban` and `kanban:setup` appear among the skills.
+Start a **new** session afterwards: sessions opened before the install do not have it. To confirm: `claude plugin list` in the panel shows `kanban@kanban-board`, `/board` in the new session opens the pane, and `kanban:kanban` and `kanban:setup` appear among the skills.
 
 What has been seen: installed from the marketplace, the plugin's MCP server and skill ran from the installed copy. The board pane itself has so far been used from a development checkout, so if `/board` does not open after an install, please open an issue at https://github.com/J-J-E/claude-kanban/issues.
 
-To remove it: `claude plugin uninstall kanban@kanban-board`, then `claude plugin marketplace remove kanban-board`. Both only undo the install; no project files are touched and your user settings are left as they were. The folder `C:\Users\<you>\.claude\plugins\cache\kanban-board` stays on disk (nothing loads it); delete it by hand if you want it gone.
+To remove it, run in the same panel: `claude plugin uninstall kanban@kanban-board`, then `claude plugin marketplace remove kanban-board`. Both only undo the install; no project files are touched and your user settings are left as they were. The folder `C:\Users\<you>\.claude\plugins\cache\kanban-board` stays on disk (nothing loads it); delete it by hand if you want it gone.
 
 ## First run
 

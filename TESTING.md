@@ -243,9 +243,10 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 25m. Tour from the board alone. A new empty git repo with one commit, a new session, `/kanban:setup`.
    - Do: after setup type nothing. Do every step by dragging, reading each chat line to find where to go.
    - Expect: every step can be done by dragging alone, with no typing. Each chat line names the lane to look in (Pending, Needs You, Auto, Plan or Done) and the ticket title to drag; none asks you to answer in chat or says `go`.
-25n. Desktop install. NOT VERIFIED.
-   - Do: in the desktop app, open the Code tab, click the `+` next to the chat box, then `Add plugins` / `Browse plugins`. Then type `/plugin marketplace add J-J-E/claude-kanban` and `/plugin install kanban@kanban-board` in the chat box.
-   - Expect (record each): whether the install works; whether a new session is needed before the plugin loads; and that `/board` then shows `This project has no board yet.` with a `Set up a board` button.
+25n. Desktop install. The `>_` route is NOT YET RUN end to end.
+   - Seen (2026-10-22, Windows, desktop app Code tab): typing `/plugin marketplace add J-J-E/claude-kanban` in the chat box does not add a marketplace, it only opens the app's plugin window; that window's search does not find the kanban plugin (on that PC the marketplace had been added earlier from a terminal and the plugin was installed); the terminal command `claude plugin install kanban --marketplace J-J-E/claude-kanban` works.
+   - Do: in the desktop app, open the Code tab, click the `>_` button at the top right to open the terminal panel, paste `claude plugin install kanban --marketplace J-J-E/claude-kanban` and press Enter. Run `claude plugin list` in the panel. Start a new session in the project folder and type `/board`.
+   - Expect (record each): the panel opens; the command reports that kanban was installed; `claude plugin list` shows `kanban@kanban-board`; a session opened before the install does not have the plugin; in the new session `/board` shows `This project has no board yet.` with a `Set up a board` button. Also try the two-command form in the panel (`claude plugin marketplace add J-J-E/claude-kanban`, then `claude plugin install kanban@kanban-board`) and the uninstall.
 
 Steps 25a to 25n test how Claude behaves, not the pane's code. The plugin's tests check that the pane attaches the note; whether Claude then does the right thing is a skill behaviour that only a real session can confirm, and it can vary from run to run. A miss is a finding: report the exact words you typed.
 
