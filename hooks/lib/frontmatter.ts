@@ -31,7 +31,7 @@ function firstControl(text: string, isNewlineKept: boolean): number | undefined 
 
 /**
  * The one check every write shares: `text` holds no control character but a tab (and a newline where `isNewlineKept`).
- * The refusal names the character and says how a backslash goes through JSON, since A:\backups typed in a JSON tool argument is a backspace.
+ * The refusal names the character and says how a backslash goes through JSON, since notes\backups typed in a JSON tool argument is a backspace.
  */
 export function noControls(text: string, what: string, isNewlineKept = false): Result<string> {
   const c = firstControl(String(text), isNewlineKept)
@@ -41,7 +41,7 @@ export function noControls(text: string, what: string, isNewlineKept = false): R
   const name = CONTROL_NAMES[c] ?? 'control character'
   return fail(
     'bad-value',
-    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, A:${bs}backups becomes A: and a backspace and then "ackups", so write A:${bs}${bs}backups.`,
+    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, notes${bs}backups becomes notes, a backspace and then "ackups", so write notes${bs}${bs}backups.`,
   )
 }
 

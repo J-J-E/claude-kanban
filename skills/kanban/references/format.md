@@ -26,7 +26,7 @@ Line 1 is `---` (a UTF-8 BOM before it is allowed and preserved), then lines of 
 - `key:` with an empty value and no `  - ` lines below it is form-neutral: the empty scalar `''`, read as `[]` by list-typed fields. Setters may rewrite it either way.
 - One level only: no nesting, no comments, no blank lines, no multi-line values; any other line is `bad-line`. A repeated key is `duplicate-key`. Unknown keys and key order are preserved untouched by every edit.
 - Written values are one line. A value starting with `[`, `'` or `"`, or with edge spaces, is wrapped in double quotes; a value that cannot be written that way (newline, or it also contains `"`) is `bad-value`.
-- No written value holds a control character (a character below U+0020 other than a tab, DEL, or one from U+0080 to U+009F; a newline is allowed only in a card body): the write is `bad-value`, naming the character. The usual cause is a backslash in a JSON tool argument: `\b` is a backspace, so a Windows path `A:\backups` is written `A:\\backups`.
+- No written value holds a control character (a character below U+0020 other than a tab, DEL, or one from U+0080 to U+009F; a newline is allowed only in a card body): the write is `bad-value`, naming the character. The usual cause is a backslash in a JSON tool argument: `\b` is a backspace, so a path `notes\backups` is written `notes\\backups`.
 - Line endings: detected from the file's first line ending (`\r\n` is CRLF, else LF). Edits keep the file's own EOL, also on added lines. New files use LF and end with a newline.
 
 ## 3. Card fields

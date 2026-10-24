@@ -312,9 +312,8 @@ test('tabs, plain text and backslashes are accepted in a comment, a title and a 
   const dir = makeBoard([['BUG-0001', 'Talker', 'Plan', 1000]])
   const path = `A:${SLASH}backups${SLASH}pyper`
   assert.equal(commentOn(dir, { id: '1', text: `copied to\t${path}`, who: 'Gemini' }, NOW).ok, true)
-  assert.ok(read(dir, cardFile(dir, 'BUG-0001')).endsWith(`Gemini: copied to ${path}
-`))
+  assert.ok(read(dir, cardFile(dir, 'BUG-0001')).endsWith(`Gemini: copied to ${path}\n`))
   const added = addCard(dir, { title: `Restore ${path}`, type: 'bug', body: `Line one\n\tIndented ${path}`, who: 'Gemini' }, NOW)
   assert.equal(added.ok, true)
-  assert.ok(read(dir, cardFile(dir, added.id)).includes(`	Indented ${path}`))
+  assert.ok(read(dir, cardFile(dir, added.id)).includes(`\tIndented ${path}`))
 })

@@ -37,7 +37,7 @@ Moved out of SKILL.md word for word. Print exactly the text of the refusal that 
 - No parent to remove:
   `<ID> has no parent. Nothing was changed.`
 - Control character (a tool argument or a manual write; the tool's text names the character and what it was in, here a comment):
-  `A Log line holds U+0008 (backspace), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, A:\backups becomes A: and a backspace and then "ackups", so write A:\\backups. Nothing was changed.`
+  `A Log line holds U+0008 (backspace), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, notes\backups becomes notes, a backspace and then "ackups", so write notes\\backups. Nothing was changed.`
 - No board:
   `No kanban/board.md here. Say "set up the kanban board" to create it.`
 - Duplicate ID (the file names, separated by `, `):

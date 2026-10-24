@@ -36581,7 +36581,7 @@ function noControls(text, what, isNewlineKept = false) {
   const name = CONTROL_NAMES[c] ?? "control character";
   return fail(
     "bad-value",
-    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, A:${bs}backups becomes A: and a backspace and then "ackups", so write A:${bs}${bs}backups.`
+    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, notes${bs}backups becomes notes, a backspace and then "ackups", so write notes${bs}${bs}backups.`
   );
 }
 function detectEol(text) {
