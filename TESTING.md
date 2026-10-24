@@ -76,6 +76,9 @@ Pictures of what you should see are in `docs/design/real-pane-*.png`, for exampl
 9d. Approving from the open card. NOT VERIFIED: nobody has tried this in the real pane yet, so a failure here is a finding, not a mistake in your steps.
    - Do: open the gate card of step 11 while it sits in Needs You (or a card with `PLAN READY`) and press `Approve and continue` (`Approve and run` on a plan card) once.
    - Expect: the toast `<ID> approved. Claude is carrying on in Auto.` (a plan card: `<ID> moved to Auto. Claude is starting.`), the open card closes and the lanes show with the same folds and sort, and the card is in Auto. Open it again: the accent box `Waiting for Claude to start` and no button.
+9e. A control character in a card. NOT VERIFIED: nobody has tried this in the real pane yet, so a failure here is a finding, not a mistake in your steps.
+   - Do: in an editor, put a backspace (0x08) inside the words of one Log line of the footer card's file and save (or use a project whose card already holds one). Look at the lanes, then open the card.
+   - Expect: the lanes draw as usual (not the line `kanban: the board could not be drawn: ...`), and the opened card draws too. In the Log line the bad character shows as a marker (`�`) with the words around it unchanged. The card file is not changed by looking at it.
 10. Delete a card.
     - Do: open the footer card, press `Delete card…`, press `Keep it`. Then `Delete card…` and `Delete it`.
     - Expect: the question `Delete <ID>? This removes the card and its log.` `Keep it` changes nothing. `Delete it` writes nothing itself: the toast says `Claude is deleting <ID>.` (or `Claude will delete <ID> when it finishes what it is doing.`), chat shows `Kanban: <you> asked to delete <ID> "<title>". Delete the card with the kanban skill.`, Claude replies `<ID> deleted.` and the file is gone. Add `Fix footer` again (step 5) for the steps below; it gets the next number, which is now the footer card.
