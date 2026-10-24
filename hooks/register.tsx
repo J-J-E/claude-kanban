@@ -3675,7 +3675,7 @@ export const register: Register = (on) => {
   })()) as never).catch((_$, _e, next) => {
     // Built with no call to the app ($.ui.resolve could fail the way the body did): a plain Text tree.
     const why = next.error.message ?? (next.error.kind === 'timeout' ? 'the drawing took too long' : 'unknown error')
-    return { type: 'Text' as const, props: { dimColor: true }, children: [drawFaultLine(why)] }
+    return { type: 'Text' as const, props: { dimColor: true }, children: [printable(drawFaultLine(why))] }
   })
 
   // The app could not draw the board region (its module failed, or the tree was refused): keep why, and the redraw shows the line and Retry.

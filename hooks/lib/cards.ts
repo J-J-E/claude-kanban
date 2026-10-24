@@ -10,6 +10,7 @@ import {
   getScalar,
   insertLines,
   joinLines,
+  noControls,
   ok,
   parseFrontmatter,
   removeKey,
@@ -116,10 +117,14 @@ export function formatLogLine(entry: LogEntry): Result<string> {
   if (typeof who !== 'string' || who === '' || who !== who.trim() || /[:\r\n]/.test(who)) {
     return fail('bad-value', 'A Log line needs a name with no colon, no newline and no edge spaces.')
   }
+  const whoPlain = noControls(who, 'The name in a Log line')
+  if (!whoPlain.ok) return whoPlain
   const text = entry.text
   if (typeof text !== 'string' || /[\r\n]/.test(text) || text.trim() === '') {
     return fail('bad-value', 'A Log line needs one line of text.')
   }
+  const textPlain = noControls(text, 'A Log line')
+  if (!textPlain.ok) return textPlain
   return ok(`- ${entry.date} ${entry.time} ${who}: ${text.trim()}`)
 }
 
@@ -285,6 +290,8 @@ export function setTitle(text: string, title: string, stamp: Stamp, who: string)
   if (typeof title !== 'string' || /[\r\n]/.test(title) || title.trim() === '') {
     return fail('bad-value', 'A title needs one line of text.')
   }
+  const titlePlain = noControls(title, 'A title')
+  if (!titlePlain.ok) return titlePlain
   const next = title.trim()
   const parsed = parseFrontmatter(text)
   if (!parsed.ok) return parsed
@@ -556,6 +563,8 @@ export function newCardText(input: NewCardInput): Result<string> {
   const title = typeof input.title === 'string' ? input.title.trim() : ''
   if (title === '') return fail('missing-field', 'A card needs a title.')
   if (/[\r\n]/.test(title)) return fail('bad-value', 'A title must be one line.')
+  const titlePlain = noControls(title, 'A title')
+  if (!titlePlain.ok) return titlePlain
   if (typeof input.status !== 'string' || input.status.trim() === '') return fail('missing-field', 'A card needs a status.')
   if (!Number.isSafeInteger(input.order) || input.order < 0) return fail('bad-value', '"order" must be a whole number, 0 or more.')
   const logLine = formatLogLine({ date: input.stamp.date, time: input.stamp.time, who: input.who, text: 'created in ' + input.status })
@@ -582,6 +591,8 @@ export function newCardText(input: NewCardInput): Result<string> {
   if (!labels.ok) return labels
   lines.push(labels.value, '---', '# ' + title)
   const body = (input.body ?? '').replace(/\r\n/g, '\n').replace(/^\n+/, '').replace(/\s+$/, '')
+  const bodyPlain = noControls(body, 'The body', true)
+  if (!bodyPlain.ok) return bodyPlain
   if (body !== '') lines.push('', ...body.split('\n'))
   lines.push('', '## Log', logLine.value)
   const text = lines.join('\n') + '\n'

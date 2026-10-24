@@ -282,3 +282,39 @@ test('card_parent sets and removes a parent with one Log line, and refuses a loo
   assert.equal(gone.message, 'Removed the parent of BUG-0002.')
   assert.match(read(dir, cardFile(dir, 'BUG-0002')), /\nparent:\n[\s\S]*parent removed \(was BUG-0001\)\n$/)
 })
+
+const BS = String.fromCharCode(8) // 0x08 backspace
+const SLASH = String.fromCharCode(92)
+
+test('a comment, a new card or a name holding a control character is refused, naming it, and nothing is written', () => {
+  const dir = makeBoard([['BUG-0001', 'Talker', 'Plan', 1000]])
+  const files = () => readdirSync(dir).map((n) => [n, read(dir, n)])
+  const before = files()
+  const refusals = [
+    commentOn(dir, { id: '1', text: `copy to A:${BS}ackups`, who: 'Gemini' }, NOW),
+    commentOn(dir, { id: '1', text: 'fine', who: `Gem${BS}ini` }, NOW),
+    addCard(dir, { title: `Back up A:${BS}ackups`, type: 'bug', who: 'Gemini' }, NOW),
+    addCard(dir, { title: 'Back up', type: 'bug', body: `to A:${BS}ackups\nand more`, who: 'Gemini' }, NOW),
+    addCard(dir, { title: 'Back up', type: 'bug', labels: [`la${BS}bel`], who: 'Gemini' }, NOW),
+    addCard(dir, { title: 'Back up', type: 'bug', who: `Gem${BS}ini` }, NOW),
+    decide(dir, { title: 'Paths', decision: `Use A:${BS}ackups`, reason: 'it is the drive' }, NOW),
+  ]
+  for (const r of refusals) {
+    assert.equal(r.ok, false)
+    assert.match(r.message, /U\+0008 \(backspace\)/)
+    assert.match(r.message, /two backslashes/)
+    assert.match(r.message, /Nothing was changed\.$/)
+  }
+  assert.deepEqual(files(), before)
+})
+
+test('tabs, plain text and backslashes are accepted in a comment, a title and a body', () => {
+  const dir = makeBoard([['BUG-0001', 'Talker', 'Plan', 1000]])
+  const path = `A:${SLASH}backups${SLASH}pyper`
+  assert.equal(commentOn(dir, { id: '1', text: `copied to\t${path}`, who: 'Gemini' }, NOW).ok, true)
+  assert.ok(read(dir, cardFile(dir, 'BUG-0001')).endsWith(`Gemini: copied to ${path}
+`))
+  const added = addCard(dir, { title: `Restore ${path}`, type: 'bug', body: `Line one\n\tIndented ${path}`, who: 'Gemini' }, NOW)
+  assert.equal(added.ok, true)
+  assert.ok(read(dir, cardFile(dir, added.id)).includes(`	Indented ${path}`))
+})

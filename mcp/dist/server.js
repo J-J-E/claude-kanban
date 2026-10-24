@@ -36555,6 +36555,35 @@ function ok(value) {
 function fail(code, message, line2) {
   return line2 === void 0 ? { ok: false, code, message } : { ok: false, code, message, line: line2 };
 }
+var CONTROL_NAMES = {
+  0: "null",
+  7: "bell",
+  8: "backspace",
+  11: "vertical tab",
+  12: "form feed",
+  13: "carriage return",
+  27: "escape",
+  127: "delete"
+};
+function firstControl(text, isNewlineKept) {
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c === 9 || c === 10 && isNewlineKept) continue;
+    if (c < 32 || c >= 127 && c < 160 || c === 8232 || c === 8233) return c;
+  }
+  return void 0;
+}
+function noControls(text, what, isNewlineKept = false) {
+  const c = firstControl(String(text), isNewlineKept);
+  if (c === void 0) return ok(text);
+  const bs = String.fromCharCode(92);
+  const code = "U+" + c.toString(16).toUpperCase().padStart(4, "0");
+  const name = CONTROL_NAMES[c] ?? "control character";
+  return fail(
+    "bad-value",
+    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, A:${bs}backups becomes A: and a backspace and then "ackups", so write A:${bs}${bs}backups.`
+  );
+}
 function detectEol(text) {
   const i = text.indexOf("\n");
   return i > 0 && text[i - 1] === "\r" ? "\r\n" : "\n";
@@ -36688,6 +36717,8 @@ function getList(fm, key) {
 function formatScalarValue(value) {
   if (typeof value !== "string") return fail("bad-value", "A value must be text.");
   if (value.indexOf("\n") !== -1 || value.indexOf("\r") !== -1) return fail("bad-value", "A value must be one line.");
+  const plain = noControls(value, "A value");
+  if (!plain.ok) return plain;
   if (value === "") return ok("");
   const needsQuotes = value[0] === "[" || value[0] === "'" || value[0] === '"' || value !== value.trim();
   if (!needsQuotes) return ok(" " + value);
@@ -36707,6 +36738,8 @@ function checkItems(items) {
     if (item === "" || item !== item.trim()) return fail("bad-value", "A list item must be non-empty with no edge spaces.");
     if (item.indexOf(",") !== -1) return fail("bad-value", "A list item cannot contain a comma.");
     if (item.indexOf("\n") !== -1 || item.indexOf("\r") !== -1) return fail("bad-value", "A list item must be one line.");
+    const plain = noControls(item, "A list item");
+    if (!plain.ok) return plain;
   }
   return ok(items.slice());
 }
@@ -36930,10 +36963,14 @@ function formatLogLine(entry) {
   if (typeof who2 !== "string" || who2 === "" || who2 !== who2.trim() || /[:\r\n]/.test(who2)) {
     return fail("bad-value", "A Log line needs a name with no colon, no newline and no edge spaces.");
   }
+  const whoPlain = noControls(who2, "The name in a Log line");
+  if (!whoPlain.ok) return whoPlain;
   const text = entry.text;
   if (typeof text !== "string" || /[\r\n]/.test(text) || text.trim() === "") {
     return fail("bad-value", "A Log line needs one line of text.");
   }
+  const textPlain = noControls(text, "A Log line");
+  if (!textPlain.ok) return textPlain;
   return ok(`- ${entry.date} ${entry.time} ${who2}: ${text.trim()}`);
 }
 function parseLogLine(line2) {
@@ -37190,6 +37227,8 @@ function newCardText(input2) {
   const title = typeof input2.title === "string" ? input2.title.trim() : "";
   if (title === "") return fail("missing-field", "A card needs a title.");
   if (/[\r\n]/.test(title)) return fail("bad-value", "A title must be one line.");
+  const titlePlain = noControls(title, "A title");
+  if (!titlePlain.ok) return titlePlain;
   if (typeof input2.status !== "string" || input2.status.trim() === "") return fail("missing-field", "A card needs a status.");
   if (!Number.isSafeInteger(input2.order) || input2.order < 0) return fail("bad-value", '"order" must be a whole number, 0 or more.');
   const logLine = formatLogLine({ date: input2.stamp.date, time: input2.stamp.time, who: input2.who, text: "created in " + input2.status });
@@ -37215,6 +37254,8 @@ function newCardText(input2) {
   if (!labels.ok) return labels;
   lines.push(labels.value, "---", "# " + title);
   const body = (input2.body ?? "").replace(/\r\n/g, "\n").replace(/^\n+/, "").replace(/\s+$/, "");
+  const bodyPlain = noControls(body, "The body", true);
+  if (!bodyPlain.ok) return bodyPlain;
   if (body !== "") lines.push("", ...body.split("\n"));
   lines.push("", "## Log", logLine.value);
   const text = lines.join("\n") + "\n";
@@ -37564,6 +37605,10 @@ function nextDecisionNumber(text) {
 }
 function appendDecision(text, input2) {
   if (!isDate(input2.date)) return fail("bad-value", `"${input2.date}" is not a YYYY-MM-DD date.`);
+  for (const [what, value] of [["A decision title", input2.title], ["A decision", input2.decision], ["A decision reason", input2.reason]]) {
+    const plain = noControls(String(value), what);
+    if (!plain.ok) return plain;
+  }
   const title = String(input2.title).trim();
   if (title === "" || /[*\r\n]/.test(title)) return fail("bad-value", "A decision title must be one line with no asterisk.");
   const decision = String(input2.decision).trim().replace(/\.$/, "");
@@ -37687,6 +37732,8 @@ function cleanWho(who2) {
   const w = String(who2 ?? "").trim();
   if (w === "") return refuse(`Say who you are: "who" is the name that goes in the card's Log. Nothing was changed.`);
   if (/[:\r\n]/.test(w)) return refuse('"who" cannot contain a colon or a line break. Nothing was changed.');
+  const plain = noControls(w, '"who"');
+  if (!plain.ok) return refuse(`${plain.message} Nothing was changed.`);
   return w;
 }
 function reserveId(dir2, typeWord, check2) {

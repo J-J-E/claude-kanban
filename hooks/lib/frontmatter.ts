@@ -15,6 +15,36 @@ export function fail(code: string, message: string, line?: number): Result<never
   return line === undefined ? { ok: false, code, message } : { ok: false, code, message, line }
 }
 
+const CONTROL_NAMES: Record<number, string> = {
+  0: 'null', 7: 'bell', 8: 'backspace', 11: 'vertical tab', 12: 'form feed', 13: 'carriage return', 27: 'escape', 127: 'delete',
+}
+
+/** The first control character of `text` that a write refuses: any but a tab (and a newline when `isNewlineKept`); undefined when there is none. */
+function firstControl(text: string, isNewlineKept: boolean): number | undefined {
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0
+    if (c === 9 || (c === 10 && isNewlineKept)) continue
+    if (c < 32 || (c >= 0x7f && c < 0xa0) || c === 0x2028 || c === 0x2029) return c
+  }
+  return undefined
+}
+
+/**
+ * The one check every write shares: `text` holds no control character but a tab (and a newline where `isNewlineKept`).
+ * The refusal names the character and says how a backslash goes through JSON, since A:\backups typed in a JSON tool argument is a backspace.
+ */
+export function noControls(text: string, what: string, isNewlineKept = false): Result<string> {
+  const c = firstControl(String(text), isNewlineKept)
+  if (c === undefined) return ok(text)
+  const bs = String.fromCharCode(92)
+  const code = 'U+' + c.toString(16).toUpperCase().padStart(4, '0')
+  const name = CONTROL_NAMES[c] ?? 'control character'
+  return fail(
+    'bad-value',
+    `${what} holds ${code} (${name}), a control character, which a card cannot keep. A backslash in a JSON tool argument must be written as two backslashes: in JSON, A:${bs}backups becomes A: and a backspace and then "ackups", so write A:${bs}${bs}backups.`,
+  )
+}
+
 /** One frontmatter entry. `kind` is the written form; an empty `key:` is a scalar with value ''. */
 export type FmEntry = {
   key: string
@@ -195,6 +225,8 @@ export function getList(fm: Frontmatter, key: string): Result<string[] | undefin
 export function formatScalarValue(value: string): Result<string> {
   if (typeof value !== 'string') return fail('bad-value', 'A value must be text.')
   if (value.indexOf('\n') !== -1 || value.indexOf('\r') !== -1) return fail('bad-value', 'A value must be one line.')
+  const plain = noControls(value, 'A value')
+  if (!plain.ok) return plain
   if (value === '') return ok('')
   const needsQuotes = value[0] === '[' || value[0] === "'" || value[0] === '"' || value !== value.trim()
   if (!needsQuotes) return ok(' ' + value)
@@ -216,6 +248,8 @@ function checkItems(items: readonly string[]): Result<string[]> {
     if (item === '' || item !== item.trim()) return fail('bad-value', 'A list item must be non-empty with no edge spaces.')
     if (item.indexOf(',') !== -1) return fail('bad-value', 'A list item cannot contain a comma.')
     if (item.indexOf('\n') !== -1 || item.indexOf('\r') !== -1) return fail('bad-value', 'A list item must be one line.')
+    const plain = noControls(item, 'A list item')
+    if (!plain.ok) return plain
   }
   return ok(items.slice())
 }
