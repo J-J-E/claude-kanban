@@ -141,7 +141,7 @@ Trigger: "decide: Pending is the inbox, because one place", "record a decision".
 
 ## The frequent verbs, step by step
 
-The manual steps of add, move, comment, list and what's next, moved out of SKILL.md word for word. Use them only when the board's MCP tools (SKILL.md, Verbs) are missing; the tools do the same steps. The reply formats and the rules both paths share stay in SKILL.md.
+The manual steps of add, move, comment, list and what's next, moved out of SKILL.md word for word. Write every card line with the Edit or Write tool, which put your text in the file exactly as given; never with `printf`, `echo -e` or a heredoc into an interpreter string, which turn `\b` into a backspace and `\t` into a tab. Refuse to write a control character; a Windows path keeps its backslashes (`A:\backups`), and in a JSON tool argument each backslash is written twice. Use them only when the board's MCP tools (SKILL.md, Verbs) are missing; the tools do the same steps. The reply formats and the rules both paths share stay in SKILL.md.
 
 ### add
 
