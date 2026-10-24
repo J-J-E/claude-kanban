@@ -219,6 +219,13 @@ export function oneLine(text: string): string {
   return String(text ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ')
 }
 
+/** Text the host will draw: a tab is a space; every other control character but a newline (C0, DEL, C1, U+2028/2029) is the marker U+FFFD. */
+export function printable(text: string): string {
+  return String(text ?? '')
+    .replace(/\t/g, ' ')
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g, '\ufffd')
+}
+
 /** `text` cut to at most `n` cells, ending in an ellipsis when it was cut. */
 export function clip(text: string, n: number): string {
   const s = oneLine(text)

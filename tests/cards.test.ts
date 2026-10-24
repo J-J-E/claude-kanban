@@ -861,3 +861,37 @@ describe('mergeRefusal', () => {
     expect(ask(card('BUG-0008'), card('BUG-0012', { parent: 'BUG-0008' }))).toBe(msg)
   })
 })
+
+describe('control characters in a write (BUG-0029)', () => {
+  const BS = String.fromCharCode(8)
+  const ESC = String.fromCharCode(27)
+  const STAMP = { date: '2026-10-08', time: '09:10' }
+  const NEW = { id: 'KB-0099', status: 'Inbox', order: 1000, stamp: STAMP, who: 'John' }
+  const refused = (r: { ok: boolean; message?: string }, name: string) => {
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain(name)
+    expect(r.message).toContain('two backslashes')
+  }
+
+  test('a Log line refuses a name or text holding one, naming it', () => {
+    refused(formatLogLine({ ...FIRST_LOG, text: `to A:${BS}ackups` }) as never, 'U+0008 (backspace)')
+    refused(formatLogLine({ ...FIRST_LOG, who: `Jo${ESC}hn` }) as never, 'U+001B (escape)')
+    expect(appendLog(CARD_EXAMPLE, { ...FIRST_LOG, text: `x${BS}` }).ok).toBe(false)
+  })
+
+  test('a new card refuses a control character in the title, the body and a label, and a body keeps its newlines', () => {
+    refused(newCardText({ ...NEW, title: `Fix${BS} it` }) as never, 'U+0008')
+    refused(newCardText({ ...NEW, title: 'Fix it', body: `A:${BS}ackups` }) as never, 'U+0008')
+    refused(newCardText({ ...NEW, title: 'Fix it', labels: [`la${BS}bel`] }) as never, 'U+0008')
+    expect(newCardText({ ...NEW, title: 'Fix it', body: 'one\n\ttwo' }).ok).toBe(true)
+  })
+
+  test('a rename and a frontmatter value refuse one; a tab and a backslash pass', () => {
+    const made = must(newCardText({ ...NEW, title: 'Fix it' }))
+    refused(setTitle(made, `New${BS}name`, STAMP, 'John') as never, 'U+0008')
+    refused(newCardText({ ...NEW, title: 'Fix it', flag: `a${BS}b`, branch: 'ok' }) as never, 'U+0008')
+    const slash = String.fromCharCode(92)
+    expect(setTitle(made, `A:${slash}backups\tnow`, STAMP, 'John').ok).toBe(true)
+    expect(formatLogLine({ ...FIRST_LOG, text: `to A:${slash}backups\tok` }).ok).toBe(true)
+  })
+})

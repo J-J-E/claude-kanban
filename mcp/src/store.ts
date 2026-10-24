@@ -17,6 +17,7 @@ import {
   unknownTypeMessage,
 } from '../../hooks/lib/board.ts'
 import type { Board, CardFile, Lane, Problem } from '../../hooks/lib/board.ts'
+import { noControls } from '../../hooks/lib/frontmatter.ts'
 import { appendLog, cardFileName, mergeCardText, mergeRefusal, newCardText, nextOrder, parentRefusal, retypeCardText, setParent, setParentCard } from '../../hooks/lib/cards.ts'
 import { allocateId, resolveRef, retypedFileName } from '../../hooks/lib/ids.ts'
 import type { Card, Stamp } from '../../hooks/lib/types.ts'
@@ -162,6 +163,8 @@ function cleanWho(who: string): Refusal | string {
   const w = String(who ?? '').trim()
   if (w === '') return refuse('Say who you are: "who" is the name that goes in the card\'s Log. Nothing was changed.')
   if (/[:\r\n]/.test(w)) return refuse('"who" cannot contain a colon or a line break. Nothing was changed.')
+  const plain = noControls(w, '"who"')
+  if (!plain.ok) return refuse(`${plain.message} Nothing was changed.`)
   return w
 }
 

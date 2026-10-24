@@ -88,7 +88,7 @@ import { settingsTree } from './ui/settings.tsx'
 import { noMatchText, toolbarTree } from './ui/toolbar.tsx'
 import type { ToolbarProps } from './ui/toolbar.tsx'
 import type { BoardCard, BoardProps, BoardView } from './lib/layout.ts'
-import { isLaneOpen } from './lib/layout.ts'
+import { isLaneOpen, printable } from './lib/layout.ts'
 import { agentKind, agentText, betweenIsNeutral, cardFacts, cardStatus as statusOf, changedWord, isNobodyOn, stepInHand, stepShort } from './lib/status.ts'
 import type { CardFacts } from './lib/status.ts'
 import type { Card, Result, Stamp } from './lib/types.ts'
@@ -226,6 +226,20 @@ const DRAW_FAULT_MAX = 160
 function drawFaultLine(reason: string): string {
   const one = reason.split(/\s+/).join(' ').trim()
   return `kanban: the board could not be drawn: ${one.length > DRAW_FAULT_MAX ? one.slice(0, DRAW_FAULT_MAX - 1) + '…' : one}`
+}
+/**
+ * The finished tree with every string in it (children, Text and Markdown props, Client props) made printable: the host refuses a
+ * whole tree for one control character, and card text from a file can hold any. Plain data is copied; functions and the rest stay.
+ */
+function printableTree(node: unknown): unknown {
+  if (typeof node === 'string') return printable(node)
+  if (Array.isArray(node)) return node.map(printableTree)
+  if (node === null || typeof node !== 'object') return node
+  const proto = Object.getPrototypeOf(node)
+  if (proto !== Object.prototype && proto !== null) return node
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(node)) out[k] = printableTree(v)
+  return out
 }
 /** The pair a drop on another card's rows asked to merge, until Merge or Keep both; null: no question. */
 const mergeAskA = atom({ plugin: 'kanban', key: 'mergeAsk' } as const, null)
@@ -3281,7 +3295,8 @@ export const register: Register = (on) => {
     return { text: opened.isPlaced ? 'Kanban board opened.' : `Kanban board is waiting: ${opened.reason}` }
   }).catch(() => ({ text: 'kanban: the board could not be opened.' }))
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  // Whatever the body below draws goes through printableTree on its way to the host (the one guarantee against a refused tree).
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => printableTree(await (async () => {
     if (clickState.focused !== e.props.isFocused) {
       clickState.focused = e.props.isFocused
     }
@@ -3657,10 +3672,10 @@ export const register: Register = (on) => {
         ))}
       </Box>
     )
-  }).catch((_$, _e, next) => {
+  })()) as never).catch((_$, _e, next) => {
     // Built with no call to the app ($.ui.resolve could fail the way the body did): a plain Text tree.
     const why = next.error.message ?? (next.error.kind === 'timeout' ? 'the drawing took too long' : 'unknown error')
-    return { type: 'Text' as const, props: { dimColor: true }, children: [drawFaultLine(why)] }
+    return { type: 'Text' as const, props: { dimColor: true }, children: [printable(drawFaultLine(why))] }
   })
 
   // The app could not draw the board region (its module failed, or the tree was refused): keep why, and the redraw shows the line and Retry.

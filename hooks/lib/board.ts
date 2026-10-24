@@ -10,6 +10,7 @@ import {
   getScalar,
   insertLines,
   joinLines,
+  noControls,
   ok,
   parseFrontmatter,
   removeKey,
@@ -580,6 +581,10 @@ export type DecisionInput = {
 /** Append one decision line at the end of DECISIONS.md, numbered nextDecisionNumber(text); other lines are kept. */
 export function appendDecision(text: string, input: DecisionInput): Result<string> {
   if (!isDate(input.date)) return fail('bad-value', `"${input.date}" is not a YYYY-MM-DD date.`)
+  for (const [what, value] of [['A decision title', input.title], ['A decision', input.decision], ['A decision reason', input.reason]] as const) {
+    const plain = noControls(String(value), what)
+    if (!plain.ok) return plain
+  }
   const title = String(input.title).trim()
   if (title === '' || /[*\r\n]/.test(title)) return fail('bad-value', 'A decision title must be one line with no asterisk.')
   const decision = String(input.decision).trim().replace(/\.$/, '')
